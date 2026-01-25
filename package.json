@@ -1,0 +1,23 @@
+{
+  "name": "probot-repo-configurator",
+  "version": "1.0.0",
+  "description": "GitHub App for automatic repository configuration using Probot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "echo \"Add linting later\"",
+    "deploy": "echo \"Add deployment script later\""
+  },
+  "keywords": ["github", "probot", "automation", "repository", "configuration"],
+  "author": "pulseengine",
+  "license": "MIT",
+  "dependencies": {
+    "probot": "^12.0.0",
+    "@octokit/rest": "^19.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.0"
+  }
+}

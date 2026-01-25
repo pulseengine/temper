@@ -1,0 +1,27 @@
+# Probot Repository Configurator Configuration
+
+# Organization to monitor
+organization: pulseengine
+
+# Target settings for repositories
+settings:
+  merge:
+    allow_merge_commit: false
+    allow_squash_merge: false
+    allow_rebase_merge: true
+    delete_branch_on_merge: true
+
+# Additional settings (commented out as examples)
+# branch_protection:
+#   required_status_checks: true
+#   enforce_admins: true
+#   required_pull_request_reviews:
+#     required_approving_review_count: 1
+
+# Issue/PR templates to apply
+# templates:
+#   pull_request: .github/PULL_REQUEST_TEMPLATE.md
+#   issue: .github/ISSUE_TEMPLATE/
+
+# CODEOWNERS file to apply
+# codeowners: .github/CODEOWNERS
