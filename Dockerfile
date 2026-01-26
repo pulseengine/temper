@@ -1,21 +1,26 @@
+# Dockerfile for Probot Repository Configurator
+
 # Use official Node.js LTS image
 FROM node:18-alpine
 
-# Create app directory
-WORKDIR /usr/src/app
+# Set working directory
+WORKDIR /app
 
-# Install dependencies first for better caching
+# Copy package files
 COPY package*.json ./
+
+# Install dependencies
 RUN npm install --production
 
-# Copy app source
+# Copy application files
 COPY . .
-
-# Build (if needed for TypeScript)
-# RUN npm run build
 
 # Expose port
 EXPOSE 3000
 
-# Command to run the application
+# Set environment variables (these should be overridden in deployment)
+ENV NODE_ENV=production
+ENV PORT=3000
+
+# Start the application
 CMD ["npm", "start"]

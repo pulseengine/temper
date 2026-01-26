@@ -11,17 +11,106 @@ settings:
     allow_rebase_merge: true
     delete_branch_on_merge: true
 
-# Additional settings (commented out as examples)
-# branch_protection:
-#   required_status_checks: true
-#   enforce_admins: true
-#   required_pull_request_reviews:
-#     required_approving_review_count: 1
+# Branch protection rules
+branch_protection:
+  main:
+    required_status_checks:
+      strict: true
+      contexts: ['ci', 'lint', 'test']
+    enforce_admins: true
+    required_pull_request_reviews:
+      required_approving_review_count: 1
+      dismiss_stale_reviews: true
+      require_code_owner_reviews: true
+    restrictions: null
+    allow_force_pushes: false
+    allow_deletions: false
+
+# Standard issue labels
+issue_labels:
+  - name: "bug"
+    color: "d73a4a"
+    description: "Something isn't working"
+  - name: "enhancement"
+    color: "a2eeef"
+    description: "New feature or request"
+  - name: "documentation"
+    color: "0075ca"
+    description: "Improvements or additions to documentation"
+  - name: "good first issue"
+    color: "7057ff"
+    description: "Good for newcomers"
+  - name: "help wanted"
+    color: "008672"
+    description: "Extra attention is needed"
+  - name: "question"
+    color: "d876e3"
+    description: "Further information is requested"
+
+# Pull request rules
+pull_request_rules:
+  required_approving_reviews: 1
+  require_code_owner_reviews: true
+  dismiss_stale_reviews: true
+  require_last_push_approval: true
+  required_status_checks:
+    - "ci"
+    - "lint"
+    - "test"
+  
+# CI attestation requirements
+ci_attestation:
+  required_for_main_branch: true
+  required_checks:
+    - "security-scan"
+    - "vulnerability-check"
+    - "license-compliance"
+  attestation_format: "sigstore"
+
+# Dependabot configuration
+dependabot:
+  version: 2
+  updates:
+    - package-ecosystem: "npm"
+      directory: "/"
+      schedule:
+        interval: "daily"
+        time: "09:00"
+        timezone: "UTC"
+      open-pull-requests-limit: 10
+      target-branch: "main"
+      reviewers:
+        - "avrabe"
+      assignees:
+        - "avrabe"
+      labels:
+        - "dependencies"
+        - "automation"
+    - package-ecosystem: "github-actions"
+      directory: "/"
+      schedule:
+        interval: "weekly"
+        day: "monday"
+        time: "09:00"
+        timezone: "UTC"
+
+# Configuration change strategy
+change_strategy:
+  use_pull_requests: true
+  pr_title: "[Bot] Repository Configuration Update"
+  pr_body: "This PR updates repository configuration to match organization standards."
+  pr_reviewers:
+    - "avrabe"
+  pr_labels:
+    - "automation"
+    - "configuration"
+  require_approval: true
+  auto_merge: false
 
 # Issue/PR templates to apply
-# templates:
-#   pull_request: .github/PULL_REQUEST_TEMPLATE.md
-#   issue: .github/ISSUE_TEMPLATE/
+templates:
+  pull_request: .github/PULL_REQUEST_TEMPLATE.md
+  issue: .github/ISSUE_TEMPLATE/
 
 # CODEOWNERS file to apply
-# codeowners: .github/CODEOWNERS
+codeowners: .github/CODEOWNERS
