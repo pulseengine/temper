@@ -57,6 +57,18 @@ pull_request_rules:
     - "ci"
     - "lint"
     - "test"
+
+# Signed commit merge strategy
+signed_commit_strategy:
+  allow_merge_commits_for_signed: true
+  temporary_rule_timeout: 3600000  # 1 hour in milliseconds
+  admin_users:
+    - "avrabe"
+  # List of branches where this applies
+  protected_branches:
+    - "main"
+    - "master"
+    - "production"
   
 # CI attestation requirements
 ci_attestation:

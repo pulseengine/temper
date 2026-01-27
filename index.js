@@ -307,7 +307,7 @@ probot.on('issue_comment.created', async (context) => {
     }
   } else if (comment.body.trim() === '/analyze-org') {
     // Allow organization members to analyze all repositories
-    const isOrgMember = await checkOrganizationMembership(context.octokit, context.payload.repository.owner.login, context.payload.sender.login);
+    const isOrgMember = await checkOrganizationMembership(octokit, context.payload.repository.owner.login, context.payload.sender.login);
     
     if (isOrgMember) {
       const org = context.payload.organization.login;
@@ -321,6 +321,128 @@ probot.on('issue_comment.created', async (context) => {
         body: analysisReport,
         labels: ['analysis', 'report', 'automation']
       });
+      
+      await context.octokit.issues.createComment({
+        owner: repository.owner.login,
+        repo: repository.name,
+        issue_number: context.payload.issue.number,
+        body: `✅ Generated organization analysis report in issue #${reportIssue.data.number}`
+      });
+    } else {
+      await context.octokit.issues.createComment({
+        owner: repository.owner.login,
+        repo: repository.name,
+        issue_number: context.payload.issue.number,
+        body: '❌ You must be an organization member to use this command.'
+      });
+    }
+  } else if (comment.body.trim() === '/check-merge-strategy') {
+    // Allow organization members to check PR merge strategy
+    const isOrgMember = await checkOrganizationMembership(octokit, context.payload.repository.owner.login, context.payload.sender.login);
+    
+    if (isOrgMember) {
+      // Extract PR number from the issue
+      const issueNumber = context.payload.issue.number;
+      
+      const strategyCheck = await checkPRMergeStrategy(
+        context.octokit,
+        repository.owner.login,
+        repository.name,
+        issueNumber
+      );
+      
+      if (strategyCheck.error) {
+        await context.octokit.issues.createComment({
+          owner: repository.owner.login,
+          repo: repository.name,
+          issue_number: issueNumber,
+          body: `❌ Error checking merge strategy: ${strategyCheck.error}`
+        });
+      } else {
+        let response = `## Merge Strategy Analysis for PR #${issueNumber}\n\n`;
+        response += `**PR Title:** ${strategyCheck.prTitle}\n\n`;
+        response += `**Base Branch:** ${strategyCheck.baseBranch}\n\n`;
+        response += `**Commits:** ${strategyCheck.commitCount} total, ${strategyCheck.signedCommitCount} signed\n\n`;
+        
+        response += `### Current Branch Protection\n`;
+        response += `- Allow Merge Commit: ${strategyCheck.currentMergeStrategy.allowMergeCommit ? '✅' : '❌'}\n`;
+        response += `- Allow Squash Merge: ${strategyCheck.currentMergeStrategy.allowSquashMerge ? '✅' : '❌'}\n`;
+        response += `- Allow Rebase Merge: ${strategyCheck.currentMergeStrategy.allowRebaseMerge ? '✅' : '❌'}\n\n`;
+        
+        if (strategyCheck.hasSignedCommits) {
+          response += `⚠️  This PR contains signed commits!\n\n`;
+          response += `💡 **Recommendation:** Use merge commit to preserve signatures.\n`;
+          response += `Use command: /allow-merge-commit`;
+        } else {
+          response += `✅ No signed commits detected.\n\n`;
+          response += `💡 **Recommendation:** Current merge strategy is appropriate.`;
+        }
+        
+        await context.octokit.issues.createComment({
+          owner: repository.owner.login,
+          repo: repository.name,
+          issue_number: issueNumber,
+          body: response
+        });
+      }
+    } else {
+      await context.octokit.issues.createComment({
+        owner: repository.owner.login,
+        repo: repository.name,
+        issue_number: context.payload.issue.number,
+        body: '❌ You must be an organization member to use this command.'
+      });
+    }
+  } else if (comment.body.trim() === '/allow-merge-commit') {
+    // Allow organization members to temporarily allow merge commits
+    const isOrgMember = await checkOrganizationMembership(octokit, context.payload.repository.owner.login, context.payload.sender.login);
+    
+    if (isOrgMember) {
+      const issueNumber = context.payload.issue.number;
+      
+      const result = await handleSignedCommitMerge(
+        context.octokit,
+        repository.owner.login,
+        repository.name,
+        issueNumber
+      );
+      
+      if (result.success) {
+        if (result.action === 'temporarily_allowed_merge_commits') {
+          await context.octokit.issues.createComment({
+            owner: repository.owner.login,
+            repo: repository.name,
+            issue_number: issueNumber,
+            body: `✅ ${result.message}\n\n` +
+                  `You can now merge this PR using the merge commit strategy to preserve signed commits.\n\n` +
+                  `⚠️  Remember: Branch protection will automatically restore to rebase-only after 1 hour.`
+          });
+        } else {
+          await context.octokit.issues.createComment({
+            owner: repository.owner.login,
+            repo: repository.name,
+            issue_number: issueNumber,
+            body: `ℹ️  ${result.message}`
+          });
+        }
+      } else {
+        await context.octokit.issues.createComment({
+          owner: repository.owner.login,
+          repo: repository.name,
+          issue_number: issueNumber,
+          body: `❌ Error: ${result.error}`
+        });
+      }
+    } else {
+      await context.octokit.issues.createComment({
+        owner: repository.owner.login,
+        repo: repository.name,
+        issue_number: context.payload.issue.number,
+        body: '❌ You must be an organization member to use this command.'
+      });
+    }
+  }
+});
       
       await context.octokit.issues.createComment({
         owner: repository.owner.login,
@@ -505,6 +627,142 @@ async function applyPullRequestRules(octokit, owner, repo, prRules) {
   } catch (error) {
     console.error(`❌ Error applying PR rules to ${owner}/${repo}:`, error.message);
     throw error;
+  }
+}
+
+// Function to handle signed commit merges
+async function handleSignedCommitMerge(octokit, owner, repo, prNumber) {
+  try {
+    console.log(`Handling signed commit merge for ${owner}/${repo} PR #${prNumber}`);
+    
+    // Check if this PR has signed commits
+    const prCommits = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}/commits', {
+      owner,
+      repo,
+      pull_number: prNumber
+    });
+    
+    const hasSignedCommits = prCommits.data.some(commit => 
+      commit.commit.verification && commit.commit.verification.verified
+    );
+    
+    if (hasSignedCommits) {
+      console.log(`✅ PR #${prNumber} contains signed commits`);
+      
+      // Get current branch protection
+      const currentProtection = await octokit.request('GET /repos/{owner}/{repo}/branches/{branch}/protection', {
+        owner,
+        repo,
+        branch: 'main'
+      });
+      
+      // Check if we need to temporarily allow merge commits
+      const allowsMergeCommits = currentProtection.data.allow_merge_commit;
+      
+      if (!allowsMergeCommits) {
+        console.log('⚠️  Branch protection blocks merge commits, temporarily allowing...');
+        
+        // Temporarily allow merge commits
+        await octokit.request('PATCH /repos/{owner}/{repo}/branches/{branch}/protection', {
+          owner,
+          repo,
+          branch: 'main',
+          allow_merge_commit: true
+        });
+        
+        console.log('✅ Temporarily allowed merge commits for signed commit preservation');
+        
+        // Schedule re-enforcement of rebase-only
+        setTimeout(async () => {
+          try {
+            await octokit.request('PATCH /repos/{owner}/{repo}/branches/{branch}/protection', {
+              owner,
+              repo,
+              branch: 'main',
+              allow_merge_commit: false
+            });
+            console.log('⏳ Re-enabled rebase-only merge after timeout');
+          } catch (error) {
+            console.error('❌ Failed to restore branch protection:', error.message);
+          }
+        }, config.signed_commit_strategy?.temporary_rule_timeout || 3600000);
+        
+        return {
+          success: true,
+          action: 'temporarily_allowed_merge_commits',
+          message: 'Branch protection temporarily modified to allow merge commits for signed commit preservation. Will restore rebase-only after 1 hour.'
+        };
+      } else {
+        return {
+          success: true,
+          action: 'no_change_needed',
+          message: 'Branch already allows merge commits, no changes needed.'
+        };
+      }
+    } else {
+      console.log(`ℹ️  PR #${prNumber} has no signed commits, using normal merge strategy`);
+      return {
+        success: true,
+        action: 'no_signed_commits',
+        message: 'No signed commits detected, proceeding with normal merge strategy.'
+      };
+    }
+  } catch (error) {
+    console.error(`❌ Error handling signed commit merge for ${owner}/${repo} PR #${prNumber}:`, error.message);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+// Function to check PR for merge strategy
+async function checkPRMergeStrategy(octokit, owner, repo, prNumber) {
+  try {
+    console.log(`Checking merge strategy for ${owner}/${repo} PR #${prNumber}`);
+    
+    // Get PR details
+    const prDetails = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
+      owner,
+      repo,
+      pull_number: prNumber
+    });
+    
+    // Check branch protection
+    const branchProtection = await octokit.request('GET /repos/{owner}/{repo}/branches/{branch}/protection', {
+      owner,
+      repo,
+      branch: prDetails.data.base.ref
+    });
+    
+    // Check commits
+    const commits = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}/commits', {
+      owner,
+      repo,
+      pull_number: prNumber
+    });
+    
+    const hasSignedCommits = commits.data.some(commit => 
+      commit.commit.verification && commit.commit.verification.verified
+    );
+    
+    return {
+      prTitle: prDetails.data.title,
+      baseBranch: prDetails.data.base.ref,
+      hasSignedCommits,
+      currentMergeStrategy: {
+        allowMergeCommit: branchProtection.data.allow_merge_commit,
+        allowSquashMerge: branchProtection.data.allow_squash_merge,
+        allowRebaseMerge: branchProtection.data.allow_rebase_merge
+      },
+      commitCount: commits.data.length,
+      signedCommitCount: commits.data.filter(c => c.commit.verification?.verified).length
+    };
+  } catch (error) {
+    console.error(`❌ Error checking PR merge strategy:`, error.message);
+    return {
+      error: error.message
+    };
   }
 }
 
