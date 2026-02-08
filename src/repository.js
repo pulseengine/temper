@@ -1,21 +1,20 @@
-'use strict';
-
-const { normalizeRepoInput, getDefaultBranch } = require('./helpers');
-const {
+import { normalizeRepoInput, getDefaultBranch } from './helpers.js';
+import { getLogger } from './logger.js';
+import {
   getConfig,
   getMergeSettings,
   getBranchProtectionConfig,
   mergePullRequestRules,
   getTargetIssueLabels
-} = require('./config');
-const { applyBranchProtection } = require('./branch-protection');
-const { applyTemplates, applyCodeowners } = require('./templates');
-const { synchronizeIssueLabels } = require('./labels');
-const {
+} from './config.js';
+import { applyBranchProtection } from './branch-protection.js';
+import { applyTemplates, applyCodeowners } from './templates.js';
+import { synchronizeIssueLabels } from './labels.js';
+import {
   applyDependabotConfig,
   checkExistingDependabotConfig,
   fixDependabotPRLabels
-} = require('./dependabot');
+} from './dependabot.js';
 
 async function configureRepository(octokit, repoOrOwner, maybeRepo) {
   const config = getConfig();
@@ -25,7 +24,7 @@ async function configureRepository(octokit, repoOrOwner, maybeRepo) {
   const defaultBranch = getDefaultBranch(repoInfo);
 
   try {
-    console.log(`Configuring repository: ${owner}/${repo}`);
+    getLogger().info(`Configuring repository: ${owner}/${repo}`);
 
     const mergeSettings = getMergeSettings(repoInfo);
     await octokit.request('PATCH /repos/{owner}/{repo}', {
@@ -66,14 +65,14 @@ async function configureRepository(octokit, repoOrOwner, maybeRepo) {
       }
     }
 
-    console.log(`✅ Successfully configured ${owner}/${repo}`);
+    getLogger().info(`✅ Successfully configured ${owner}/${repo}`);
     return { success: true };
   } catch (error) {
-    console.error(`❌ Error configuring ${owner}/${repo}:`, error.message);
+    getLogger().error(`❌ Error configuring ${owner}/${repo}:`, error.message);
     return { success: false, error: error.message };
   }
 }
 
-module.exports = {
+export {
   configureRepository
 };

@@ -1,36 +1,28 @@
-# .dockerignore
-
-# Node modules
 node_modules
-
-# Logs
-logs
-*.log
-
-# Test files
+.git
+.github
+.claude
+.bazel*
+bazel-*
 __tests__
+coverage
 *.test.js
 *.spec.js
-
-# Configuration files
 .env
 .env.*
-
-# IDE files
 .vscode
 .idea
-
-# Coverage
-coverage
-
-# Build artifacts
-dist
-build
-
-# Dependency directories
+*.log
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# OS files
+pnpm-lock.yaml
+DEVELOPMENT.md
+.pre-commit-config.yaml
+.eslintrc.json
+jest.config.cjs
+babel.config.cjs
+MODULE.bazel
+BUILD.bazel
+.bazelversion
+.bazelrc
+.bazelignore
 .DS_Store

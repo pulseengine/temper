@@ -1,23 +1,32 @@
-'use strict';
-
-const { getConfig } = require('./config');
-const { configureRepository } = require('./repository');
-const {
+import { getConfig } from './config.js';
+import { getLogger, setLogger } from './logger.js';
+import { configureRepository } from './repository.js';
+import {
   checkOrganizationMembership,
   synchronizeAllRepositories,
   generateOrganizationAnalysisReport
-} = require('./organization');
-const { generateConfigurationReport } = require('./reporting');
-const {
+} from './organization.js';
+import { generateConfigurationReport } from './reporting.js';
+import {
   checkDependabotConfiguration,
   checkExistingDependabotConfig,
   fixDependabotPRLabels
-} = require('./dependabot');
-const { handleSignedCommitMerge, checkPRMergeStrategy } = require('./merge-strategy');
-const { reviewPullRequest } = require('./ai-review');
+} from './dependabot.js';
+import { handleSignedCommitMerge, checkPRMergeStrategy } from './merge-strategy.js';
+import { reviewPullRequest } from './ai-review.js';
+import { isProcessed, markProcessed } from './idempotency.js';
+import { defaultQueue } from './queue.js';
+import { applySecurityMiddleware } from './middleware.js';
 
 function registerApp(app, { getRouter } = {}) {
   app.on('repository.created', async (context) => {
+    if (context.log) setLogger(context.log);
+    const deliveryId = context.id;
+    if (deliveryId && isProcessed(deliveryId)) {
+      getLogger().info({ deliveryId }, 'Skipping duplicate webhook delivery');
+      return;
+    }
+
     const config = getConfig();
     const { repository, organization } = context.payload;
 
@@ -25,7 +34,7 @@ function registerApp(app, { getRouter } = {}) {
     const repoOrg = organization?.login || repository.owner?.login;
 
     if (repoOrg === targetOrg) {
-      console.log(`New repository created: ${repository.full_name}`);
+      getLogger().info({ repo: repository.full_name }, 'New repository created');
 
       const result = await configureRepository(context.octokit, repository);
 
@@ -41,9 +50,18 @@ function registerApp(app, { getRouter } = {}) {
         });
       }
     }
+
+    if (deliveryId) markProcessed(deliveryId);
   });
 
   app.on('issue_comment.created', async (context) => {
+    if (context.log) setLogger(context.log);
+    const deliveryId = context.id;
+    if (deliveryId && isProcessed(deliveryId)) {
+      getLogger().info({ deliveryId }, 'Skipping duplicate webhook delivery');
+      return;
+    }
+
     const config = getConfig();
     const { comment, repository, sender } = context.payload;
     if (!comment?.body) {
@@ -78,7 +96,7 @@ function registerApp(app, { getRouter } = {}) {
         return;
       }
 
-      console.log(`Manual configuration requested for: ${repository.full_name}`);
+      getLogger().info({ repo: repository.full_name }, 'Manual configuration requested');
       const result = await configureRepository(context.octokit, repository);
 
       await context.octokit.issues.createComment({
@@ -89,6 +107,7 @@ function registerApp(app, { getRouter } = {}) {
           ? '✅ Repository configured with standard merge and branch protection settings!'
           : `❌ Configuration failed: ${result.error}`
       });
+      if (deliveryId) markProcessed(deliveryId);
       return;
     }
 
@@ -108,6 +127,7 @@ function registerApp(app, { getRouter } = {}) {
           ? `✅ Synchronized all repositories! Processed ${syncResult.repositoriesProcessed} repositories.`
           : `❌ Synchronization failed: ${syncResult.error}`
       });
+      if (deliveryId) markProcessed(deliveryId);
       return;
     }
 
@@ -123,6 +143,7 @@ function registerApp(app, { getRouter } = {}) {
         issue_number: issueNumber,
         body: configReport
       });
+      if (deliveryId) markProcessed(deliveryId);
       return;
     }
 
@@ -138,6 +159,7 @@ function registerApp(app, { getRouter } = {}) {
         issue_number: issueNumber,
         body: dependabotReport
       });
+      if (deliveryId) markProcessed(deliveryId);
       return;
     }
 
@@ -169,6 +191,7 @@ function registerApp(app, { getRouter } = {}) {
           body: '✅ No Dependabot PR label issues found.'
         });
       }
+      if (deliveryId) markProcessed(deliveryId);
       return;
     }
 
@@ -194,6 +217,7 @@ function registerApp(app, { getRouter } = {}) {
         issue_number: issueNumber,
         body: `✅ Generated organization analysis report in issue #${reportIssue.data.number}`
       });
+      if (deliveryId) markProcessed(deliveryId);
       return;
     }
 
@@ -215,6 +239,7 @@ function registerApp(app, { getRouter } = {}) {
           issue_number: issueNumber,
           body: `❌ Error checking merge strategy: ${strategyCheck.error}`
         });
+        if (deliveryId) markProcessed(deliveryId);
         return;
       }
 
@@ -243,6 +268,7 @@ function registerApp(app, { getRouter } = {}) {
         issue_number: issueNumber,
         body: response
       });
+      if (deliveryId) markProcessed(deliveryId);
       return;
     }
 
@@ -290,6 +316,7 @@ function registerApp(app, { getRouter } = {}) {
           body: `❌ Error: ${result.error}`
         });
       }
+      if (deliveryId) markProcessed(deliveryId);
       return;
     }
 
@@ -334,18 +361,23 @@ function registerApp(app, { getRouter } = {}) {
           comment_id: workingComment.data.id
         });
       }
+      if (deliveryId) markProcessed(deliveryId);
       return;
     }
   });
 
-  // Add health check endpoint
+  // Add health check endpoint with queue stats
   if (getRouter) {
     const router = getRouter('/');
+
+    applySecurityMiddleware(router);
+
     router.get('/health', (req, res) => {
       res.status(200).json({
         status: 'healthy',
         timestamp: new Date().toISOString(),
-        version: '1.0.0'
+        version: '1.0.0',
+        queue: defaultQueue.stats()
       });
     });
 
@@ -358,7 +390,7 @@ function registerApp(app, { getRouter } = {}) {
   }
 
   app.onError((error) => {
-    console.error('Probot error:', error);
+    getLogger().error({ err: error }, 'Probot error');
   });
 }
 
@@ -377,7 +409,7 @@ function mapLegacyEnvVars() {
   }
 }
 
-module.exports = {
+export {
   registerApp,
   mapLegacyEnvVars
 };

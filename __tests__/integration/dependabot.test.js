@@ -1,5 +1,6 @@
-const { checkExistingDependabotConfig, fixDependabotPRLabels } = require('../../src/dependabot');
-const { _setConfigForTesting } = require('../../src/config');
+import { checkExistingDependabotConfig, fixDependabotPRLabels } from '../../src/dependabot.js';
+import { _setConfigForTesting } from '../../src/config.js';
+import yaml from 'js-yaml';
 
 function createMockOctokit() {
   return {
@@ -27,7 +28,6 @@ describe('dependabot', () => {
     });
 
     it('detects matching config', async () => {
-      const yaml = require('js-yaml');
       const targetYaml = yaml.dump({ version: 2, updates: [{ labels: ['dependencies'] }] });
       const b64 = Buffer.from(targetYaml).toString('base64');
 
@@ -39,7 +39,6 @@ describe('dependabot', () => {
     });
 
     it('detects mismatching config', async () => {
-      const yaml = require('js-yaml');
       const differentConfig = yaml.dump({ version: 2, updates: [{ labels: ['other'] }] });
       const b64 = Buffer.from(differentConfig).toString('base64');
 
@@ -52,7 +51,6 @@ describe('dependabot', () => {
     });
 
     it('detects PRs with missing labels', async () => {
-      const yaml = require('js-yaml');
       const configYaml = yaml.dump({ version: 2, updates: [{ labels: ['dependencies'] }] });
       const b64 = Buffer.from(configYaml).toString('base64');
 

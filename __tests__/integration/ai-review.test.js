@@ -1,10 +1,10 @@
-const {
+import {
   buildReviewPrompt,
   formatReviewComment,
   isLocalEndpoint,
   sanitizeAIOutput,
   _reviewTimestamps
-} = require('../../src/ai-review');
+} from '../../src/ai-review.js';
 
 describe('ai-review', () => {
   describe('isLocalEndpoint', () => {

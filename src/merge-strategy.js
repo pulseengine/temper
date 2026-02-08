@@ -1,12 +1,11 @@
-'use strict';
-
-const { getConfig } = require('./config');
+import { getConfig } from './config.js';
+import { getLogger } from './logger.js';
 
 async function handleSignedCommitMerge(octokit, owner, repo, prNumber) {
   const config = getConfig();
 
   try {
-    console.log(`Handling signed commit merge for ${owner}/${repo} PR #${prNumber}`);
+    getLogger().info(`Handling signed commit merge for ${owner}/${repo} PR #${prNumber}`);
 
     if (!config.signed_commit_strategy?.allow_merge_commits_for_signed) {
       return {
@@ -42,7 +41,7 @@ async function handleSignedCommitMerge(octokit, owner, repo, prNumber) {
     }
 
     if (hasSignedCommits) {
-      console.log(`✅ PR #${prNumber} contains signed commits`);
+      getLogger().info(`✅ PR #${prNumber} contains signed commits`);
 
       const repoSettings = await octokit.request('GET /repos/{owner}/{repo}', { owner, repo });
 
@@ -50,7 +49,7 @@ async function handleSignedCommitMerge(octokit, owner, repo, prNumber) {
       const originalAllowMergeCommits = repoSettings.data.allow_merge_commit;
 
       if (!allowsMergeCommits) {
-        console.log('⚠️  Merge commits are disabled, temporarily allowing...');
+        getLogger().info('⚠️  Merge commits are disabled, temporarily allowing...');
 
         await octokit.request('PATCH /repos/{owner}/{repo}', {
           owner,
@@ -58,7 +57,7 @@ async function handleSignedCommitMerge(octokit, owner, repo, prNumber) {
           allow_merge_commit: true
         });
 
-        console.log('✅ Temporarily allowed merge commits for signed commit preservation');
+        getLogger().info('✅ Temporarily allowed merge commits for signed commit preservation');
 
         setTimeout(async () => {
           try {
@@ -67,9 +66,9 @@ async function handleSignedCommitMerge(octokit, owner, repo, prNumber) {
               repo,
               allow_merge_commit: originalAllowMergeCommits
             });
-            console.log('⏳ Re-enabled rebase-only merge after timeout');
+            getLogger().info('⏳ Re-enabled rebase-only merge after timeout');
           } catch (error) {
-            console.error('❌ Failed to restore merge settings:', error.message);
+            getLogger().error('❌ Failed to restore merge settings:', error.message);
           }
         }, config.signed_commit_strategy?.temporary_rule_timeout || 3600000);
 
@@ -87,7 +86,7 @@ async function handleSignedCommitMerge(octokit, owner, repo, prNumber) {
         };
       }
     } else {
-      console.log(`ℹ️  PR #${prNumber} has no signed commits, using normal merge strategy`);
+      getLogger().info(`ℹ️  PR #${prNumber} has no signed commits, using normal merge strategy`);
       return {
         success: true,
         action: 'no_signed_commits',
@@ -95,7 +94,7 @@ async function handleSignedCommitMerge(octokit, owner, repo, prNumber) {
       };
     }
   } catch (error) {
-    console.error(
+    getLogger().error(
       `❌ Error handling signed commit merge for ${owner}/${repo} PR #${prNumber}:`,
       error.message
     );
@@ -108,7 +107,7 @@ async function handleSignedCommitMerge(octokit, owner, repo, prNumber) {
 
 async function checkPRMergeStrategy(octokit, owner, repo, prNumber) {
   try {
-    console.log(`Checking merge strategy for ${owner}/${repo} PR #${prNumber}`);
+    getLogger().info(`Checking merge strategy for ${owner}/${repo} PR #${prNumber}`);
 
     const prDetails = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
       owner,
@@ -140,14 +139,14 @@ async function checkPRMergeStrategy(octokit, owner, repo, prNumber) {
       signedCommitCount: commits.data.filter((c) => c.commit.verification?.verified).length
     };
   } catch (error) {
-    console.error(`❌ Error checking PR merge strategy:`, error.message);
+    getLogger().error(`❌ Error checking PR merge strategy:`, error.message);
     return {
       error: error.message
     };
   }
 }
 
-module.exports = {
+export {
   handleSignedCommitMerge,
   checkPRMergeStrategy
 };

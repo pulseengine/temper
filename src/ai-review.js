@@ -1,6 +1,5 @@
-'use strict';
-
-const { getConfig } = require('./config');
+import { getConfig } from './config.js';
+import { getLogger } from './logger.js';
 
 const _reviewTimestamps = new Map();
 
@@ -168,12 +167,12 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
 
     return { success: true, comment };
   } catch (error) {
-    console.error(`❌ Error reviewing PR #${prNumber}:`, error.message);
+    getLogger().error(`❌ Error reviewing PR #${prNumber}:`, error.message);
     return { success: false, error: error.message };
   }
 }
 
-module.exports = {
+export {
   reviewPullRequest,
   buildReviewPrompt,
   callLocalAI,

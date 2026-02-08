@@ -1,5 +1,5 @@
-const { checkOrganizationMembership, synchronizeAllRepositories } = require('../../src/organization');
-const { _setConfigForTesting } = require('../../src/config');
+import { checkOrganizationMembership, synchronizeAllRepositories } from '../../src/organization.js';
+import { _setConfigForTesting } from '../../src/config.js';
 
 function createMockOctokit() {
   return {

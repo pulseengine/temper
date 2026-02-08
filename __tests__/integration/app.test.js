@@ -1,4 +1,4 @@
-const { registerApp, mapLegacyEnvVars } = require('../../src/app');
+import { registerApp, mapLegacyEnvVars } from '../../src/app.js';
 
 describe('app', () => {
   describe('mapLegacyEnvVars', () => {

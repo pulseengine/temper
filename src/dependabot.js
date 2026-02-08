@@ -1,14 +1,13 @@
-'use strict';
-
-const yaml = require('js-yaml');
-const { getConfig, getDependabotLabels } = require('./config');
-const { upsertRepoFile, createConfigurationPR } = require('./github-api');
+import yaml from 'js-yaml';
+import { getConfig, getDependabotLabels } from './config.js';
+import { getLogger } from './logger.js';
+import { upsertRepoFile, createConfigurationPR } from './github-api.js';
 
 async function applyDependabotConfig(octokit, owner, repo, dependabotConfig) {
   const config = getConfig();
 
   try {
-    console.log(`Applying Dependabot configuration to ${owner}/${repo}`);
+    getLogger().info(`Applying Dependabot configuration to ${owner}/${repo}`);
 
     const usePR = config.change_strategy?.use_pull_requests || false;
     const yamlContent = yaml.dump(dependabotConfig);
@@ -33,9 +32,9 @@ async function applyDependabotConfig(octokit, owner, repo, dependabotConfig) {
       );
     }
 
-    console.log(`✅ Applied Dependabot configuration to ${owner}/${repo}`);
+    getLogger().info(`✅ Applied Dependabot configuration to ${owner}/${repo}`);
   } catch (error) {
-    console.error(
+    getLogger().error(
       `❌ Error applying Dependabot configuration to ${owner}/${repo}:`,
       error.message
     );
@@ -47,7 +46,7 @@ async function checkExistingDependabotConfig(octokit, owner, repo) {
   const config = getConfig();
 
   try {
-    console.log(`Checking existing Dependabot configuration for ${owner}/${repo}`);
+    getLogger().info(`Checking existing Dependabot configuration for ${owner}/${repo}`);
 
     try {
       const dependabotResponse = await octokit.request(
@@ -107,14 +106,14 @@ async function checkExistingDependabotConfig(octokit, owner, repo) {
       throw error;
     }
   } catch (error) {
-    console.error(`❌ Error checking existing Dependabot configuration:`, error.message);
+    getLogger().error(`❌ Error checking existing Dependabot configuration:`, error.message);
     throw error;
   }
 }
 
 async function fixDependabotPRLabels(octokit, owner, repo, labelIssues) {
   try {
-    console.log(`Fixing labels for ${labelIssues.length} Dependabot PRs in ${owner}/${repo}`);
+    getLogger().info(`Fixing labels for ${labelIssues.length} Dependabot PRs in ${owner}/${repo}`);
 
     for (const issue of labelIssues) {
       await octokit.request('POST /repos/{owner}/{repo}/issues/{issue_number}/labels', {
@@ -123,14 +122,14 @@ async function fixDependabotPRLabels(octokit, owner, repo, labelIssues) {
         issue_number: issue.number,
         labels: issue.missingLabels
       });
-      console.log(
+      getLogger().info(
         `✅ Added missing labels to PR #${issue.number}: ${issue.missingLabels.join(', ')}`
       );
     }
 
     return { success: true, fixedIssues: labelIssues.length };
   } catch (error) {
-    console.error(`❌ Error fixing Dependabot PR labels:`, error.message);
+    getLogger().error(`❌ Error fixing Dependabot PR labels:`, error.message);
     throw error;
   }
 }
@@ -139,7 +138,7 @@ async function checkDependabotConfiguration(octokit, owner, repo) {
   const config = getConfig();
 
   try {
-    console.log(`Checking Dependabot configuration for ${owner}/${repo}`);
+    getLogger().info(`Checking Dependabot configuration for ${owner}/${repo}`);
 
     try {
       const dependabotResponse = await octokit.request(
@@ -196,7 +195,7 @@ async function checkDependabotConfiguration(octokit, owner, repo) {
       throw error;
     }
   } catch (error) {
-    console.error(
+    getLogger().error(
       `❌ Error checking Dependabot configuration for ${owner}/${repo}:`,
       error.message
     );
@@ -204,7 +203,7 @@ async function checkDependabotConfiguration(octokit, owner, repo) {
   }
 }
 
-module.exports = {
+export {
   applyDependabotConfig,
   checkExistingDependabotConfig,
   fixDependabotPRLabels,

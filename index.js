@@ -1,19 +1,18 @@
-'use strict';
-
-const { run } = require('probot');
-const { registerApp, mapLegacyEnvVars } = require('./src/app');
-const { configureRepository } = require('./src/repository');
-const { applyBranchProtection } = require('./src/branch-protection');
-const { applyTemplates, applyCodeowners } = require('./src/templates');
-const { synchronizeIssueLabels } = require('./src/labels');
-const {
+import { fileURLToPath } from 'url';
+import { run } from 'probot';
+import { registerApp, mapLegacyEnvVars } from './src/app.js';
+import { configureRepository } from './src/repository.js';
+import { applyBranchProtection } from './src/branch-protection.js';
+import { applyTemplates, applyCodeowners } from './src/templates.js';
+import { synchronizeIssueLabels } from './src/labels.js';
+import {
   checkExistingDependabotConfig,
   fixDependabotPRLabels
-} = require('./src/dependabot');
-const { getTargetIssueLabels } = require('./src/config');
+} from './src/dependabot.js';
+import { getTargetIssueLabels } from './src/config.js';
 
-// Backwards-compatible exports (same as before)
-module.exports = {
+// Named exports
+export {
   registerApp,
   configureRepository,
   applyBranchProtection,
@@ -26,7 +25,7 @@ module.exports = {
 };
 
 // Start the Probot server with enhanced logging
-if (require.main === module) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   (async () => {
     try {
       mapLegacyEnvVars();

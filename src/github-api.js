@@ -1,8 +1,7 @@
-'use strict';
+import { getConfig } from './config.js';
+import { getLogger } from './logger.js';
 
-const { getConfig } = require('./config');
-
-async function upsertRepoFile(octokit, owner, repo, filePath, content, message, branch) {
+export async function upsertRepoFile(octokit, owner, repo, filePath, content, message, branch) {
   let sha;
 
   try {
@@ -39,11 +38,11 @@ async function upsertRepoFile(octokit, owner, repo, filePath, content, message, 
   await octokit.request('PUT /repos/{owner}/{repo}/contents/{path}', updateRequest);
 }
 
-async function createConfigurationPR(octokit, owner, repo, filePath, fileContent, commitMessage) {
+export async function createConfigurationPR(octokit, owner, repo, filePath, fileContent, commitMessage) {
   const config = getConfig();
 
   try {
-    console.log(`Creating configuration PR for ${owner}/${repo} - ${filePath}`);
+    getLogger().info(`Creating configuration PR for ${owner}/${repo} - ${filePath}`);
 
     const repoInfo = await octokit.request('GET /repos/{owner}/{repo}', { owner, repo });
     const defaultBranch = repoInfo.data.default_branch || 'main';
@@ -96,15 +95,11 @@ async function createConfigurationPR(octokit, owner, repo, filePath, fileContent
       );
     }
 
-    console.log(`✅ Created configuration PR #${pr.data.number} for ${owner}/${repo}`);
+    getLogger().info(`✅ Created configuration PR #${pr.data.number} for ${owner}/${repo}`);
     return pr.data;
   } catch (error) {
-    console.error(`❌ Error creating configuration PR for ${owner}/${repo}:`, error.message);
+    getLogger().error(`❌ Error creating configuration PR for ${owner}/${repo}:`, error.message);
     throw error;
   }
 }
 
-module.exports = {
-  upsertRepoFile,
-  createConfigurationPR
-};

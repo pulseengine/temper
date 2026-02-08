@@ -1,4 +1,4 @@
-const { normalizeRepoInput, getDefaultBranch, isForkRepo } = require('../../src/helpers');
+import { normalizeRepoInput, getDefaultBranch, isForkRepo } from '../../src/helpers.js';
 
 describe('helpers', () => {
   describe('normalizeRepoInput', () => {

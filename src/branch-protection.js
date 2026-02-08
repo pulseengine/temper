@@ -1,10 +1,9 @@
-'use strict';
-
-const { getRequiredSignaturesFlag } = require('./config');
+import { getRequiredSignaturesFlag } from './config.js';
+import { getLogger } from './logger.js';
 
 async function applyBranchProtection(octokit, owner, repo, branch, protectionConfig = {}) {
   try {
-    console.log(`Applying branch protection to ${owner}/${repo}@${branch}`);
+    getLogger().info(`Applying branch protection to ${owner}/${repo}@${branch}`);
 
     const requiredStatusChecks =
       protectionConfig.required_status_checks === null
@@ -33,9 +32,9 @@ async function applyBranchProtection(octokit, owner, repo, branch, protectionCon
       await setRequiredSignatures(octokit, owner, repo, branch, requiredSignatures);
     }
 
-    console.log(`✅ Branch protection applied to ${owner}/${repo}`);
+    getLogger().info(`✅ Branch protection applied to ${owner}/${repo}`);
   } catch (error) {
-    console.error(`❌ Error applying branch protection to ${owner}/${repo}:`, error.message);
+    getLogger().error(`❌ Error applying branch protection to ${owner}/${repo}:`, error.message);
     throw error;
   }
 }
@@ -55,7 +54,7 @@ async function setRequiredSignatures(octokit, owner, repo, branch, enabled) {
     }
   } catch (error) {
     if (error.status === 404 || error.status === 422) {
-      console.warn(
+      getLogger().warn(
         `⚠️  Required signatures not supported for ${owner}/${repo}@${branch}: ${error.message}`
       );
       return;
@@ -64,7 +63,7 @@ async function setRequiredSignatures(octokit, owner, repo, branch, enabled) {
   }
 }
 
-module.exports = {
+export {
   applyBranchProtection,
   setRequiredSignatures
 };

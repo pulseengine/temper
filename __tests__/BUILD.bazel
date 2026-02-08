@@ -1,15 +1,62 @@
-load("@aspect_rules_jest//jest:defs.bzl", "jest_test")
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 
-jest_test(
-    name = "unit_tests",
-    node_modules = "//:node_modules",
-    config = "//:jest.config.js",
-    data = ["//src:lib"] + glob(["unit/**/*.test.js", "fixtures/**"]),
+js_library(
+    name = "test_sources",
+    srcs = glob([
+        "unit/**/*.test.js",
+        "integration/**/*.test.js",
+    ]),
+    deps = [
+        "//src:lib",
+        "//:node_modules/jest",
+        "//:node_modules/@babel/core",
+        "//:node_modules/@babel/preset-env",
+        "//:node_modules/babel-plugin-transform-import-meta",
+    ],
 )
 
-jest_test(
+js_test(
+    name = "unit_tests",
+    entry_point = "//:node_modules/jest/bin/jest.js",
+    args = [
+        "--config",
+        "$(rootpath //:jest.config.cjs)",
+        "--testPathPattern",
+        "unit",
+        "--no-cache",
+    ],
+    data = [
+        ":test_sources",
+        "//src:lib",
+        "//:jest.config.cjs",
+        "//:babel.config.cjs",
+        "//:node_modules/jest",
+        "//:node_modules/@babel/core",
+        "//:node_modules/@babel/preset-env",
+        "//:node_modules/babel-plugin-transform-import-meta",
+        "//:node_modules/@types/jest",
+    ],
+)
+
+js_test(
     name = "integration_tests",
-    node_modules = "//:node_modules",
-    config = "//:jest.config.js",
-    data = ["//src:lib"] + glob(["integration/**/*.test.js", "fixtures/**"]),
+    entry_point = "//:node_modules/jest/bin/jest.js",
+    args = [
+        "--config",
+        "$(rootpath //:jest.config.cjs)",
+        "--testPathPattern",
+        "integration",
+        "--no-cache",
+    ],
+    data = [
+        ":test_sources",
+        "//src:lib",
+        "//:jest.config.cjs",
+        "//:babel.config.cjs",
+        "//:node_modules/jest",
+        "//:node_modules/@babel/core",
+        "//:node_modules/@babel/preset-env",
+        "//:node_modules/babel-plugin-transform-import-meta",
+        "//:node_modules/@types/jest",
+    ],
 )

@@ -1,18 +1,21 @@
-'use strict';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import yaml from 'js-yaml';
+import { isForkRepo, getDefaultBranch } from './helpers.js';
+import { validateConfig } from './schema.js';
+import { getLogger } from './logger.js';
 
-const fs = require('fs');
-const path = require('path');
-const yaml = require('js-yaml');
-const { isForkRepo, getDefaultBranch } = require('./helpers');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const DEFAULT_MERGE_SETTINGS = {
+export const DEFAULT_MERGE_SETTINGS = {
   allow_merge_commit: false,
   allow_squash_merge: false,
   allow_rebase_merge: true,
   delete_branch_on_merge: true
 };
 
-const DEPENDABOT_LABEL_DEFAULTS = {
+export const DEPENDABOT_LABEL_DEFAULTS = {
   dependencies: {
     color: '0366d6',
     description: 'Dependency updates'
@@ -27,13 +30,17 @@ const CONFIG_PATH = path.join(__dirname, '..', 'config.yml');
 let config = {};
 let TARGET_SETTINGS = { ...DEFAULT_MERGE_SETTINGS };
 
-function loadConfig() {
+export function loadConfig() {
   try {
     config = yaml.load(fs.readFileSync(CONFIG_PATH, 'utf8')) || {};
     TARGET_SETTINGS = config?.settings?.merge || { ...DEFAULT_MERGE_SETTINGS };
-    console.log('Configuration loaded from config.yml');
+    const validation = validateConfig(config);
+    if (!validation.valid) {
+      getLogger().warn({ errors: validation.errors }, 'Config validation warnings');
+    }
+    getLogger().info('Configuration loaded from config.yml');
   } catch (error) {
-    console.error('Error loading config.yml, using default settings:', error.message);
+    getLogger().error({ err: error }, 'Error loading config.yml, using default settings');
     config = {};
     TARGET_SETTINGS = { ...DEFAULT_MERGE_SETTINGS };
   }
@@ -41,21 +48,21 @@ function loadConfig() {
 
 loadConfig();
 
-function getConfig() {
+export function getConfig() {
   return config;
 }
 
-function getTargetSettings() {
+export function getTargetSettings() {
   return TARGET_SETTINGS;
 }
 
 /** Replace config and TARGET_SETTINGS for testing purposes. */
-function _setConfigForTesting(newConfig) {
+export function _setConfigForTesting(newConfig) {
   config = newConfig;
   TARGET_SETTINGS = newConfig?.settings?.merge || { ...DEFAULT_MERGE_SETTINGS };
 }
 
-function getMergeSettings(repoInfo) {
+export function getMergeSettings(repoInfo) {
   if (isForkRepo(repoInfo) && config?.forks?.merge) {
     return {
       ...TARGET_SETTINGS,
@@ -66,7 +73,7 @@ function getMergeSettings(repoInfo) {
   return TARGET_SETTINGS;
 }
 
-function getBranchProtectionConfig(repoInfo) {
+export function getBranchProtectionConfig(repoInfo) {
   const defaultBranch = getDefaultBranch(repoInfo);
   const protection = config?.branch_protection || {};
 
@@ -86,7 +93,7 @@ function getBranchProtectionConfig(repoInfo) {
   return baseConfig;
 }
 
-function mergePullRequestRules(protectionConfig = {}) {
+export function mergePullRequestRules(protectionConfig = {}) {
   if (!config?.pull_request_rules) {
     return protectionConfig;
   }
@@ -112,7 +119,7 @@ function mergePullRequestRules(protectionConfig = {}) {
   return merged;
 }
 
-function getRequiredSignaturesFlag(protectionConfig = {}) {
+export function getRequiredSignaturesFlag(protectionConfig = {}) {
   if (typeof protectionConfig.require_signed_commits === 'boolean') {
     return protectionConfig.require_signed_commits;
   }
@@ -122,7 +129,7 @@ function getRequiredSignaturesFlag(protectionConfig = {}) {
   return null;
 }
 
-function getDependabotLabels(dependabotConfig = {}) {
+export function getDependabotLabels(dependabotConfig = {}) {
   if (!dependabotConfig || !Array.isArray(dependabotConfig.updates)) {
     return [];
   }
@@ -137,7 +144,7 @@ function getDependabotLabels(dependabotConfig = {}) {
   return Array.from(labels);
 }
 
-function getTargetIssueLabels() {
+export function getTargetIssueLabels() {
   const baseLabels = Array.isArray(config?.issue_labels) ? [...config.issue_labels] : [];
   const dependabotLabels = getDependabotLabels(config?.dependabot);
 
@@ -159,17 +166,3 @@ function getTargetIssueLabels() {
   return baseLabels;
 }
 
-module.exports = {
-  DEFAULT_MERGE_SETTINGS,
-  DEPENDABOT_LABEL_DEFAULTS,
-  loadConfig,
-  getConfig,
-  getTargetSettings,
-  _setConfigForTesting,
-  getMergeSettings,
-  getBranchProtectionConfig,
-  mergePullRequestRules,
-  getRequiredSignaturesFlag,
-  getDependabotLabels,
-  getTargetIssueLabels
-};

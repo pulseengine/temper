@@ -1,8 +1,7 @@
-'use strict';
-
-const { getTargetIssueLabels } = require('./config');
-const { configureRepository } = require('./repository');
-const { checkExistingDependabotConfig } = require('./dependabot');
+import { getTargetIssueLabels } from './config.js';
+import { getLogger } from './logger.js';
+import { configureRepository } from './repository.js';
+import { checkExistingDependabotConfig } from './dependabot.js';
 
 async function checkOrganizationMembership(octokit, org, username) {
   try {
@@ -15,14 +14,14 @@ async function checkOrganizationMembership(octokit, org, username) {
     if (error.status === 404) {
       return false;
     }
-    console.error('Error checking organization membership:', error.message);
+    getLogger().error('Error checking organization membership:', error.message);
     return false;
   }
 }
 
 async function synchronizeAllRepositories(octokit, org) {
   try {
-    console.log(`Starting synchronization for organization: ${org}`);
+    getLogger().info(`Starting synchronization for organization: ${org}`);
 
     const repos = await octokit.paginate('GET /orgs/{org}/repos', {
       org,
@@ -30,34 +29,34 @@ async function synchronizeAllRepositories(octokit, org) {
       per_page: 100
     });
 
-    console.log(`Found ${repos.length} repositories to synchronize`);
+    getLogger().info(`Found ${repos.length} repositories to synchronize`);
 
     for (const repo of repos) {
       if (repo.archived) {
-        console.log(`Skipping archived repository: ${repo.full_name}`);
+        getLogger().info(`Skipping archived repository: ${repo.full_name}`);
         continue;
       }
 
-      console.log(`Processing repository: ${repo.full_name}`);
+      getLogger().info(`Processing repository: ${repo.full_name}`);
       const configResult = await configureRepository(octokit, repo);
       if (!configResult.success) {
-        console.warn(`⚠️  Failed to configure ${repo.full_name}: ${configResult.error}`);
+        getLogger().warn(`⚠️  Failed to configure ${repo.full_name}: ${configResult.error}`);
       } else {
-        console.log(`✅ Synchronized ${repo.full_name}`);
+        getLogger().info(`✅ Synchronized ${repo.full_name}`);
       }
     }
 
-    console.log(`✅ Completed synchronization for organization: ${org}`);
+    getLogger().info(`✅ Completed synchronization for organization: ${org}`);
     return { success: true, repositoriesProcessed: repos.length };
   } catch (error) {
-    console.error(`❌ Error synchronizing repositories:`, error.message);
+    getLogger().error(`❌ Error synchronizing repositories:`, error.message);
     return { success: false, error: error.message };
   }
 }
 
 async function analyzeOrganizationRepositories(octokit, org) {
   try {
-    console.log(`Analyzing all repositories in organization: ${org}`);
+    getLogger().info(`Analyzing all repositories in organization: ${org}`);
 
     const repos = await octokit.paginate('GET /orgs/{org}/repos', {
       org,
@@ -65,10 +64,10 @@ async function analyzeOrganizationRepositories(octokit, org) {
       per_page: 100
     });
 
-    console.log(`Found ${repos.length} repositories to analyze`);
+    getLogger().info(`Found ${repos.length} repositories to analyze`);
 
     const nonForkRepos = repos.filter((repo) => !repo.fork);
-    console.log(`Analyzing ${nonForkRepos.length} non-fork repositories`);
+    getLogger().info(`Analyzing ${nonForkRepos.length} non-fork repositories`);
 
     const targetLabels = getTargetIssueLabels();
 
@@ -76,11 +75,11 @@ async function analyzeOrganizationRepositories(octokit, org) {
 
     for (const repo of nonForkRepos) {
       if (repo.archived) {
-        console.log(`Skipping archived repository: ${repo.full_name}`);
+        getLogger().info(`Skipping archived repository: ${repo.full_name}`);
         continue;
       }
 
-      console.log(`Analyzing repository: ${repo.full_name}`);
+      getLogger().info(`Analyzing repository: ${repo.full_name}`);
 
       const repoAnalysis = {
         name: repo.name,
@@ -110,7 +109,7 @@ async function analyzeOrganizationRepositories(octokit, org) {
           delete_branch_on_merge: repoSettings.data.delete_branch_on_merge
         };
       } catch (error) {
-        console.error(`Error getting settings for ${repo.full_name}:`, error.message);
+        getLogger().error(`Error getting settings for ${repo.full_name}:`, error.message);
         repoAnalysis.configurations.merge_settings = { error: error.message };
       }
 
@@ -135,7 +134,7 @@ async function analyzeOrganizationRepositories(octokit, org) {
         if (error.status === 404) {
           repoAnalysis.configurations.branch_protection = { exists: false };
         } else {
-          console.error(
+          getLogger().error(
             `Error getting branch protection for ${repo.full_name}:`,
             error.message
           );
@@ -156,7 +155,7 @@ async function analyzeOrganizationRepositories(octokit, org) {
           label_issues: dependabotCheck.labelIssues.length
         };
       } catch (error) {
-        console.error(`Error checking Dependabot for ${repo.full_name}:`, error.message);
+        getLogger().error(`Error checking Dependabot for ${repo.full_name}:`, error.message);
         repoAnalysis.configurations.dependabot = { error: error.message };
       }
 
@@ -174,17 +173,17 @@ async function analyzeOrganizationRepositories(octokit, org) {
             .map((label) => label.name)
         };
       } catch (error) {
-        console.error(`Error checking labels for ${repo.full_name}:`, error.message);
+        getLogger().error(`Error checking labels for ${repo.full_name}:`, error.message);
         repoAnalysis.configurations.labels = { error: error.message };
       }
 
       analysisResults.push(repoAnalysis);
     }
 
-    console.log(`✅ Completed analysis for organization: ${org}`);
+    getLogger().info(`✅ Completed analysis for organization: ${org}`);
     return { success: true, repositories: analysisResults };
   } catch (error) {
-    console.error(`❌ Error analyzing organization repositories:`, error.message);
+    getLogger().error(`❌ Error analyzing organization repositories:`, error.message);
     return { success: false, error: error.message };
   }
 }
@@ -333,12 +332,12 @@ async function generateOrganizationAnalysisReport(octokit, org) {
 
     return report;
   } catch (error) {
-    console.error(`❌ Error generating organization analysis report:`, error.message);
+    getLogger().error(`❌ Error generating organization analysis report:`, error.message);
     return `❌ Error generating report: ${error.message}`;
   }
 }
 
-module.exports = {
+export {
   checkOrganizationMembership,
   synchronizeAllRepositories,
   analyzeOrganizationRepositories,

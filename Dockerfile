@@ -1,26 +1,28 @@
-# Dockerfile for Probot Repository Configurator
+# Build stage
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --production
 
-# Use official Node.js LTS image
-FROM node:18-alpine
-
-# Set working directory
+# Production stage
+FROM node:20-alpine
 WORKDIR /app
 
-# Copy package files
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -S appuser -u 1001 -G appgroup
+
+COPY --from=builder /app/node_modules ./node_modules
 COPY package*.json ./
+COPY index.js functions.js config.yml ./
+COPY src/ ./src/
 
-# Install dependencies
-RUN npm install --production
+USER appuser
 
-# Copy application files
-COPY . .
-
-# Expose port
-EXPOSE 3000
-
-# Set environment variables (these should be overridden in deployment)
 ENV NODE_ENV=production
 ENV PORT=3000
+EXPOSE 3000
 
-# Start the application
-CMD ["npm", "start"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
+CMD ["node", "index.js"]

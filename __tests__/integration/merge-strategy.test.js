@@ -1,5 +1,5 @@
-const { handleSignedCommitMerge, checkPRMergeStrategy } = require('../../src/merge-strategy');
-const { _setConfigForTesting } = require('../../src/config');
+import { handleSignedCommitMerge, checkPRMergeStrategy } from '../../src/merge-strategy.js';
+import { _setConfigForTesting } from '../../src/config.js';
 
 function createMockOctokit() {
   return {

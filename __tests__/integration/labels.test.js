@@ -1,4 +1,4 @@
-const { synchronizeIssueLabels } = require('../../src/labels');
+import { synchronizeIssueLabels } from '../../src/labels.js';
 
 function createMockOctokit() {
   return {

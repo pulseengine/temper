@@ -2,11 +2,13 @@ load("@aspect_rules_js//js:defs.bzl", "js_library")
 
 js_library(
     name = "lib",
-    srcs = glob(["**/*.js"]),
+    srcs = glob(["*.js"]),
     deps = [
         "//:node_modules/probot",
-        "//:node_modules/@octokit/rest",
+        "//:node_modules/@octokit__rest",
         "//:node_modules/js-yaml",
+        "//:node_modules/helmet",
+        "//:node_modules/pino",
     ],
     visibility = ["//visibility:public"],
 )

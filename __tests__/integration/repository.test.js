@@ -1,5 +1,5 @@
-const { configureRepository } = require('../../src/repository');
-const { _setConfigForTesting } = require('../../src/config');
+import { configureRepository } from '../../src/repository.js';
+import { _setConfigForTesting } from '../../src/config.js';
 
 function createMockOctokit() {
   return {

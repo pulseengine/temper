@@ -1,10 +1,8 @@
-'use strict';
-
-const yaml = require('js-yaml');
+import { getLogger } from './logger.js';
 
 async function generateConfigurationReport(octokit, owner, repo) {
   try {
-    console.log(`Generating configuration report for ${owner}/${repo}`);
+    getLogger().info(`Generating configuration report for ${owner}/${repo}`);
 
     const repoSettings = await octokit.request('GET /repos/{owner}/{repo}', { owner, repo });
 
@@ -73,7 +71,7 @@ async function generateConfigurationReport(octokit, owner, repo) {
 
     return report;
   } catch (error) {
-    console.error(
+    getLogger().error(
       `❌ Error generating configuration report for ${owner}/${repo}:`,
       error.message
     );
@@ -83,7 +81,7 @@ async function generateConfigurationReport(octokit, owner, repo) {
 
 async function verifyCIAttestation(octokit, owner, repo, branch, ciConfig) {
   try {
-    console.log(`Verifying CI attestation for ${owner}/${repo}`);
+    getLogger().info(`Verifying CI attestation for ${owner}/${repo}`);
 
     const branchProtection = await octokit.request(
       'GET /repos/{owner}/{repo}/branches/{branch}/protection',
@@ -96,19 +94,19 @@ async function verifyCIAttestation(octokit, owner, repo, branch, ciConfig) {
     );
 
     if (missingChecks.length > 0) {
-      console.warn(`Missing required CI checks: ${missingChecks.join(', ')}`);
+      getLogger().warn(`Missing required CI checks: ${missingChecks.join(', ')}`);
       return { compliant: false, missingChecks };
     }
 
-    console.log(`✅ CI attestation verified for ${owner}/${repo}`);
+    getLogger().info(`✅ CI attestation verified for ${owner}/${repo}`);
     return { compliant: true };
   } catch (error) {
-    console.error(`❌ Error verifying CI attestation for ${owner}/${repo}:`, error.message);
+    getLogger().error(`❌ Error verifying CI attestation for ${owner}/${repo}:`, error.message);
     return { compliant: false, error: error.message };
   }
 }
 
-module.exports = {
+export {
   generateConfigurationReport,
   verifyCIAttestation
 };

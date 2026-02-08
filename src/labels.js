@@ -1,8 +1,8 @@
-'use strict';
+import { getLogger } from './logger.js';
 
 async function synchronizeIssueLabels(octokit, owner, repo, targetLabels) {
   try {
-    console.log(`Synchronizing labels for ${owner}/${repo}`);
+    getLogger().info(`Synchronizing labels for ${owner}/${repo}`);
 
     const currentLabels = await octokit.paginate('GET /repos/{owner}/{repo}/labels', {
       owner,
@@ -25,7 +25,7 @@ async function synchronizeIssueLabels(octokit, owner, repo, targetLabels) {
             color: targetLabel.color,
             description: targetLabel.description
           });
-          console.log(`Updated label: ${targetLabel.name}`);
+          getLogger().info(`Updated label: ${targetLabel.name}`);
         }
       } else {
         await octokit.request('POST /repos/{owner}/{repo}/labels', {
@@ -35,7 +35,7 @@ async function synchronizeIssueLabels(octokit, owner, repo, targetLabels) {
           color: targetLabel.color,
           description: targetLabel.description
         });
-        console.log(`Created label: ${targetLabel.name}`);
+        getLogger().info(`Created label: ${targetLabel.name}`);
       }
     }
 
@@ -46,17 +46,17 @@ async function synchronizeIssueLabels(octokit, owner, repo, targetLabels) {
           repo,
           name: currentLabel.name
         });
-        console.log(`Removed label: ${currentLabel.name}`);
+        getLogger().info(`Removed label: ${currentLabel.name}`);
       }
     }
 
-    console.log(`✅ Synchronized labels for ${owner}/${repo}`);
+    getLogger().info(`✅ Synchronized labels for ${owner}/${repo}`);
   } catch (error) {
-    console.error(`❌ Error synchronizing labels for ${owner}/${repo}:`, error.message);
+    getLogger().error(`❌ Error synchronizing labels for ${owner}/${repo}:`, error.message);
     throw error;
   }
 }
 
-module.exports = {
+export {
   synchronizeIssueLabels
 };

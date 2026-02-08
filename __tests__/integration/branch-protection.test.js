@@ -1,4 +1,4 @@
-const { applyBranchProtection, setRequiredSignatures } = require('../../src/branch-protection');
+import { applyBranchProtection, setRequiredSignatures } from '../../src/branch-protection.js';
 
 function createMockOctokit() {
   return {

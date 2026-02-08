@@ -1,6 +1,4 @@
-'use strict';
-
-function normalizeRepoInput(repoOrOwner, maybeRepo) {
+export function normalizeRepoInput(repoOrOwner, maybeRepo) {
   if (typeof repoOrOwner === 'string') {
     return {
       name: maybeRepo,
@@ -13,16 +11,11 @@ function normalizeRepoInput(repoOrOwner, maybeRepo) {
   return repoOrOwner;
 }
 
-function getDefaultBranch(repoInfo) {
+export function getDefaultBranch(repoInfo) {
   return repoInfo?.default_branch || 'main';
 }
 
-function isForkRepo(repoInfo) {
+export function isForkRepo(repoInfo) {
   return Boolean(repoInfo?.fork);
 }
 
-module.exports = {
-  normalizeRepoInput,
-  getDefaultBranch,
-  isForkRepo
-};

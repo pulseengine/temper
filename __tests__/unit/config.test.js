@@ -1,4 +1,4 @@
-const {
+import {
   getMergeSettings,
   getBranchProtectionConfig,
   mergePullRequestRules,
@@ -6,9 +6,8 @@ const {
   getDependabotLabels,
   getTargetIssueLabels,
   _setConfigForTesting,
-  DEFAULT_MERGE_SETTINGS,
-  DEPENDABOT_LABEL_DEFAULTS
-} = require('../../src/config');
+  DEFAULT_MERGE_SETTINGS
+} from '../../src/config.js';
 
 describe('config', () => {
   afterEach(() => {
