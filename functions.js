@@ -1,6 +1,11 @@
-// Export functions for testing
-const { configureRepository, applyBranchProtection, applyTemplates } = require('./index');
-const { checkExistingDependabotConfig, fixDependabotPRLabels } = require('./index');
+// Re-export functions for testing and external use
+const {
+  configureRepository,
+  applyBranchProtection,
+  applyTemplates,
+  checkExistingDependabotConfig,
+  fixDependabotPRLabels
+} = require('./index');
 
 module.exports = {
   configureRepository,

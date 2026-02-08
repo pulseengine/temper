@@ -46,9 +46,6 @@ private-key.pem
 dist/
 build/
 
-# Dependencies
-package-lock.json
-
 # OS generated files
 .DS_Store
 .DS_Store?
@@ -57,3 +54,10 @@ package-lock.json
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Bazel
+bazel-*
+/bazel-bin
+/bazel-out
+/bazel-testlogs
+/bazel-probot-repo-configurator

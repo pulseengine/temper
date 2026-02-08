@@ -11,9 +11,17 @@ settings:
     allow_rebase_merge: true
     delete_branch_on_merge: true
 
-# Branch protection rules
+# Forked repositories can use slightly looser merge settings
+forks:
+  merge:
+    allow_merge_commit: true
+    allow_squash_merge: true
+    allow_rebase_merge: true
+    delete_branch_on_merge: true
+
+# Branch protection rules (applied to the repository default branch)
 branch_protection:
-  main:
+  default:
     required_status_checks:
       strict: true
       contexts: ['ci', 'lint', 'test']
@@ -22,9 +30,23 @@ branch_protection:
       required_approving_review_count: 1
       dismiss_stale_reviews: true
       require_code_owner_reviews: true
+      require_last_push_approval: true
+    required_linear_history: true
+    required_conversation_resolution: true
     restrictions: null
     allow_force_pushes: false
     allow_deletions: false
+    require_signed_commits: true
+  fork_overrides:
+    # Loosened defaults for forked repositories
+    enforce_admins: false
+    required_status_checks: null
+    required_pull_request_reviews: null
+    required_linear_history: false
+    required_conversation_resolution: false
+    allow_force_pushes: true
+    allow_deletions: true
+    require_signed_commits: false
 
 # Standard issue labels
 issue_labels:
@@ -46,6 +68,12 @@ issue_labels:
   - name: "question"
     color: "d876e3"
     description: "Further information is requested"
+  - name: "dependencies"
+    color: "0366d6"
+    description: "Dependency updates"
+  - name: "automation"
+    color: "0e8a16"
+    description: "Automation updates"
 
 # Pull request rules
 pull_request_rules:
@@ -126,3 +154,21 @@ templates:
 
 # CODEOWNERS file to apply
 codeowners: .github/CODEOWNERS
+
+# AI-powered PR review (requires a local OpenAI-compatible endpoint)
+ai_review:
+  enabled: false
+  endpoint: ""
+  model: ""
+  max_diff_size: 12000
+  max_tokens: 2000
+  temperature: 0.3
+  timeout: 120000
+  allow_remote_endpoint: false
+  system_prompt: |
+    You are a thorough code reviewer. Analyze the PR diff and provide:
+    1. Summary of changes
+    2. Potential bugs or issues
+    3. Security concerns
+    4. Suggestions for improvement
+    5. Overall assessment

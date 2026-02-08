@@ -1,0 +1,18 @@
+module(name = "probot-repo-configurator", version = "1.0.0")
+
+bazel_dep(name = "aspect_rules_js", version = "2.4.0")
+bazel_dep(name = "aspect_rules_jest", version = "0.24.2")
+bazel_dep(name = "aspect_bazel_lib", version = "2.9.4")
+bazel_dep(name = "rules_nodejs", version = "6.3.2")
+bazel_dep(name = "bazel_skylib", version = "1.7.1")
+
+node = use_extension("@rules_nodejs//nodejs:extensions.bzl", "node", dev_dependency = True)
+node.toolchain(node_version = "20.18.0")
+
+npm = use_extension("@aspect_rules_js//npm:extensions.bzl", "npm")
+npm.npm_translate_lock(
+    name = "npm",
+    pnpm_lock = "//:pnpm-lock.yaml",
+    verify_node_modules_ignored = "//:.bazelignore",
+)
+use_repo(npm, "npm")

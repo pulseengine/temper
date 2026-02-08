@@ -1,0 +1,76 @@
+organization: test-org
+
+settings:
+  merge:
+    allow_merge_commit: false
+    allow_squash_merge: false
+    allow_rebase_merge: true
+    delete_branch_on_merge: true
+
+forks:
+  merge:
+    allow_merge_commit: true
+    allow_squash_merge: true
+
+branch_protection:
+  default:
+    required_status_checks:
+      strict: true
+      contexts: ['ci']
+    enforce_admins: true
+    required_pull_request_reviews:
+      required_approving_review_count: 1
+      dismiss_stale_reviews: true
+      require_code_owner_reviews: true
+      require_last_push_approval: true
+    required_linear_history: true
+    require_signed_commits: true
+  fork_overrides:
+    enforce_admins: false
+    required_status_checks: null
+
+pull_request_rules:
+  required_approving_reviews: 1
+  require_code_owner_reviews: true
+  dismiss_stale_reviews: true
+  require_last_push_approval: true
+  required_status_checks:
+    - ci
+    - lint
+
+issue_labels:
+  - name: bug
+    color: d73a4a
+    description: Something is broken
+  - name: enhancement
+    color: a2eeef
+    description: New feature
+
+dependabot:
+  version: 2
+  updates:
+    - package-ecosystem: npm
+      directory: /
+      schedule:
+        interval: daily
+      labels:
+        - dependencies
+        - automation
+
+signed_commit_strategy:
+  allow_merge_commits_for_signed: true
+  temporary_rule_timeout: 1000
+  admin_users:
+    - admin-user
+  protected_branches:
+    - main
+
+ai_review:
+  enabled: true
+  endpoint: "http://localhost:9999/v1/chat/completions"
+  model: "test-model"
+  max_diff_size: 5000
+  max_tokens: 500
+  temperature: 0.3
+  timeout: 5000
+  allow_remote_endpoint: false

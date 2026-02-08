@@ -1,0 +1,12 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+
+js_library(
+    name = "lib",
+    srcs = glob(["**/*.js"]),
+    deps = [
+        "//:node_modules/probot",
+        "//:node_modules/@octokit/rest",
+        "//:node_modules/js-yaml",
+    ],
+    visibility = ["//visibility:public"],
+)

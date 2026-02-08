@@ -1,0 +1,7 @@
+common --enable_bzlmod
+
+build --jobs=auto
+build --verbose_failures
+
+test --test_output=errors
+test --test_verbose_timeout_warnings
