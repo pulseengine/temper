@@ -1,5 +1,6 @@
 module.exports = {
   testEnvironment: 'node',
+  resolver: './jest-resolver.cjs',
   transform: {
     '^.+\\.js$': ['babel-jest', { configFile: './babel.config.cjs' }]
   },
@@ -8,7 +9,8 @@ module.exports = {
   ],
   testMatch: [
     '**/__tests__/unit/**/*.test.js',
-    '**/__tests__/integration/**/*.test.js'
+    '**/__tests__/integration/**/*.test.js',
+    '**/__tests__/smoke/**/*.test.js'
   ],
   collectCoverageFrom: [
     'src/**/*.js',
