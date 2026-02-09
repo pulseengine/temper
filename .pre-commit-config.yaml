@@ -18,3 +18,17 @@ repos:
         additional_dependencies:
           - prettier@3.2.5
         files: "\\.(js|json|md|yml|yaml)$"
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint
+        entry: npx eslint --max-warnings=0
+        language: system
+        types: [javascript]
+        files: "\\.(js|mjs|cjs)$"
+      - id: tests
+        name: tests (optional)
+        entry: npx jest --config jest.config.cjs --passWithNoTests --bail
+        language: system
+        pass_filenames: false
+        stages: [manual]

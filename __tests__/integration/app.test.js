@@ -52,7 +52,7 @@ jest.mock('../../src/logger.js', () => {
   };
 });
 
-import { registerApp, mapLegacyEnvVars } from '../../src/app.js';
+import { registerApp, mapLegacyEnvVars, createCustomRoutesHandler, applySecurityHeaders } from '../../src/app.js';
 import { _setConfigForTesting } from '../../src/config.js';
 import { configureRepository } from '../../src/repository.js';
 import {
@@ -93,11 +93,28 @@ function setupApp(options = {}) {
     get: jest.fn((path, handler) => { routeHandlers[path] = handler; }),
     use: jest.fn()
   };
-  const getRouter = options.skipRouter ? undefined : jest.fn().mockReturnValue(mockRouter);
 
-  registerApp(app, getRouter ? { getRouter } : undefined);
+  // Support three modes:
+  // 1. getRouter (legacy/Express) - default
+  // 2. addHandler (Probot v14 raw HTTP handlers)
+  // 3. skipRouter - no routing at all
+  const addedHandlers = [];
+  const mockAddHandler = jest.fn((handler) => { addedHandlers.push(handler); });
+  let getRouter;
+  let secondArg;
 
-  return { app, handlers, errorHandler, routeHandlers, mockRouter, getRouter };
+  if (options.useAddHandler) {
+    secondArg = { addHandler: mockAddHandler };
+  } else if (options.skipRouter) {
+    secondArg = undefined;
+  } else {
+    getRouter = jest.fn().mockReturnValue(mockRouter);
+    secondArg = { getRouter };
+  }
+
+  registerApp(app, secondArg);
+
+  return { app, handlers, errorHandler, routeHandlers, mockRouter, getRouter, addedHandlers, mockAddHandler };
 }
 
 function createMockOctokit() {
@@ -329,6 +346,146 @@ describe('app', () => {
       errorHandler(error);
 
       expect(getLogger().error).toHaveBeenCalledWith({ err: error }, 'Probot error');
+    });
+  });
+
+  // =========================================================================
+  // registerApp - addHandler (Probot v14)
+  // =========================================================================
+  describe('registerApp with addHandler (Probot v14)', () => {
+    function createMockReq(method, url) {
+      return { method, url, headers: { host: 'localhost:3000' } };
+    }
+
+    function createMockRes() {
+      const res = {
+        setHeader: jest.fn(),
+        writeHead: jest.fn().mockReturnThis(),
+        end: jest.fn()
+      };
+      return res;
+    }
+
+    it('registers a handler via addHandler when getRouter is absent', () => {
+      const { mockAddHandler, addedHandlers } = setupApp({ useAddHandler: true });
+
+      expect(mockAddHandler).toHaveBeenCalledTimes(1);
+      expect(addedHandlers).toHaveLength(1);
+      expect(typeof addedHandlers[0]).toBe('function');
+    });
+
+    it('does not call addHandler when getRouter is present', () => {
+      const { mockAddHandler } = setupApp();
+
+      // mockAddHandler is created but never passed to registerApp in getRouter mode
+      // getRouter takes precedence, so addHandler should not be used
+      expect(mockAddHandler).not.toHaveBeenCalled();
+    });
+
+    it('health endpoint returns correct JSON via addHandler', async () => {
+      const { addedHandlers } = setupApp({ useAddHandler: true });
+      const handler = addedHandlers[0];
+      const req = createMockReq('GET', '/health');
+      const res = createMockRes();
+
+      const handled = await handler(req, res);
+
+      expect(handled).toBe(true);
+      expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
+      const body = JSON.parse(res.end.mock.calls[0][0]);
+      expect(body.status).toBe('healthy');
+      expect(body.version).toBe('1.0.0');
+      expect(body.queue).toBeDefined();
+      expect(body.timestamp).toBeDefined();
+    });
+
+    it('health endpoint includes queue stats via addHandler', async () => {
+      defaultQueue.stats.mockReturnValue({ pending: 3, active: 2, completed: 15, failed: 0 });
+      const { addedHandlers } = setupApp({ useAddHandler: true });
+      const handler = addedHandlers[0];
+      const req = createMockReq('GET', '/health');
+      const res = createMockRes();
+
+      await handler(req, res);
+
+      const body = JSON.parse(res.end.mock.calls[0][0]);
+      expect(body.queue).toEqual({ pending: 3, active: 2, completed: 15, failed: 0 });
+    });
+
+    it('webhook endpoint returns correct JSON via addHandler', async () => {
+      const { addedHandlers } = setupApp({ useAddHandler: true });
+      const handler = addedHandlers[0];
+      const req = createMockReq('GET', '/webhook');
+      const res = createMockRes();
+
+      const handled = await handler(req, res);
+
+      expect(handled).toBe(true);
+      expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
+      const body = JSON.parse(res.end.mock.calls[0][0]);
+      expect(body.message).toBe('Webhook endpoint ready');
+      expect(body.events).toEqual(expect.arrayContaining(['repository', 'issue_comment', 'pull_request', 'push']));
+    });
+
+    it('applies security headers on health endpoint', async () => {
+      const { addedHandlers } = setupApp({ useAddHandler: true });
+      const handler = addedHandlers[0];
+      const req = createMockReq('GET', '/health');
+      const res = createMockRes();
+
+      await handler(req, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith('X-Content-Type-Options', 'nosniff');
+      expect(res.setHeader).toHaveBeenCalledWith('X-Frame-Options', 'SAMEORIGIN');
+      expect(res.setHeader).toHaveBeenCalledWith('X-XSS-Protection', '0');
+    });
+
+    it('applies security headers on webhook endpoint', async () => {
+      const { addedHandlers } = setupApp({ useAddHandler: true });
+      const handler = addedHandlers[0];
+      const req = createMockReq('GET', '/webhook');
+      const res = createMockRes();
+
+      await handler(req, res);
+
+      expect(res.setHeader).toHaveBeenCalledWith('X-Content-Type-Options', 'nosniff');
+      expect(res.setHeader).toHaveBeenCalledWith('X-Frame-Options', 'SAMEORIGIN');
+      expect(res.setHeader).toHaveBeenCalledWith('X-XSS-Protection', '0');
+    });
+
+    it('returns false for unhandled routes', async () => {
+      const { addedHandlers } = setupApp({ useAddHandler: true });
+      const handler = addedHandlers[0];
+      const req = createMockReq('GET', '/unknown');
+      const res = createMockRes();
+
+      const handled = await handler(req, res);
+
+      expect(handled).toBe(false);
+      expect(res.writeHead).not.toHaveBeenCalled();
+      expect(res.end).not.toHaveBeenCalled();
+    });
+
+    it('returns false for POST to /health', async () => {
+      const { addedHandlers } = setupApp({ useAddHandler: true });
+      const handler = addedHandlers[0];
+      const req = createMockReq('POST', '/health');
+      const res = createMockRes();
+
+      const handled = await handler(req, res);
+
+      expect(handled).toBe(false);
+    });
+
+    it('returns false for POST to /webhook', async () => {
+      const { addedHandlers } = setupApp({ useAddHandler: true });
+      const handler = addedHandlers[0];
+      const req = createMockReq('POST', '/webhook');
+      const res = createMockRes();
+
+      const handled = await handler(req, res);
+
+      expect(handled).toBe(false);
     });
   });
 

@@ -18,7 +18,46 @@ import { isProcessed, markProcessed } from './idempotency.js';
 import { defaultQueue } from './queue.js';
 import { applySecurityMiddleware } from './middleware.js';
 
-function registerApp(app, { getRouter } = {}) {
+function applySecurityHeaders(res) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '0');
+}
+
+function createCustomRoutesHandler() {
+  return async (req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    const pathname = url.pathname;
+
+    if (req.method === 'GET' && pathname === '/health') {
+      applySecurityHeaders(res);
+      const body = JSON.stringify({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        version: '1.0.0',
+        queue: defaultQueue.stats()
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(body);
+      return true;
+    }
+
+    if (req.method === 'GET' && pathname === '/webhook') {
+      applySecurityHeaders(res);
+      const body = JSON.stringify({
+        message: 'Webhook endpoint ready',
+        events: ['repository', 'issue_comment', 'pull_request', 'push']
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(body);
+      return true;
+    }
+
+    return false;
+  };
+}
+
+function registerApp(app, { getRouter, addHandler } = {}) {
   app.on('repository.created', async (context) => {
     if (context.log) setLogger(context.log);
     const deliveryId = context.id;
@@ -387,6 +426,8 @@ function registerApp(app, { getRouter } = {}) {
         events: ['repository', 'issue_comment', 'pull_request', 'push']
       });
     });
+  } else if (addHandler) {
+    addHandler(createCustomRoutesHandler());
   }
 
   app.onError((error) => {
@@ -411,5 +452,7 @@ function mapLegacyEnvVars() {
 
 export {
   registerApp,
-  mapLegacyEnvVars
+  mapLegacyEnvVars,
+  createCustomRoutesHandler,
+  applySecurityHeaders
 };
