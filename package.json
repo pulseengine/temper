@@ -47,5 +47,8 @@
   },
   "publishConfig": {
     "provenance": true
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": []
   }
 }

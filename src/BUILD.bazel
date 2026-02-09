@@ -5,7 +5,7 @@ js_library(
     srcs = glob(["*.js"]),
     deps = [
         "//:node_modules/probot",
-        "//:node_modules/@octokit__rest",
+        "//:node_modules/@octokit/rest",
         "//:node_modules/js-yaml",
         "//:node_modules/helmet",
         "//:node_modules/pino",

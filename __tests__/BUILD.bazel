@@ -1,4 +1,5 @@
-load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
+load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@npm//:jest/package_json.bzl", jest_bin = "bin")
 
 js_library(
     name = "test_sources",
@@ -15,21 +16,20 @@ js_library(
     ],
 )
 
-js_test(
+jest_bin.jest_test(
     name = "unit_tests",
-    entry_point = "//:node_modules/jest/bin/jest.js",
     args = [
         "--config",
-        "$(rootpath //:jest.config.cjs)",
+        "jest.config.cjs",
         "--testPathPattern",
         "unit",
         "--no-cache",
+        "--no-watchman",
     ],
     data = [
         ":test_sources",
         "//src:lib",
-        "//:jest.config.cjs",
-        "//:babel.config.cjs",
+        "//:jest_config",
         "//:node_modules/jest",
         "//:node_modules/@babel/core",
         "//:node_modules/@babel/preset-env",
@@ -38,21 +38,20 @@ js_test(
     ],
 )
 
-js_test(
+jest_bin.jest_test(
     name = "integration_tests",
-    entry_point = "//:node_modules/jest/bin/jest.js",
     args = [
         "--config",
-        "$(rootpath //:jest.config.cjs)",
+        "jest.config.cjs",
         "--testPathPattern",
         "integration",
         "--no-cache",
+        "--no-watchman",
     ],
     data = [
         ":test_sources",
         "//src:lib",
-        "//:jest.config.cjs",
-        "//:babel.config.cjs",
+        "//:jest_config",
         "//:node_modules/jest",
         "//:node_modules/@babel/core",
         "//:node_modules/@babel/preset-env",
