@@ -1,332 +1,124 @@
 # Probot Repository Configurator
 
-🤖 **GitHub App for automatic repository configuration**
-
-Automatically configures new repositories in the pulseengine organization with standard merge settings using the Probot framework.
-
-## 🎯 Features
-
-- ✅ **Automatic Configuration** - New repositories are configured immediately upon creation
-- ✅ **Real-time Processing** - Uses GitHub webhooks for instant response
-- ✅ **Chatops Support** - Configure repositories manually via `/configure-repo` command
-- ✅ **Audit Logging** - All actions are logged and documented in issues
-- ✅ **Extensible Architecture** - Easy to add more automation features
-- ✅ **Production Ready** - Built with GitHub's official Probot framework
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Node.js 16+ (LTS recommended)
-- npm or yarn
-- GitHub App credentials
-- Access to pulseengine organization
-
-### Installation
-
-```bash
-# Clone this repository
-git clone https://github.com/avrabe/probot-repo-configurator.git
-cd probot-repo-configurator
-
-# Install dependencies
-npm install
-
-# Start the bot
-npm start
-```
-
-### Configuration
-
-Edit `config.yml` to customize settings:
-
-```yaml
-organization: pulseengine
-settings:
-  merge:
-    allow_merge_commit: false
-    allow_squash_merge: false
-    allow_rebase_merge: true
-    delete_branch_on_merge: true
-```
-
-## 🔧 Usage
-
-### Automatic Configuration
-
-The bot automatically configures new repositories in the pulseengine organization with:
-
-- **Rebase merges only** (no merge commits, no squash merges)
-- **Branch deletion after merge** (automatic cleanup)
-- **Issue documentation** (creates configuration issue in each repo)
-
-### Manual Configuration
-
-Add a comment to any issue in any repository:
-
-```
-/configure-repo
-```
-
-The bot will:
-1. Apply standard merge settings
-2. Reply with confirmation or error
-3. Create a configuration issue
-
-## 📦 Architecture
-
-```
-┌─────────────────────────────────────────────────┐
-│                 GitHub Events                    │
-└───────────────┬─────────────────┬───────────────┘
-                │                 │                 
-                ▼                 ▼                 
-┌─────────────────────────────────────────────────┐
-│                 Probot Framework                 │
-│                                                 │
-│  ┌─────────────┐    ┌───────────────────────┐  │
-│  │  Webhooks   │    │  Event Handlers       │  │
-│  └─────────────┘    └───────────────────────┘  │
-│                                                 │
-└─────────────────────────────────────────────────┘
-                │                 │                 
-                ▼                 ▼                 
-┌─────────────────────────────────────────────────┐
-│                 Octokit API                     │
-│                                                 │
-│  ┌─────────────┐    ┌───────────────────────┐  │
-│  │  GitHub     │    │  Repository           │  │
-│  │  API Calls  │    │  Configuration        │  │
-│  └─────────────┘    └───────────────────────┘  │
-│                                                 │
-└─────────────────────────────────────────────────┘
-```
+[![CI](https://github.com/avrabe/probot-repo-configurator/actions/workflows/ci.yml/badge.svg)](https://github.com/avrabe/probot-repo-configurator/actions/workflows/ci.yml)
+![Node.js](https://img.shields.io/badge/node-%3E%3D20.11.0-brightgreen)
+
+A Probot v14 GitHub App that automatically configures repositories to match
+organization standards. It enforces merge settings, branch protection rules,
+issue labels, PR/issue templates, CODEOWNERS, Dependabot configuration,
+signed-commit merge strategies, and AI-powered PR reviews -- across every
+repository in your GitHub organization.
+
+## Features
+
+- **Auto-configure new repositories** -- applies full configuration on `repository.created` events
+- **Branch protection** -- enforces required reviews, status checks, signed commits, and linear history
+- **Issue labels** -- synchronizes a standard label set (create, update, delete) across all repos
+- **PR and issue templates** -- pushes PR templates, issue templates, and CODEOWNERS into target repos
+- **Dependabot configuration** -- applies `dependabot.yml` and fixes missing PR labels
+- **Signed-commit merge strategy** -- temporarily enables merge commits to preserve GPG signatures, then auto-reverts
+- **AI-powered PR review** -- sends diffs to a local OpenAI-compatible endpoint for automated code review
+- **Organization-wide sync** -- bulk-apply configuration to every repo in the org
+- **ChatOps commands** -- 9 slash commands for on-demand configuration and diagnostics
+- **Fork-aware settings** -- separate merge and branch-protection overrides for forked repositories
+- **PR-based changes** -- optionally applies file changes via pull requests instead of direct commits
+- **Idempotent webhook processing** -- deduplicates delivery IDs to prevent duplicate work
+- **Retry with backoff** -- exponential backoff with jitter for transient GitHub API errors
+
+## Quick Start
+
+1. **Register a GitHub App** at `https://github.com/settings/apps/new` with
+   repository (Contents, Issues, Pull Requests, Metadata) and organization
+   (Members, Metadata) permissions. Subscribe to `repository`, `issue_comment`,
+   and `pull_request` events.
+
+2. **Clone and install:**
+
+   ```bash
+   git clone https://github.com/avrabe/probot-repo-configurator.git
+   cd probot-repo-configurator
+   npm install
+   ```
+
+3. **Configure environment variables** -- create a `.env` file:
+
+   ```bash
+   APP_ID=123456
+   PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+   WEBHOOK_SECRET=your-webhook-secret
+   ```
+
+4. **Run:**
+
+   ```bash
+   npm start        # production
+   npm run dev      # development (auto-reload via nodemon)
+   ```
+
+   The server listens on port 3000 (configurable via `PORT`) and exposes
+   `POST /api/github/webhooks`, `GET /health`, and `GET /webhook`.
+
+## ChatOps Commands
+
+Comment on any issue or pull request to trigger a command. The commenter must
+be an organization member.
+
+| Command | Description |
+|---|---|
+| `/configure-repo` | Apply full repository configuration (merge settings, branch protection, labels, templates, Dependabot) |
+| `/sync-all-repos` | Synchronize configuration across all repositories in the organization |
+| `/check-config` | Generate a configuration report for the current repository |
+| `/check-dependabot` | Check Dependabot configuration and PR label compliance |
+| `/fix-dependabot-labels` | Add missing labels to open Dependabot PRs |
+| `/analyze-org` | Generate a full organization analysis report (creates a new issue) |
+| `/check-merge-strategy` | Analyze a PR's merge strategy and signed-commit status |
+| `/allow-merge-commit` | Temporarily enable merge commits for signed-commit preservation (admin-only, auto-reverts after timeout) |
+| `/review-pr` | Trigger an AI-powered code review (requires `ai_review.enabled: true`; PR only) |
+
+## Configuration
+
+All behavior is controlled by [`config.yml`](config.yml). Key sections:
+
+| Section | Purpose |
+|---|---|
+| `organization` | Target GitHub organization |
+| `settings.merge` | Default merge strategy (rebase-only by default) |
+| `forks.merge` | Overridden merge settings for forked repos |
+| `branch_protection` | Branch protection rules and fork overrides |
+| `issue_labels` | Standard labels to synchronize |
+| `pull_request_rules` | Required reviews, status checks |
+| `signed_commit_strategy` | Merge-commit override for signed commits |
+| `dependabot` | Dependabot v2 configuration to push to repos |
+| `change_strategy` | PR-based vs. direct-commit change application |
+| `templates` / `codeowners` | PR/issue templates and CODEOWNERS paths |
+| `ai_review` | AI review endpoint, model, prompt, and limits |
+
+See the file itself for the full schema and defaults.
+
+## Development
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the full development guide, including:
+
+- Project structure and architecture
+- Environment variables reference
+- Testing (unit, integration, smoke) and coverage thresholds
+- Pre-commit hooks and linting
+- Bazel build system (optional)
+- Docker usage
+- CI pipeline details
 
-## 🎛️ Configuration Options
+## Deployment
 
-### Merge Settings
+The app can be deployed in several ways:
 
-```yaml
-settings:
-  merge:
-    allow_merge_commit: false  # Disable merge commits
-    allow_squash_merge: false # Disable squash merges  
-    allow_rebase_merge: true  # Enable rebase merges
-    delete_branch_on_merge: true # Delete branches after merge
-```
+- **Docker** -- `npm run deploy:docker` builds and pushes a multi-stage Alpine image (runs as non-root, built-in healthcheck).
+- **Heroku** -- `npm run deploy:heroku` pushes to Heroku via git.
+- **PM2** -- `npm run deploy:server` starts or restarts the app under PM2 process management.
+- **Netcup** -- `npm run deploy:netcup` installs production dependencies for shared hosting.
 
-### Branch Protection (Future)
+Set `APP_ID`, `PRIVATE_KEY`, and `WEBHOOK_SECRET` as environment variables in
+your deployment target.
 
-```yaml
-branch_protection:
-  main:
-    required_status_checks: true
-    enforce_admins: true
-    required_pull_request_reviews:
-      required_approving_review_count: 1
-```
+## License
 
-### Templates (Future)
-
-```yaml
-templates:
-  pull_request: .github/PULL_REQUEST_TEMPLATE.md
-  issue: .github/ISSUE_TEMPLATE/
-```
-
-## 🚀 Deployment
-
-### Local Development
-
-```bash
-# Install nodemon for auto-restart
-npm install --save-dev nodemon
-
-# Start in development mode
-npm run dev
-```
-
-### Production Deployment
-
-#### Option A: Heroku
-
-```bash
-# Create Heroku app
-heroku create probot-repo-configurator
-
-# Set environment variables
-heroku config:set GITHUB_APP_ID=your_app_id
-heroku config:set GITHUB_PRIVATE_KEY="$(cat private-key.pem)"
-heroku config:set GITHUB_WEBHOOK_SECRET=your_webhook_secret
-
-# Deploy
-git push heroku main
-```
-
-#### Option B: Docker
-
-```bash
-# Build Docker image
-docker build -t probot-repo-configurator .
-
-# Run container
-docker run -p 3000:3000 \
-  -e GITHUB_APP_ID=your_app_id \
-  -e GITHUB_PRIVATE_KEY="$(cat private-key.pem)" \
-  -e GITHUB_WEBHOOK_SECRET=your_webhook_secret \
-  probot-repo-configurator
-```
-
-#### Option C: Server
-
-```bash
-# Install PM2 for process management
-npm install -g pm2
-
-# Start with PM2
-pm2 start index.js --name probot-repo-configurator
-
-# Save process list
-pm2 save
-```
-
-## 📋 GitHub App Setup
-
-### Step 1: Create GitHub App
-
-1. Go to: https://github.com/organizations/pulseengine/settings/apps
-2. Click "New GitHub App"
-3. Fill in app details:
-   - **GitHub App name**: Probot Repository Configurator
-   - **Homepage URL**: https://github.com/avrabe/probot-repo-configurator
-   - **Webhook URL**: https://your-server-url/webhook
-   - **Webhook Secret**: Generate a secure secret
-
-### Step 2: Configure Permissions
-
-**Repository permissions:**
-- ✅ Contents: Read & Write
-- ✅ Issues: Read & Write
-- ✅ Metadata: Read-only
-- ✅ Pull Requests: Read & Write
-
-**Organization permissions:**
-- ✅ Members: Read-only
-- ✅ Metadata: Read-only
-
-### Step 3: Install the App
-
-1. Install on the pulseengine organization
-2. Grant access to all repositories (or select specific ones)
-
-### Step 4: Generate Private Key
-
-1. Click "Generate a private key"
-2. Save the `.pem` file securely
-3. Set as `GITHUB_PRIVATE_KEY` environment variable
-
-## 🔄 Event Reference
-
-### Processed Events
-
-| Event | Description | Action |
-|-------|-------------|--------|
-| `repository.created` | New repository created | Auto-configure |
-| `issue_comment.created` | Comment on issue | Manual configure |
-
-### Future Events to Add
-
-| Event | Description | Potential Action |
-|-------|-------------|------------------|
-| `pull_request.opened` | PR opened | Add labels, checks |
-| `push` | Code pushed | Validate settings |
-| `organization.member_added` | New member | Welcome message |
-
-## 📊 Monitoring
-
-### Logs
-
-```bash
-# View logs
-pm2 logs
-
-# Or for Docker
-docker logs container_name
-```
-
-### Metrics (Future)
-
-```yaml
-# Prometheus metrics endpoint
-metrics:
-  enabled: true
-  port: 9090
-```
-
-## 🧪 Testing
-
-### Manual Testing
-
-```bash
-# Create a test repository
-gh repo create pulseengine/test-repo --private
-
-# Check if it was configured
-gh api repos/pulseengine/test-repo --jq '.allow_merge_commit, .allow_squash_merge, .allow_rebase_merge, .delete_branch_on_merge'
-```
-
-### Unit Testing (Future)
-
-```bash
-npm install --save-dev jest @types/jest
-npx jest --init
-```
-
-## 🔧 Extending the Bot
-
-### Add New Features
-
-```javascript
-// Add to index.js
-probot.on('some.event', async (context) => {
-  // Your logic here
-});
-```
-
-### Example: Branch Protection
-
-```javascript
-probot.on('repository.created', async (context) => {
-  // After configuring merge settings
-  await context.octokit.request('PUT /repos/{owner}/{repo}/branches/{branch}/protection', {
-    owner: context.payload.repository.owner.login,
-    repo: context.payload.repository.name,
-    branch: 'main',
-    required_status_checks: null,
-    enforce_admins: null,
-    required_pull_request_reviews: null,
-    restrictions: null
-  });
-});
-```
-
-## 📚 Resources
-
-- **Probot Documentation**: https://probot.github.io/docs/
-- **Octokit Documentation**: https://octokit.github.io/rest.js/
-- **GitHub Apps**: https://docs.github.com/en/developers/apps
-- **Probot Examples**: https://github.com/probot/examples
-
-## 🎉 Contributing
-
-Contributions welcome! Please open issues and pull requests.
-
-## 📝 License
-
-MIT License - See LICENSE file
-
----
-
-**Status**: Ready for deployment  
-**Organization**: pulseengine  
-**Maintainer**: @avrabe
+[MIT](LICENSE)

@@ -26,6 +26,14 @@
   ],
   "author": "pulseengine",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/avrabe/probot-repo-configurator.git"
+  },
+  "bugs": {
+    "url": "https://github.com/avrabe/probot-repo-configurator/issues"
+  },
+  "homepage": "https://github.com/avrabe/probot-repo-configurator#readme",
   "dependencies": {
     "@octokit/rest": "^22.0.1",
     "helmet": "^8.1.0",
