@@ -1,18 +1,18 @@
 # Contributing to Probot Repository Configurator
 
-🎉 **Thank you for your interest in contributing!**
+**Thank you for your interest in contributing!**
 
 This guide will help you get started with contributing to the Probot Repository Configurator project.
 
-## 📋 Code of Conduct
+## Code of Conduct
 
 By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
-- Node.js 16+ (LTS recommended)
+- Node.js >= 20.11.0
 - npm or yarn
 - Git
 - GitHub account
@@ -32,7 +32,7 @@ cp .env.example .env
 # Edit .env with your GitHub App credentials
 ```
 
-## 📝 How to Contribute
+## How to Contribute
 
 ### Reporting Bugs
 
@@ -74,7 +74,7 @@ cp .env.example .env
    ```
 8. **Open a pull request**
 
-## 🔧 Development Guidelines
+## Development Guidelines
 
 ### Code Style
 
@@ -108,32 +108,26 @@ docs/your-docs-update
 refactor/your-refactoring
 ```
 
-## 🧪 Testing
+## Testing
 
 ### Manual Testing
 
 ```bash
 # Create a test repository
-gh repo create pulseengine/test-repo --private
+gh repo create your-org/test-repo --private
 
 # Verify configuration
-gh api repos/pulseengine/test-repo --jq '.allow_merge_commit, .allow_squash_merge, .allow_rebase_merge, .delete_branch_on_merge'
+gh api repos/your-org/test-repo --jq '.allow_merge_commit, .allow_squash_merge, .allow_rebase_merge, .delete_branch_on_merge'
 
 # Clean up
-gh repo delete pulseengine/test-repo --confirm
+gh repo delete your-org/test-repo --confirm
 ```
 
-### Unit Testing (Future)
+### Running Tests
 
-```bash
-# Run tests
-npm test
+`npm test` runs 453 tests. See DEVELOPMENT.md for test structure details.
 
-# Add new tests
-# Tests should be added to the test/ directory
-```
-
-## 📚 Documentation
+## Documentation
 
 ### Updating Documentation
 
@@ -150,7 +144,7 @@ npm test
 - Add code examples
 - Include screenshots where helpful
 
-## 🎯 Feature Development
+## Feature Development
 
 ### Adding New Features
 
@@ -170,7 +164,7 @@ npm test
 - [ ] Error handling included
 - [ ] Performance considered
 
-## 🔄 Release Process
+## Release Process
 
 ### Versioning
 
@@ -188,7 +182,7 @@ We use [Semantic Versioning](https://semver.org/):
 4. **Publish to npm** (if applicable)
 5. **Announce release**
 
-## 📋 Maintainer Guidelines
+## Maintainer Guidelines
 
 ### Reviewing Pull Requests
 
@@ -206,7 +200,7 @@ We use [Semantic Versioning](https://semver.org/):
 4. **Delete branch** - After merging
 5. **Thank contributor** - Show appreciation
 
-## 🎉 Recognition
+## Recognition
 
 Contributors will be recognized in:
 
@@ -215,24 +209,10 @@ Contributors will be recognized in:
 - GitHub contributors list
 - Release notes
 
-## 📚 Resources
+## Resources
 
 - [Probot Documentation](https://probot.github.io/docs/)
 - [GitHub API Documentation](https://docs.github.com/en/rest)
 - [Octokit Documentation](https://octokit.github.io/rest.js/)
 - [Conventional Commits](https://www.conventionalcommits.org/)
 - [Semantic Versioning](https://semver.org/)
-
-## 💡 Tips for Success
-
-1. **Start small** - Begin with simple issues
-2. **Ask questions** - Don't hesitate to ask for help
-3. **Be patient** - Reviews may take time
-4. **Follow guidelines** - Stick to the contribution rules
-5. **Have fun** - Enjoy the process!
-
----
-
-**Thank you for contributing!** 🚀
-
-Your contributions help make this project better for everyone!

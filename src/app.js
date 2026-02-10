@@ -69,7 +69,11 @@ function registerApp(app, { getRouter, addHandler } = {}) {
     const config = getConfig();
     const { repository, organization } = context.payload;
 
-    const targetOrg = config?.organization || process.env.ORGANIZATION || 'pulseengine';
+    const targetOrg = config?.organization || process.env.ORGANIZATION;
+    if (!targetOrg) {
+      getLogger().warn('No target organization configured — skipping repository.created event');
+      return;
+    }
     const repoOrg = organization?.login || repository.owner?.login;
 
     if (repoOrg === targetOrg) {

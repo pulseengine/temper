@@ -11,11 +11,7 @@
     "lint": "eslint src/ index.js functions.js __tests__/",
     "build": "bazel build //...",
     "bazel:test": "bazel test //...",
-    "deploy": "echo \"Add deployment script later\"",
-    "deploy:heroku": "echo \"Deploying to Heroku...\" && git push heroku main",
-    "deploy:docker": "docker build -t probot-repo-configurator . && docker push probot-repo-configurator",
-    "deploy:server": "pm2 restart probot-repo-configurator || pm2 start index.js --name probot-repo-configurator",
-    "deploy:netcup": "npm install --production && echo 'Netcup deployment ready'"
+    "docker:build": "docker build -t probot-repo-configurator ."
   },
   "keywords": [
     "github",

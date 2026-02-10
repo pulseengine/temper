@@ -97,7 +97,7 @@ signed_commit_strategy:
     - "main"
     - "master"
     - "production"
-  
+
 # CI attestation requirements
 ci_attestation:
   required_for_main_branch: true

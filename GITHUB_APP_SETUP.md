@@ -1,16 +1,16 @@
 # GitHub App Setup Guide
 
-## 🎯 Step-by-Step Guide to Setting Up the GitHub App
+## Step-by-Step Guide to Setting Up the GitHub App
 
 ### Step 1: Create the GitHub App
 
 1. **Go to GitHub App Settings**
-   - Navigate to: https://github.com/organizations/pulseengine/settings/apps
+   - Navigate to: https://github.com/organizations/YOUR_ORG/settings/apps
    - Click "New GitHub App"
 
 2. **Fill in App Details**
    - **GitHub App name**: `Probot Repository Configurator`
-   - **Homepage URL**: `https://github.com/avrabe/probot-repo-configurator`
+   - **Homepage URL**: `https://github.com/YOUR_ORG/probot-repo-configurator`
    - **Description**: `Automatically configures repositories with standard merge settings`
    - **Callback URL**: Leave empty (not needed for this app)
 
@@ -23,25 +23,25 @@
 ### Step 2: Configure Permissions
 
 #### Repository Permissions
-- ✅ **Contents**: Read & Write
-- ✅ **Issues**: Read & Write
-- ✅ **Metadata**: Read-only
-- ✅ **Pull Requests**: Read & Write
+- **Contents**: Read & Write
+- **Issues**: Read & Write
+- **Metadata**: Read-only
+- **Pull Requests**: Read & Write
 
 #### Organization Permissions
-- ✅ **Members**: Read-only
-- ✅ **Metadata**: Read-only
+- **Members**: Read-only
+- **Metadata**: Read-only
 
-#### User Permissions**
+#### User Permissions
 - None required
 
 ### Step 3: Subscribe to Events
 
 Subscribe to these events:
-- ✅ **Repository** (repository.created)
-- ✅ **Issue comment** (issue_comment.created)
-- ✅ **Push** (optional, for future features)
-- ✅ **Pull request** (optional, for future features)
+- **Repository** (repository.created)
+- **Issue comment** (issue_comment.created)
+- **Push** (optional, for future features)
+- **Pull request** (optional, for future features)
 
 ### Step 4: Generate Private Key
 
@@ -72,7 +72,7 @@ GITHUB_APP_ID=123456          # From GitHub App settings
 GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----..."  # Contents of .pem file
 GITHUB_WEBHOOK_SECRET=your_webhook_secret_here  # From webhook setup
 PORT=3000
-ORGANIZATION=pulseengine
+ORGANIZATION=your-org
 ```
 
 ### Step 7: Deploy the App
@@ -85,16 +85,7 @@ npm install
 npm start
 ```
 
-#### Option B: Heroku
-```bash
-heroku create probot-repo-configurator
-heroku config:set GITHUB_APP_ID=your_app_id
-heroku config:set GITHUB_PRIVATE_KEY="$(cat private-key.pem)"
-heroku config:set GITHUB_WEBHOOK_SECRET=your_webhook_secret
-git push heroku main
-```
-
-#### Option C: Docker
+#### Option B: Docker
 ```bash
 docker build -t probot-repo-configurator .
 docker run -p 3000:3000 \
@@ -117,7 +108,7 @@ docker run -p 3000:3000 \
 3. **Updates**: Keep dependencies updated
 4. **Backups**: Regularly backup your private key
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -137,7 +128,7 @@ docker run -p 3000:3000 \
 - **Check**: API rate limits
 - **Fix**: Consider adding rate limit handling or upgrading GitHub plan
 
-## 📋 Security Best Practices
+## Security Best Practices
 
 1. **Never commit private keys** - Keep `.env` and `.pem` files out of Git
 2. **Use HTTPS** - Always use HTTPS for webhook URLs
@@ -145,11 +136,11 @@ docker run -p 3000:3000 \
 4. **Limit access** - Only grant necessary permissions
 5. **Monitor activity** - Review app activity in GitHub settings
 
-## 🎉 Success!
+## Success
 
 Your GitHub App is now set up and ready to automatically configure repositories!
 
-## 📚 Additional Resources
+## Additional Resources
 
 - [GitHub Apps Documentation](https://docs.github.com/en/developers/apps)
 - [Probot Documentation](https://probot.github.io/docs/)

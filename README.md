@@ -1,6 +1,7 @@
 # Probot Repository Configurator
 
-[![CI](https://github.com/avrabe/probot-repo-configurator/actions/workflows/ci.yml/badge.svg)](https://github.com/avrabe/probot-repo-configurator/actions/workflows/ci.yml)
+<!-- Update the CI badge URL after forking to your own org/repo -->
+<!-- [![CI](https://github.com/YOUR-ORG/probot-repo-configurator/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR-ORG/probot-repo-configurator/actions/workflows/ci.yml) -->
 ![Node.js](https://img.shields.io/badge/node-%3E%3D20.11.0-brightgreen)
 
 A Probot v14 GitHub App that automatically configures repositories to match
@@ -35,17 +36,16 @@ repository in your GitHub organization.
 2. **Clone and install:**
 
    ```bash
-   git clone https://github.com/avrabe/probot-repo-configurator.git
+   git clone https://github.com/YOUR-ORG/probot-repo-configurator.git
    cd probot-repo-configurator
    npm install
    ```
 
-3. **Configure environment variables** -- create a `.env` file:
+3. **Configure environment variables** -- copy `.env.example` to `.env` and fill in your values:
 
    ```bash
-   APP_ID=123456
-   PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
-   WEBHOOK_SECRET=your-webhook-secret
+   cp .env.example .env
+   # Edit .env with your GitHub App credentials (APP_ID, PRIVATE_KEY, WEBHOOK_SECRET)
    ```
 
 4. **Run:**

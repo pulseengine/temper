@@ -585,18 +585,15 @@ describe('app', () => {
       process.env.ORGANIZATION = origOrg;
     });
 
-    it('falls back to pulseengine when no config org or env var', async () => {
+    it('skips when no config org or env var is set', async () => {
       const origOrg = process.env.ORGANIZATION;
       delete process.env.ORGANIZATION;
       _setConfigForTesting({});
       const { handlers } = setupApp();
-      // Org matches the hardcoded fallback 'pulseengine'
-      const context = createRepoCreatedContext({
-        organization: { login: 'pulseengine' }
-      });
+      const context = createRepoCreatedContext();
       await handlers['repository.created'](context);
 
-      expect(configureRepository).toHaveBeenCalled();
+      expect(configureRepository).not.toHaveBeenCalled();
       process.env.ORGANIZATION = origOrg;
     });
 
@@ -612,6 +609,7 @@ describe('app', () => {
     });
 
     it('marks delivery as processed', async () => {
+      _setConfigForTesting({ organization: 'pulseengine' });
       const { handlers } = setupApp();
       const context = createRepoCreatedContext();
       await handlers['repository.created'](context);

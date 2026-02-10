@@ -33,44 +33,26 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`Port: ${process.env.PORT || 3000}`);
 
-      if (process.env.HETZNER_ENVIRONMENT) {
-        console.log('🔧 Running in Hetzner environment');
-        console.log('📦 Using Hetzner server configuration');
-      } else if (process.env.NETCUP_ENVIRONMENT) {
-        console.log('🔧 Running in Netcup environment');
-        console.log('📦 Using shared hosting configuration');
-      } else {
-        console.log('🔧 Running in generic environment');
-      }
-
       await run(registerApp);
-      console.log('✅ Probot app started');
-      console.log('🚀 Ready to process GitHub events!');
+      console.log('Probot app started');
+      console.log('Ready to process GitHub events!');
 
-      console.log('📡 Health check: GET /health');
-      console.log(`📡 Webhook: POST ${process.env.WEBHOOK_PATH}`);
-      console.log('📡 Webhook info: GET /webhook');
-
-      if (process.env.HETZNER_ENVIRONMENT) {
-        console.log('💡 Hetzner Tip: Check Nginx proxy configuration');
-        console.log('💡 Hetzner Tip: Verify firewall allows port 80/443');
-      } else if (process.env.NETCUP_ENVIRONMENT) {
-        console.log('💡 Netcup Tip: Make sure your .htaccess is properly configured');
-        console.log('💡 Netcup Tip: Check that port 3000 is allowed in your hosting');
-      }
+      console.log('Health check: GET /health');
+      console.log(`Webhook: POST ${process.env.WEBHOOK_PATH}`);
+      console.log('Webhook info: GET /webhook');
     } catch (error) {
-      console.error('❌ Error starting Probot:', error);
+      console.error('Error starting Probot:', error);
 
       if (error.code === 'EADDRINUSE') {
-        console.error('🔥 Port 3000 is already in use. Check other Node.js processes.');
+        console.error('Port 3000 is already in use. Check other Node.js processes.');
       }
 
       if (error.message?.includes('permission')) {
-        console.error('🔒 Permission error. Check file permissions.');
+        console.error('Permission error. Check file permissions.');
       }
 
       if (error.message?.includes('ENOENT')) {
-        console.error('📁 File not found. Check application files are present.');
+        console.error('File not found. Check application files are present.');
       }
 
       process.exit(1);
