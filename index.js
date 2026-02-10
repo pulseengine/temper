@@ -29,7 +29,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   (async () => {
     try {
       mapLegacyEnvVars();
-      console.log('Starting Probot Repository Configurator...');
+      console.log('Starting Temper...');
       console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`Port: ${process.env.PORT || 3000}`);
 

@@ -1,8 +1,8 @@
-# Contributing to Probot Repository Configurator
+# Contributing to Temper
 
 **Thank you for your interest in contributing!**
 
-This guide will help you get started with contributing to the Probot Repository Configurator project.
+This guide will help you get started with contributing to the Temper project.
 
 ## Code of Conduct
 
@@ -21,8 +21,8 @@ By participating in this project, you agree to abide by our [Code of Conduct](CO
 
 ```bash
 # Fork the repository
-git clone https://github.com/your-username/probot-repo-configurator.git
-cd probot-repo-configurator
+git clone https://github.com/your-username/temper.git
+cd temper
 
 # Install dependencies
 npm install
@@ -114,13 +114,13 @@ refactor/your-refactoring
 
 ```bash
 # Create a test repository
-gh repo create your-org/test-repo --private
+gh repo create pulseengine/test-repo --private
 
 # Verify configuration
-gh api repos/your-org/test-repo --jq '.allow_merge_commit, .allow_squash_merge, .allow_rebase_merge, .delete_branch_on_merge'
+gh api repos/pulseengine/test-repo --jq '.allow_merge_commit, .allow_squash_merge, .allow_rebase_merge, .delete_branch_on_merge'
 
 # Clean up
-gh repo delete your-org/test-repo --confirm
+gh repo delete pulseengine/test-repo --confirm
 ```
 
 ### Running Tests

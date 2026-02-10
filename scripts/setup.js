@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Bootstrap script for probot-repo-configurator.
+ * Bootstrap script for temper.
  *
  * Replaces placeholder values across all config/doc files with your
  * org-specific settings. Run once after cloning or forking the template.
@@ -51,7 +51,7 @@ function prompt(rl, question, defaultValue) {
 
 async function collectInteractive(defaults) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  console.log('\nProbot Repository Configurator - Setup\n');
+  console.log('\nTemper - Setup\n');
 
   const org = await prompt(rl, 'GitHub organization', defaults.org);
   const user = await prompt(rl, 'GitHub username (admin/reviewer)', defaults.user);
@@ -123,7 +123,7 @@ function applyReplacements({ org, user, email, repo }) {
 
   // README.md
   if (replaceInFile('README.md', [
-    [`YOUR-ORG/probot-repo-configurator`, `${repoFullName}`],
+    [`YOUR-ORG/temper`, `${repoFullName}`],
     [`YOUR-ORG/${repo}`, `${repoFullName}`],
     // Uncomment the CI badge if it was commented out
     ['<!-- [![CI]', '[![CI]'],
@@ -133,7 +133,7 @@ function applyReplacements({ org, user, email, repo }) {
 
   // package.json — update repo URLs and author
   if (replaceInFile('package.json', [
-    ['avrabe/probot-repo-configurator', repoFullName],
+    ['avrabe/temper', repoFullName],
     ['"author": "pulseengine"', `"author": "${org}"`],
     ['"author": ""', `"author": "${org}"`],
   ])) changed.push('package.json');
@@ -161,7 +161,7 @@ Options:
   --org <name>     GitHub organization name
   --user <name>    GitHub username (for CODEOWNERS, reviewers, admin)
   --email <addr>   Contact email (for Code of Conduct)
-  --repo <name>    Repository name (default: probot-repo-configurator)
+  --repo <name>    Repository name (default: temper)
   -h, --help       Show this help
 
 Examples:
@@ -176,7 +176,7 @@ Examples:
     org: args.org || '',
     user: args.user || '',
     email: args.email || '',
-    repo: args.repo || 'probot-repo-configurator',
+    repo: args.repo || 'temper',
   };
 
   // If all required args provided, skip interactive mode
@@ -195,7 +195,7 @@ Examples:
   }
 
   if (!values.repo) {
-    values.repo = 'probot-repo-configurator';
+    values.repo = 'temper';
   }
 
   const changed = applyReplacements(values);

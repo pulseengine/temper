@@ -14,7 +14,7 @@
 
 ```bash
 git clone <repo-url>
-cd probot-repo-configurator
+cd temper
 npm install
 ```
 
@@ -44,7 +44,7 @@ The app listens on `PORT` (default 3000) and exposes:
 ## Project Structure
 
 ```
-probot-repo-configurator/
+temper/
   index.js              Entry point; re-exports public API, boots Probot via run()
   functions.js          Convenience re-exports for external consumers
   config.yml            Declarative repository configuration (merge, protection, labels, etc.)
@@ -316,12 +316,12 @@ The `config.yml` file controls all behavior. Top-level sections:
 Build and run:
 
 ```bash
-docker build -t probot-repo-configurator .
+docker build -t temper .
 docker run -p 3000:3000 \
   -e APP_ID=123456 \
   -e PRIVATE_KEY="$(cat private-key.pem)" \
   -e WEBHOOK_SECRET=your-secret \
-  probot-repo-configurator
+  temper
 ```
 
 The Dockerfile uses a multi-stage build:

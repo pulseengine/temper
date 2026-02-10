@@ -94,7 +94,7 @@ describe('server boot', () => {
   });
 
   it('prints startup messages', () => {
-    expect(stdoutData).toContain('Starting Probot Repository Configurator');
+    expect(stdoutData).toContain('Starting Temper');
   });
 
   it('accepts HTTP connections', async () => {

@@ -1,7 +1,7 @@
-# Probot Repository Configurator
+# Temper
 
 <!-- Update the CI badge URL after forking to your own org/repo -->
-<!-- [![CI](https://github.com/YOUR-ORG/probot-repo-configurator/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR-ORG/probot-repo-configurator/actions/workflows/ci.yml) -->
+[![CI](https://github.com/pulseengine/temper/actions/workflows/ci.yml/badge.svg)](https://github.com/pulseengine/temper/actions/workflows/ci.yml)
 ![Node.js](https://img.shields.io/badge/node-%3E%3D20.11.0-brightgreen)
 
 A Probot v14 GitHub App that automatically configures repositories to match
@@ -36,8 +36,8 @@ repository in your GitHub organization.
 2. **Clone and bootstrap:**
 
    ```bash
-   git clone https://github.com/YOUR-ORG/probot-repo-configurator.git
-   cd probot-repo-configurator
+   git clone https://github.com/pulseengine/temper.git
+   cd temper
    npm install
    npm run setup    # interactive wizard to configure org, username, email
    ```

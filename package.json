@@ -1,7 +1,7 @@
 {
-  "name": "probot-repo-configurator",
+  "name": "temper",
   "version": "1.0.0",
-  "description": "GitHub App for automatic repository configuration using Probot",
+  "description": "Temper -- harden your GitHub org's repositories to spec",
   "type": "module",
   "main": "index.js",
   "scripts": {
@@ -11,7 +11,7 @@
     "lint": "eslint src/ index.js functions.js __tests__/",
     "build": "bazel build //...",
     "bazel:test": "bazel test //...",
-    "docker:build": "docker build -t probot-repo-configurator .",
+    "docker:build": "docker build -t temper .",
     "setup": "node scripts/setup.js"
   },
   "keywords": [
@@ -25,12 +25,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pulseengine/probot-repo-configurator.git"
+    "url": "https://github.com/pulseengine/temper.git"
   },
   "bugs": {
-    "url": "https://github.com/pulseengine/probot-repo-configurator/issues"
+    "url": "https://github.com/pulseengine/temper/issues"
   },
-  "homepage": "https://github.com/pulseengine/probot-repo-configurator#readme",
+  "homepage": "https://github.com/pulseengine/temper#readme",
   "dependencies": {
     "@octokit/rest": "^22.0.1",
     "helmet": "^8.1.0",

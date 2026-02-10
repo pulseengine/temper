@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2026-01-24
 
 ### Added
-- Initial release of Probot Repository Configurator
+- Initial release of Temper
 - Automatic repository configuration on creation
 - Merge settings management (rebase-only, delete branches)
 - Chatops support via `/configure-repo` command

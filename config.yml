@@ -1,7 +1,7 @@
-# Probot Repository Configurator Configuration
+# Temper Configuration
 
 # Organization to monitor
-organization: your-org
+organization: pulseengine
 
 # Target settings for repositories
 settings:
@@ -91,7 +91,7 @@ signed_commit_strategy:
   allow_merge_commits_for_signed: true
   temporary_rule_timeout: 3600000  # 1 hour in milliseconds
   admin_users:
-    - "your-github-username"
+    - "avrabe"
   # List of branches where this applies
   protected_branches:
     - "main"
@@ -120,9 +120,9 @@ dependabot:
       open-pull-requests-limit: 10
       target-branch: "main"
       reviewers:
-        - "your-github-username"
+        - "avrabe"
       assignees:
-        - "your-github-username"
+        - "avrabe"
       labels:
         - "dependencies"
         - "automation"
@@ -140,7 +140,7 @@ change_strategy:
   pr_title: "[Bot] Repository Configuration Update"
   pr_body: "This PR updates repository configuration to match organization standards."
   pr_reviewers:
-    - "your-github-username"
+    - "avrabe"
   pr_labels:
     - "automation"
     - "configuration"

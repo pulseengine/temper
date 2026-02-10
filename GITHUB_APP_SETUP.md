@@ -5,12 +5,12 @@
 ### Step 1: Create the GitHub App
 
 1. **Go to GitHub App Settings**
-   - Navigate to: https://github.com/organizations/YOUR_ORG/settings/apps
+   - Navigate to: https://github.com/organizations/pulseengine/settings/apps
    - Click "New GitHub App"
 
 2. **Fill in App Details**
-   - **GitHub App name**: `Probot Repository Configurator`
-   - **Homepage URL**: `https://github.com/YOUR_ORG/probot-repo-configurator`
+   - **GitHub App name**: `Temper`
+   - **Homepage URL**: `https://github.com/pulseengine/temper`
    - **Description**: `Automatically configures repositories with standard merge settings`
    - **Callback URL**: Leave empty (not needed for this app)
 
@@ -72,7 +72,7 @@ GITHUB_APP_ID=123456          # From GitHub App settings
 GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----..."  # Contents of .pem file
 GITHUB_WEBHOOK_SECRET=your_webhook_secret_here  # From webhook setup
 PORT=3000
-ORGANIZATION=your-org
+ORGANIZATION=pulseengine
 ```
 
 ### Step 7: Deploy the App
@@ -87,12 +87,12 @@ npm start
 
 #### Option B: Docker
 ```bash
-docker build -t probot-repo-configurator .
+docker build -t temper .
 docker run -p 3000:3000 \
   -e GITHUB_APP_ID=your_app_id \
   -e GITHUB_PRIVATE_KEY="$(cat private-key.pem)" \
   -e GITHUB_WEBHOOK_SECRET=your_webhook_secret \
-  probot-repo-configurator
+  temper
 ```
 
 ### Step 8: Verify the App
