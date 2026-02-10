@@ -33,12 +33,19 @@ repository in your GitHub organization.
    (Members, Metadata) permissions. Subscribe to `repository`, `issue_comment`,
    and `pull_request` events.
 
-2. **Clone and install:**
+2. **Clone and bootstrap:**
 
    ```bash
    git clone https://github.com/YOUR-ORG/probot-repo-configurator.git
    cd probot-repo-configurator
    npm install
+   npm run setup    # interactive wizard to configure org, username, email
+   ```
+
+   Or non-interactively:
+
+   ```bash
+   npm run setup -- --org myorg --user myuser --email me@example.com
    ```
 
 3. **Configure environment variables** -- copy `.env.example` to `.env` and fill in your values:

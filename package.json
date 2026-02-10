@@ -11,7 +11,8 @@
     "lint": "eslint src/ index.js functions.js __tests__/",
     "build": "bazel build //...",
     "bazel:test": "bazel test //...",
-    "docker:build": "docker build -t probot-repo-configurator ."
+    "docker:build": "docker build -t probot-repo-configurator .",
+    "setup": "node scripts/setup.js"
   },
   "keywords": [
     "github",
@@ -24,12 +25,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/avrabe/probot-repo-configurator.git"
+    "url": "https://github.com/pulseengine/probot-repo-configurator.git"
   },
   "bugs": {
-    "url": "https://github.com/avrabe/probot-repo-configurator/issues"
+    "url": "https://github.com/pulseengine/probot-repo-configurator/issues"
   },
-  "homepage": "https://github.com/avrabe/probot-repo-configurator#readme",
+  "homepage": "https://github.com/pulseengine/probot-repo-configurator#readme",
   "dependencies": {
     "@octokit/rest": "^22.0.1",
     "helmet": "^8.1.0",
