@@ -55,7 +55,7 @@ describe('server boot', () => {
   let port;
   let baseUrl;
   let stdoutData = '';
-  let stderrData = '';
+  let stderrData = ''; // eslint-disable-line no-unused-vars
 
   beforeAll(async () => {
     port = 30000 + Math.floor(Math.random() * 10000);

@@ -229,8 +229,8 @@ describe('E2E webhook simulation', () => {
   let serverProcess;
   let port;
   let baseUrl;
-  let stdoutData = '';
-  let stderrData = '';
+  let stdoutData = ''; // eslint-disable-line no-unused-vars
+  let stderrData = ''; // eslint-disable-line no-unused-vars
 
   beforeAll(async () => {
     port = 30000 + Math.floor(Math.random() * 10000);

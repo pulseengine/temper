@@ -283,7 +283,6 @@ describe('organization', () => {
         return Promise.resolve({ status: 200, data: {} });
       });
 
-      let paginateCallCount = 0;
       mockOctokit.paginate.mockImplementation((route) => {
         if (route === 'GET /orgs/{org}/repos') {
           return Promise.resolve(repos);
@@ -544,7 +543,6 @@ describe('organization', () => {
         return Promise.resolve({ status: 200, data: {} });
       });
 
-      let paginateCallIndex = 0;
       octokit.paginate.mockImplementation((route) => {
         if (route === 'GET /orgs/{org}/repos') {
           return Promise.resolve([repo]);

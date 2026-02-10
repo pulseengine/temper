@@ -52,7 +52,7 @@ jest.mock('../../src/logger.js', () => {
   };
 });
 
-import { registerApp, mapLegacyEnvVars, createCustomRoutesHandler, applySecurityHeaders } from '../../src/app.js';
+import { registerApp, mapLegacyEnvVars } from '../../src/app.js';
 import { _setConfigForTesting } from '../../src/config.js';
 import { configureRepository } from '../../src/repository.js';
 import {
