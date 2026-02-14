@@ -66,6 +66,11 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       return;
     }
 
+    if (!context.octokit) {
+      getLogger().warn('No context.octokit - skipping event');
+      return;
+    }
+
     const config = getConfig();
     const { repository, organization } = context.payload;
 
