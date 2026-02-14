@@ -357,7 +357,7 @@ function registerApp(app, { getRouter, addHandler } = {}) {
           owner,
           repo,
           issue_number: issueNumber,
-          body: '❌ You are not authorized to run this cmd.'
+          body: '❌ You are not authorized to run this command.'
         });
         return;
       }
