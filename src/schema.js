@@ -9,6 +9,14 @@ export function validateConfig(config) {
     errors.push('organization must be a non-empty string');
   }
 
+  if (config.bot_name !== undefined && typeof config.bot_name !== 'string') {
+    errors.push('bot_name must be a string');
+  }
+
+  if (config.allowed_command_users !== undefined && !Array.isArray(config.allowed_command_users)) {
+    errors.push('allowed_command_users must be an array');
+  }
+
   if (config.settings?.merge) {
     const merge = config.settings.merge;
     const boolFields = ['allow_merge_commit', 'allow_squash_merge', 'allow_rebase_merge', 'delete_branch_on_merge'];
