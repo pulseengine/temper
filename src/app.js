@@ -111,16 +111,31 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       return;
     }
 
-    const command = comment.body.trim();
+    const commandBody = comment.body.trim();
     const owner = repository.owner.login;
     const repo = repository.name;
     const issueNumber = context.payload.issue.number;
+    const senderLogin = sender.login;
+
+    // Extract command from either /command or @botname command format
+    let extractedCommand = commandBody;
+    const botName = config?.bot_name || 'temper';
+    const botMentionRegex = new RegExp(`^@${botName}\\[bot\\]\\s+(\\S+)`, 'i');
+    const mentionMatch = commandBody.match(botMentionRegex);
+    
+    if (mentionMatch) {
+      extractedCommand = '/' + mentionMatch[1];
+    }
+
+    // Check if user is allowed to run commands
+    const allowedUsers = config?.allowed_command_users || [];
+    const isAllowedUser = allowedUsers.length === 0 || allowedUsers.includes(senderLogin);
 
     const requireOrgMember = async () => {
       const isOrgMember = await checkOrganizationMembership(
         context.octokit,
         owner,
-        sender.login
+        senderLogin
       );
       if (!isOrgMember) {
         await context.octokit.issues.createComment({
@@ -134,8 +149,24 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       return true;
     };
 
-    if (command === '/configure-repo') {
-      if (!(await requireOrgMember())) {
+    const requireAllowedUser = async () => {
+      if (!isAllowedUser) {
+        await context.octokit.issues.createComment({
+          owner,
+          repo,
+          issue_number: issueNumber,
+          body: `❌ You are not authorized to use this command. Allowed users: ${allowedUsers.join(', ')}`
+        });
+        return false;
+      }
+      return true;
+    };
+
+    // Use extracted command (supports both /command and @botname command)
+    const cmd = extractedCommand;
+
+    if (cmd === '/configure-repo') {
+      if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
         return;
       }
 
@@ -154,8 +185,8 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       return;
     }
 
-    if (command === '/sync-all-repos') {
-      if (!(await requireOrgMember())) {
+    if (cmd === '/sync-all-repos') {
+      if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
         return;
       }
 
@@ -174,8 +205,8 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       return;
     }
 
-    if (command === '/check-config') {
-      if (!(await requireOrgMember())) {
+    if (cmd === '/check-config') {
+      if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
         return;
       }
 
@@ -190,8 +221,8 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       return;
     }
 
-    if (command === '/check-dependabot') {
-      if (!(await requireOrgMember())) {
+    if (cmd === '/check-dependabot') {
+      if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
         return;
       }
 
@@ -206,8 +237,8 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       return;
     }
 
-    if (command === '/fix-dependabot-labels') {
-      if (!(await requireOrgMember())) {
+    if (cmd === '/fix-dependabot-labels') {
+      if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
         return;
       }
 
@@ -238,8 +269,8 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       return;
     }
 
-    if (command === '/analyze-org') {
-      if (!(await requireOrgMember())) {
+    if (cmd === '/analyze-org') {
+      if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
         return;
       }
 
@@ -264,8 +295,8 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       return;
     }
 
-    if (command === '/check-merge-strategy') {
-      if (!(await requireOrgMember())) {
+    if (cmd === '/check-merge-strategy') {
+      if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
         return;
       }
 
@@ -299,7 +330,7 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       if (strategyCheck.hasSignedCommits) {
         response += `⚠️  This PR contains signed commits!\n\n`;
         response += `💡 **Recommendation:** Use merge commit to preserve signatures.\n`;
-        response += `Use command: /allow-merge-commit`;
+        response += `Use cmd: /allow-merge-commit`;
       } else {
         response += `✅ No signed commits detected.\n\n`;
         response += `💡 **Recommendation:** Current merge strategy is appropriate.`;
@@ -315,8 +346,8 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       return;
     }
 
-    if (command === '/allow-merge-commit') {
-      if (!(await requireOrgMember())) {
+    if (cmd === '/allow-merge-commit') {
+      if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
         return;
       }
 
@@ -326,7 +357,7 @@ function registerApp(app, { getRouter, addHandler } = {}) {
           owner,
           repo,
           issue_number: issueNumber,
-          body: '❌ You are not authorized to run this command.'
+          body: '❌ You are not authorized to run this cmd.'
         });
         return;
       }
@@ -363,8 +394,8 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       return;
     }
 
-    if (command === '/review-pr') {
-      if (!(await requireOrgMember())) {
+    if (cmd === '/review-pr') {
+      if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
         return;
       }
 

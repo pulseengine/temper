@@ -3,6 +3,13 @@
 # Organization to monitor
 organization: pulseengine
 
+# Bot mention name (without [bot] suffix - e.g., "temper" for @temper[bot])
+bot_name: temper
+
+# Users authorized to trigger commands (if empty, any org member can trigger)
+allowed_command_users:
+  - avrabe
+
 # Target settings for repositories
 settings:
   merge:
