@@ -107,7 +107,7 @@ function registerApp(app, { getRouter, addHandler } = {}) {
 
     const config = getConfig();
     const { comment, repository, sender } = context.payload;
-    if (!comment?.body) {
+    if (!comment?.body || !context.octokit) {
       return;
     }
 
