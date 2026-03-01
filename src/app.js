@@ -103,6 +103,7 @@ function registerApp(app, { getRouter, addHandler } = {}) {
   });
 
   app.on('issue_comment.created', async (context) => {
+    if (!context.octokit) { return; }
     if (context.log) setLogger(context.log);
     const deliveryId = context.id;
     if (deliveryId && isProcessed(deliveryId)) {
@@ -112,7 +113,8 @@ function registerApp(app, { getRouter, addHandler } = {}) {
 
     const config = getConfig();
     const { comment, repository, sender } = context.payload;
-    if (!comment?.body || !context.octokit) {
+
+    if (!comment?.body || !context.octokit?.issues) {
       return;
     }
 
@@ -168,6 +170,7 @@ function registerApp(app, { getRouter, addHandler } = {}) {
     };
 
     // Use extracted command (supports both /command and @botname command)
+    getLogger().info({ commandBody, extractedCommand, botName }, "Debug: command parsing");
     const cmd = extractedCommand;
 
     if (cmd === '/configure-repo') {
