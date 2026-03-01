@@ -17,6 +17,7 @@ settings:
     allow_squash_merge: true
     allow_rebase_merge: false
     delete_branch_on_merge: true
+    allow_auto_merge: true
 
 forks:
   merge:
@@ -38,6 +39,13 @@ branch_protection:
     allow_force_pushes: false
     allow_deletions: false
     require_signed_commits: true
+
+auto_merge:
+  enabled: true
+  on_dependabot: true
+  on_bot_users:
+    - thrum
+  merge_method: squash
 
 issue_labels:
   - name: "bug"

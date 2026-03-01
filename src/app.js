@@ -449,7 +449,52 @@ function registerApp(app, { getRouter, addHandler } = {}) {
     }
   });
 
-  // Add health check endpoint with queue stats
+
+  // Auto-merge for Dependabot and bot PRs
+  app.on('pull_request.opened', async (context) => {
+    if (context.log) setLogger(context.log);
+    const config = getConfig();
+    const autoMerge = config?.auto_merge;
+    if (!autoMerge?.enabled) return;
+
+    const pr = context.payload.pull_request;
+    const sender = context.payload.sender?.login || "";
+    const owner = context.payload.repository.owner.login;
+    const repo = context.payload.repository.name;
+
+    const isDependabot = sender === "dependabot[bot]" && autoMerge.on_dependabot;
+    const isBotUser = (autoMerge.on_bot_users || []).some(
+      bot => sender === bot || sender === bot + "[bot]"
+    );
+
+    if (!isDependabot && !isBotUser) return;
+
+    const mergeMethod = autoMerge.merge_method || "squash";
+    getLogger().info({ pr: pr.number, sender, mergeMethod }, "Enabling auto-merge");
+
+    try {
+      // GitHub GraphQL is needed for enablePullRequestAutoMerge
+      const query = `mutation($prId: ID!, $mergeMethod: PullRequestMergeMethod!) {
+        enablePullRequestAutoMerge(input: {
+          pullRequestId: $prId,
+          mergeMethod: $mergeMethod
+        }) {
+          pullRequest { number }
+        }
+      }`;
+
+      await context.octokit.graphql(query, {
+        prId: pr.node_id,
+        mergeMethod: mergeMethod.toUpperCase()
+      });
+
+      getLogger().info({ pr: pr.number }, "Auto-merge enabled");
+    } catch (err) {
+      getLogger().warn({ pr: pr.number, err: err.message }, "Could not enable auto-merge");
+    }
+  });
+
+    // Add health check endpoint with queue stats
   if (getRouter) {
     const router = getRouter('/');
 
