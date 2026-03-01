@@ -1,3 +1,4 @@
+import { createDashboardHandler } from './dashboard.js';
 import { getConfig } from './config.js';
 import { getLogger, setLogger } from './logger.js';
 import { configureRepository } from './repository.js';
@@ -454,6 +455,7 @@ function registerApp(app, { getRouter, addHandler } = {}) {
 
     applySecurityMiddleware(router);
 
+
     router.get('/health', (req, res) => {
       res.status(200).json({
         status: 'healthy',
@@ -471,6 +473,7 @@ function registerApp(app, { getRouter, addHandler } = {}) {
     });
   } else if (addHandler) {
     addHandler(createCustomRoutesHandler());
+    addHandler(createDashboardHandler());
   }
 
   app.onError((error) => {
