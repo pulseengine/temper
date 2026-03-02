@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v5.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -11,24 +11,18 @@ repos:
       - id: check-case-conflict
       - id: check-added-large-files
       - id: detect-private-key
-  - repo: https://github.com/pre-commit/mirrors-prettier
-    rev: v3.1.0
-    hooks:
-      - id: prettier
-        additional_dependencies:
-          - prettier@3.2.5
-        files: "\\.(js|json|md|yml|yaml)$"
+        exclude: "(__tests__/fixtures/|GITHUB_APP_SETUP\\.md|DEVELOPMENT\\.md)"
   - repo: local
     hooks:
       - id: eslint
         name: eslint
-        entry: npx eslint --max-warnings=0
+        entry: npx eslint --quiet
         language: system
         types: [javascript]
         files: "\\.(js|mjs|cjs)$"
-      - id: tests
-        name: tests (optional)
-        entry: npx jest --config jest.config.cjs --passWithNoTests --bail
+      - id: jest
+        name: jest
+        entry: npx jest --config jest.config.cjs --bail --passWithNoTests
         language: system
         pass_filenames: false
-        stages: [manual]
+        stages: [pre-push]

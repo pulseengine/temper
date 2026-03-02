@@ -137,4 +137,3 @@ export function validateConfig(config) {
 
   return { valid: errors.length === 0, errors };
 }
-

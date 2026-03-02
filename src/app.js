@@ -162,7 +162,7 @@ function registerApp(app, { getRouter, addHandler } = {}) {
     const botName = config?.bot_name || 'temper';
     const botMentionRegex = new RegExp(`^@${botName}\\[bot\\]\\s+(\\S+)`, 'i');
     const mentionMatch = commandBody.match(botMentionRegex);
-    
+
     if (mentionMatch) {
       extractedCommand = '/' + mentionMatch[1];
     }

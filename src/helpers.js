@@ -18,4 +18,3 @@ export function getDefaultBranch(repoInfo) {
 export function isForkRepo(repoInfo) {
   return Boolean(repoInfo?.fork);
 }
-

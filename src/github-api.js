@@ -102,4 +102,3 @@ export async function createConfigurationPR(octokit, owner, repo, filePath, file
     throw error;
   }
 }
-
