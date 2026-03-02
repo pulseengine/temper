@@ -1703,16 +1703,18 @@ describe('ai-review', () => {
       storeReview({ repo: 'owner/repo', prNumber: 1, status: 'open' });
       storeReview({ repo: 'owner/repo', prNumber: 2, status: 'open' });
       updateReviewStatus('owner/repo', 1, 'merged');
-      expect(getReviews()[0].status).toBe('merged');
-      expect(getReviews()[1].status).toBe('open');
+      // getReviews() returns newest-first, so [0] is prNumber:2, [1] is prNumber:1
+      expect(getReviews()[0].status).toBe('open');
+      expect(getReviews()[1].status).toBe('merged');
     });
 
     it('does not update reviews for different repo', () => {
       storeReview({ repo: 'owner/repo-a', prNumber: 1, status: 'open' });
       storeReview({ repo: 'owner/repo-b', prNumber: 1, status: 'open' });
       updateReviewStatus('owner/repo-a', 1, 'closed');
-      expect(getReviews()[0].status).toBe('closed');
-      expect(getReviews()[1].status).toBe('open');
+      // getReviews() returns newest-first, so [0] is repo-b, [1] is repo-a
+      expect(getReviews()[0].status).toBe('open');
+      expect(getReviews()[1].status).toBe('closed');
     });
 
     it('returns 0 when no reviews match', () => {

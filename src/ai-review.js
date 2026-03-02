@@ -427,8 +427,28 @@ function storeReview(entry) {
   saveReviews();
 }
 
-function getReviews() {
-  return _reviews;
+function getReviews(opts = {}) {
+  const { limit, offset = 0 } = typeof opts === 'object' ? opts : {};
+  // Newest-first
+  const sorted = [..._reviews].reverse();
+  if (limit !== undefined && limit !== null) return sorted.slice(offset, offset + limit);
+  return sorted;
+}
+
+function getReviewStats() {
+  const now = Date.now();
+  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+  let total = 0, approve = 0, minor = 0, major = 0, unknown = 0, thisWeek = 0, totalFindings = 0;
+  for (const r of _reviews) {
+    total++;
+    if (r.assessment === 'approve') approve++;
+    else if (r.assessment === 'minor') minor++;
+    else if (r.assessment === 'major') major++;
+    else unknown++;
+    if (r.timestamp && new Date(r.timestamp).getTime() > weekAgo) thisWeek++;
+    totalFindings += r.findings || 0;
+  }
+  return { total, approve, minor, major, unknown, thisWeek, avgFindings: total ? +(totalFindings / total).toFixed(1) : 0 };
 }
 
 /**
@@ -470,6 +490,7 @@ export {
   supersedePreviousReviews,
   storeReview,
   getReviews,
+  getReviewStats,
   updateReviewStatus,
   _reviewTimestamps,
   _resetReviews,
