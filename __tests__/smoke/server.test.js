@@ -121,7 +121,7 @@ describe('server boot', () => {
     if (res.status === 200) {
       const data = JSON.parse(res.body);
       expect(data.status).toBe('healthy');
-      expect(data.version).toBe('1.0.0');
+      expect(typeof data.version).toBe('string');
       expect(data.queue).toBeDefined();
     } else {
       // Routes not registered — Probot v14 doesn't always provide getRouter

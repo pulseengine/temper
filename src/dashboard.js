@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process';
 import { getConfig } from './config.js';
 import { getLogger } from './logger.js';
 import { analyzeOrganizationRepositories, synchronizeAllRepositories, generateOrganizationAnalysisReport } from './organization.js';
@@ -406,6 +407,113 @@ function renderReviewsPartial() {
   return rows;
 }
 
+// ── Deployment partial ───────────────────────────────────────────────
+
+async function renderDeploymentPartial() {
+  const config = getConfig();
+  const org = config?.organization;
+
+  // Local deploy info always renders — no API needed
+  const startedAgo = timeAgo(DEPLOY_TIME);
+  let html = '<div class="stat-grid">' +
+    '<div class="stat-card"><div class="stat-label">Deployed SHA</div>' +
+      '<div class="stat-value" style="font-size:1.1rem;font-family:inherit">' + esc(DEPLOY_SHA) + '</div>' +
+      '<div class="stat-sub">started ' + esc(startedAgo) + ' ago</div></div>';
+
+  // API-dependent section
+  let mainSha = null;
+  let behindBy = 0;
+  let branches = [];
+  try {
+    const octokit = await getOctokit();
+    const selfRepo = config?.selfRepoName || 'temper';
+
+    // Get main branch HEAD
+    const { data: mainBranch } = await octokit.repos.getBranch({ owner: org, repo: selfRepo, branch: 'main' });
+    mainSha = mainBranch.commit.sha.slice(0, 7);
+    const mainShaFull = mainBranch.commit.sha;
+
+    // Compare to find drift
+    let compareData = null;
+    if (DEPLOY_SHA_FULL !== 'unknown') {
+      try {
+        const { data } = await octokit.repos.compareCommits({ owner: org, repo: selfRepo, base: DEPLOY_SHA_FULL, head: mainShaFull });
+        compareData = data;
+        behindBy = data.ahead_by || 0;
+      } catch (cmpErr) {
+        if (cmpErr.status === 404) {
+          compareData = { error: 'Deployed SHA not found in repo history (force-pushed?)' };
+        } else { throw cmpErr; }
+      }
+    }
+
+    // Main HEAD card
+    const driftBadge = behindBy > 0 ? badge('warn', behindBy + ' behind') : badge('ok', 'up to date');
+    html += '<div class="stat-card"><div class="stat-label">Main HEAD</div>' +
+      '<div class="stat-value" style="font-size:1.1rem;font-family:inherit">' + esc(mainSha) + '</div>' +
+      '<div class="stat-sub">' + driftBadge + '</div></div>';
+
+    // Branch count
+    const { data: branchList } = await octokit.repos.listBranches({ owner: org, repo: selfRepo, per_page: 100 });
+    branches = branchList;
+    html += '<div class="stat-card"><div class="stat-label">Branches</div>' +
+      '<div class="stat-value">' + branches.length + '</div>' +
+      '<div class="stat-sub">remote</div></div>';
+
+    html += '</div>'; // close stat-grid
+
+    // Commits table (when behind)
+    if (compareData && !compareData.error && behindBy > 0) {
+      const commits = (compareData.commits || []).slice(-10).reverse();
+      html += '<div class="section-header" style="margin-top:1rem">Commits on main since deploy (' + behindBy + ')</div>' +
+        '<div class="table-wrap"><table><thead><tr>' +
+          '<th>SHA</th><th>Message</th><th>Author</th><th>Age</th>' +
+        '</tr></thead><tbody>';
+      for (const c of commits) {
+        const sha7 = c.sha.slice(0, 7);
+        const msg = (c.commit.message || '').split('\n')[0];
+        const author = c.commit.author?.name || c.author?.login || '';
+        const age = timeAgo(c.commit.author?.date);
+        html += '<tr>' +
+          '<td><a href="' + esc(c.html_url) + '" target="_blank">' + esc(sha7) + '</a></td>' +
+          '<td>' + esc(msg.length > 72 ? msg.slice(0, 72) + '...' : msg) + '</td>' +
+          '<td>' + esc(author) + '</td>' +
+          '<td class="dim">' + esc(age) + '</td>' +
+        '</tr>';
+      }
+      html += '</tbody></table></div>';
+    } else if (compareData && compareData.error) {
+      html += '<div class="alert" style="margin-top:1rem;color:var(--dim);background:var(--surface);border:1px solid var(--border)">' + esc(compareData.error) + '</div>';
+    }
+
+    // Branch list table
+    if (branches.length > 0) {
+      html += '<div class="section-header" style="margin-top:1rem">Remote Branches</div>' +
+        '<div class="table-wrap"><table><thead><tr>' +
+          '<th>Branch</th><th>Last Commit</th><th>Info</th>' +
+        '</tr></thead><tbody>';
+      for (const b of branches) {
+        const sha7 = b.commit.sha.slice(0, 7);
+        const badges = [];
+        if (b.name === 'main') badges.push(badge('info', 'default'));
+        if (b.commit.sha === DEPLOY_SHA_FULL) badges.push(badge('ok', 'deployed'));
+        html += '<tr>' +
+          '<td>' + esc(b.name) + '</td>' +
+          '<td style="font-family:inherit">' + esc(sha7) + '</td>' +
+          '<td>' + (badges.length ? badges.join(' ') : '') + '</td>' +
+        '</tr>';
+      }
+      html += '</tbody></table></div>';
+    }
+  } catch (err) {
+    html += '</div>'; // close stat-grid in case API failed mid-render
+    getLogger().warn({ err }, 'Deployment partial API error');
+    html += '<div class="alert" style="margin-top:0.75rem;color:var(--dim);background:var(--surface);border:1px solid var(--border)">Could not fetch remote info: ' + esc(err.message) + '</div>';
+  }
+
+  return html;
+}
+
 // ── Full reviews partial (for dedicated Reviews tab) ─────────────────
 
 function reviewAssessmentBadge(a) {
@@ -570,6 +678,11 @@ const dashModuleDir = dirname(dashModuleFile);
 const CLIENT_JS = readFileSync(join(dashModuleDir, 'dashboard-client.js'), 'utf8');
 const HTMX_JS = readFileSync(join(dashModuleDir, 'htmx.min.js'), 'utf8');
 const IDIOMORPH_JS = readFileSync(join(dashModuleDir, 'idiomorph-ext.min.js'), 'utf8');
+
+// ── Deploy info (captured once at startup) ──────────────────────────
+export const DEPLOY_SHA = (() => { try { return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: dashModuleDir, encoding: 'utf8' }).trim(); } catch { return 'unknown'; } })();
+const DEPLOY_SHA_FULL = (() => { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dashModuleDir, encoding: 'utf8' }).trim(); } catch { return 'unknown'; } })();
+const DEPLOY_TIME = new Date().toISOString();
 
 // ── CSS ──────────────────────────────────────────────────────────────
 const CSS = `
@@ -1067,6 +1180,10 @@ function renderDashboardPage() {
       '<div id="summary-section" hx-get="/dashboard/partials/summary" hx-trigger="load, every 600s" hx-swap="morph:innerHTML" hx-indicator="#poll-indicator">' +
         '<div style="text-align:center;padding:3rem"><span class="spinner"></span></div>' +
       '</div>' +
+      '<div class="section-header">Deployment</div>' +
+      '<div id="deployment-section" hx-get="/dashboard/partials/deployment" hx-trigger="load, every 600s" hx-swap="morph:innerHTML" hx-indicator="#poll-indicator">' +
+        '<div style="text-align:center;padding:2rem"><span class="spinner"></span></div>' +
+      '</div>' +
       '<div class="section-header">Active Pull Requests</div>' +
       '<div id="overview-prs" hx-get="/dashboard/partials/prs" hx-trigger="load, every 600s" hx-swap="morph:innerHTML" hx-indicator="#poll-indicator">' +
         '<div style="text-align:center;padding:2rem"><span class="spinner"></span></div>' +
@@ -1229,6 +1346,11 @@ export function createDashboardHandler() {
     if (req.method === 'GET' && path === '/dashboard/partials/issues') {
       try { sendHtml(res, 200, renderIssuesPartial(await fetchOrgData())); }
       catch (err) { getLogger().error({err},'Dashboard issues error'); sendHtml(res, 200, renderError(err)); }
+      return true;
+    }
+    if (req.method === 'GET' && path === '/dashboard/partials/deployment') {
+      try { sendHtml(res, 200, await renderDeploymentPartial()); }
+      catch (err) { getLogger().error({err},'Dashboard deployment error'); sendHtml(res, 200, renderError(err)); }
       return true;
     }
 

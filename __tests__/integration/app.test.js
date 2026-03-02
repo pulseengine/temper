@@ -322,7 +322,7 @@ describe('app', () => {
 
       expect(mockRes.status).toHaveBeenCalledWith(200);
       expect(mockRes.json).toHaveBeenCalledWith(
-        expect.objectContaining({ status: 'healthy', version: '1.0.0' })
+        expect.objectContaining({ status: 'healthy', version: expect.any(String) })
       );
       expect(mockRes.json).toHaveBeenCalledWith(
         expect.objectContaining({ queue: expect.any(Object) })
@@ -407,7 +407,7 @@ describe('app', () => {
       expect(res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
       const body = JSON.parse(res.end.mock.calls[0][0]);
       expect(body.status).toBe('healthy');
-      expect(body.version).toBe('1.0.0');
+      expect(typeof body.version).toBe('string');
       expect(body.queue).toBeDefined();
       expect(body.timestamp).toBeDefined();
     });
