@@ -16,6 +16,9 @@ module.exports = {
   collectCoverageFrom: [
     'src/**/*.js',
     '!src/dashboard.js',
+    '!src/dashboard-client.js',
+    '!src/htmx.min.js',
+    '!src/idiomorph-ext.min.js',
     'index.js',
     '!**/node_modules/**'
   ],
