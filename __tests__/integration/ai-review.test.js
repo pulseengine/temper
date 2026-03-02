@@ -27,6 +27,7 @@ import {
   supersedePreviousReviews,
   storeReview,
   getReviews,
+  getReviewStats,
   updateReviewStatus,
   _reviewTimestamps,
   _resetReviews,
@@ -1721,6 +1722,103 @@ describe('ai-review', () => {
       storeReview({ repo: 'owner/repo', prNumber: 1, status: 'open' });
       const updated = updateReviewStatus('owner/other', 99, 'merged');
       expect(updated).toBe(0);
+    });
+  });
+
+  // =========================================================================
+  // getReviews pagination
+  // =========================================================================
+
+  describe('getReviews pagination', () => {
+    beforeEach(() => _resetReviews());
+
+    it('returns newest-first by default', () => {
+      storeReview({ repo: 'a/b', prNumber: 1 });
+      storeReview({ repo: 'a/b', prNumber: 2 });
+      storeReview({ repo: 'a/b', prNumber: 3 });
+      const reviews = getReviews();
+      expect(reviews.map(r => r.prNumber)).toEqual([3, 2, 1]);
+    });
+
+    it('limits results with { limit }', () => {
+      storeReview({ repo: 'a/b', prNumber: 1 });
+      storeReview({ repo: 'a/b', prNumber: 2 });
+      storeReview({ repo: 'a/b', prNumber: 3 });
+      const reviews = getReviews({ limit: 2 });
+      expect(reviews).toHaveLength(2);
+      expect(reviews.map(r => r.prNumber)).toEqual([3, 2]);
+    });
+
+    it('paginates with { limit, offset }', () => {
+      storeReview({ repo: 'a/b', prNumber: 1 });
+      storeReview({ repo: 'a/b', prNumber: 2 });
+      storeReview({ repo: 'a/b', prNumber: 3 });
+      const page = getReviews({ limit: 2, offset: 2 });
+      expect(page).toHaveLength(1);
+      expect(page[0].prNumber).toBe(1);
+    });
+
+    it('returns empty array when offset exceeds length', () => {
+      storeReview({ repo: 'a/b', prNumber: 1 });
+      expect(getReviews({ limit: 10, offset: 100 })).toEqual([]);
+    });
+
+    it('returns all reviews when no options given', () => {
+      storeReview({ repo: 'a/b', prNumber: 1 });
+      storeReview({ repo: 'a/b', prNumber: 2 });
+      expect(getReviews()).toHaveLength(2);
+    });
+  });
+
+  // =========================================================================
+  // getReviewStats
+  // =========================================================================
+
+  describe('getReviewStats', () => {
+    beforeEach(() => _resetReviews());
+
+    it('returns zeros when no reviews exist', () => {
+      const stats = getReviewStats();
+      expect(stats).toEqual({
+        total: 0, approve: 0, minor: 0, major: 0, unknown: 0,
+        thisWeek: 0, avgFindings: 0
+      });
+    });
+
+    it('counts verdicts correctly', () => {
+      storeReview({ assessment: 'approve', findings: 0 });
+      storeReview({ assessment: 'approve', findings: 1 });
+      storeReview({ assessment: 'minor', findings: 2 });
+      storeReview({ assessment: 'major', findings: 5 });
+      storeReview({ assessment: 'something-else', findings: 0 });
+      const stats = getReviewStats();
+      expect(stats.total).toBe(5);
+      expect(stats.approve).toBe(2);
+      expect(stats.minor).toBe(1);
+      expect(stats.major).toBe(1);
+      expect(stats.unknown).toBe(1);
+    });
+
+    it('computes average findings', () => {
+      storeReview({ findings: 2 });
+      storeReview({ findings: 4 });
+      storeReview({ findings: 6 });
+      expect(getReviewStats().avgFindings).toBe(4);
+    });
+
+    it('counts reviews from this week', () => {
+      const now = new Date().toISOString();
+      const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+      storeReview({ timestamp: now });
+      storeReview({ timestamp: now });
+      storeReview({ timestamp: twoWeeksAgo });
+      expect(getReviewStats().thisWeek).toBe(2);
+    });
+
+    it('handles reviews with no findings field', () => {
+      storeReview({ assessment: 'approve' });
+      storeReview({ assessment: 'minor' });
+      expect(getReviewStats().avgFindings).toBe(0);
     });
   });
 });
