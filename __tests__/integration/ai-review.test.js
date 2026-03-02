@@ -397,6 +397,23 @@ describe('ai-review', () => {
       expect(result).toContain('`aaaaaaa`');
       expect(result).not.toContain('a'.repeat(40));
     });
+
+    it('includes repo and branch metadata when provided', () => {
+      const result = formatReviewComment('review', 42, 'abc1234', {
+        baseRepo: 'pulseengine/temper',
+        baseBranch: 'main',
+        headRepo: 'contributor/temper',
+        headBranch: 'fix/bug',
+      });
+      expect(result).toContain('contributor/temper:`fix/bug`');
+      expect(result).toContain('pulseengine/temper:`main`');
+      expect(result).toContain('→');
+    });
+
+    it('omits branch line when meta is not provided', () => {
+      const result = formatReviewComment('review', 1);
+      expect(result).not.toContain('→');
+    });
   });
 
   // =========================================================================
