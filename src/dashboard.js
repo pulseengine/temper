@@ -5,7 +5,7 @@ import { checkDependabotConfiguration, checkExistingDependabotConfig, fixDependa
 import { generateConfigurationReport } from './reporting.js';
 import { createAppAuth } from '@octokit/auth-app';
 import { Octokit } from '@octokit/rest';
-import { getReviews, reviewPullRequest } from './ai-review.js';
+import { getReviews, getReviewStats, reviewPullRequest } from './ai-review.js';
 
 // ── Cache ────────────────────────────────────────────────────────────
 const cache = { data: null, timestamp: 0 };
@@ -375,7 +375,7 @@ function renderIssuesPartial(data) {
 // ── AI Reviews partial ───────────────────────────────────────────────
 function renderReviewsPartial() {
   let reviews;
-  try { reviews = getReviews(15); } catch { reviews = []; }
+  try { reviews = getReviews({ limit: 15 }); } catch { reviews = []; }
   if (reviews.length === 0) {
     return '<div class="alert" style="color:var(--dim);background:var(--surface);border:1px solid var(--border)">No AI reviews yet. Reviews are triggered automatically on PR open/sync, or manually via <span style="color:var(--accent)">/review-pr</span> command.</div>';
   }
@@ -407,15 +407,108 @@ function renderReviewsPartial() {
 }
 
 // ── Full reviews partial (for dedicated Reviews tab) ─────────────────
-function renderReviewsFullPartial() {
-  let reviews;
-  try { reviews = getReviews(50); } catch { reviews = []; }
 
-  const reviewCount = reviews.length;
-  // Inject badge count update
-  const badgeScript = `<span data-metric="reviews" style="display:none">${reviewCount}</span>`;
+function reviewAssessmentBadge(a) {
+  if (a === 'approve') return badge('ok', 'approve');
+  if (a === 'minor') return badge('warn', 'minor');
+  if (a === 'major') return badge('err', 'major');
+  return badge('muted', 'no verdict');
+}
 
-  if (reviews.length === 0) {
+function reviewVerdictIcon(a) {
+  if (a === 'approve') return '<span class="verdict-icon verdict-approve">&#10003;</span>';
+  if (a === 'minor') return '<span class="verdict-icon verdict-minor">&#9888;</span>';
+  if (a === 'major') return '<span class="verdict-icon verdict-major">&#10007;</span>';
+  return '<span class="verdict-icon verdict-unknown">?</span>';
+}
+
+function renderReviewStatsBanner(stats) {
+  const cards = [
+    { label: 'Total', value: stats.total, cls: '' },
+    { label: 'Approved', value: stats.approve, cls: 'stat-green' },
+    { label: 'Minor', value: stats.minor, cls: 'stat-yellow' },
+    { label: 'Major', value: stats.major, cls: 'stat-red' },
+    { label: 'This Week', value: stats.thisWeek, cls: '' },
+    { label: 'Avg Findings', value: stats.avgFindings, cls: '' },
+  ];
+  const inner = cards.map(c =>
+    '<div class="stat-card' + (c.cls ? ' ' + c.cls : '') + '">' +
+      '<div class="stat-value">' + c.value + '</div>' +
+      '<div class="stat-label">' + c.label + '</div>' +
+    '</div>'
+  ).join('');
+  return '<div class="reviews-stats-banner">' + inner + '</div>';
+}
+
+function renderReviewRowPair(r) {
+  const id = esc(r.id || (r.repo + '-' + r.pr + '-' + r.timestamp));
+  const findingsTag = r.findings > 0
+    ? ' ' + badge(r.findings > 2 ? 'err' : 'warn', r.findings + ' finding' + (r.findings !== 1 ? 's' : ''))
+    : '';
+  const repoShort = (r.repo || '').split('/').pop();
+
+  const dataRow =
+    '<tr class="review-row" data-review-id="' + id + '">' +
+      '<td>' + reviewVerdictIcon(r.assessment) + '</td>' +
+      '<td>' + esc(repoShort) + '</td>' +
+      '<td><a href="' + esc(r.url || '#') + '" target="_blank">#' + r.pr + '</a></td>' +
+      '<td class="review-row-title">' + esc(r.title || '') + '</td>' +
+      '<td>' + reviewAssessmentBadge(r.assessment) + findingsTag + '</td>' +
+      '<td>' + (r.findings || 0) + '</td>' +
+      '<td>' + esc(r.author || '') + '</td>' +
+      '<td class="dim">' + esc(timeAgo(r.timestamp)) + '</td>' +
+    '</tr>';
+
+  const detailRow =
+    '<tr class="review-detail-row" data-pair-of="' + id + '" style="display:none">' +
+      '<td colspan="8">' +
+        '<div class="review-detail-inner">' +
+          '<div class="review-detail-summary"><strong>Summary:</strong> ' + esc(r.summary || 'No summary available') + '</div>' +
+          '<div class="review-detail-body">' + (r.body || '<em>No review body stored</em>') + '</div>' +
+          '<div class="review-detail-actions">' +
+            '<div class="review-retrigger">' +
+              '<input class="filter-input" id="review-instructions-' + esc(r.repo) + '-' + r.pr +
+                '" placeholder="extra instructions (e.g. focus on security)" style="flex:1" />' +
+              '<button class="cmd-btn" onclick="triggerReview(\'' + esc(r.repo) + '\',' + r.pr + ')">RE-REVIEW</button>' +
+            '</div>' +
+            '<div class="review-action-status" id="review-status-' + esc(r.repo) + '-' + r.pr + '"></div>' +
+          '</div>' +
+        '</div>' +
+      '</td>' +
+    '</tr>';
+
+  return dataRow + detailRow;
+}
+
+function renderReviewsTable(reviews) {
+  const headers =
+    '<thead><tr>' +
+      '<th data-sort="">V</th>' +
+      '<th data-sort="">Repo</th>' +
+      '<th data-sort="">PR</th>' +
+      '<th data-sort="">Title</th>' +
+      '<th data-sort="">Assessment</th>' +
+      '<th data-sort="">Findings</th>' +
+      '<th data-sort="">Author</th>' +
+      '<th data-sort="">Age</th>' +
+    '</tr></thead>';
+
+  const rows = reviews.map(renderReviewRowPair).join('');
+
+  return '<div class="table-wrap"><table id="reviews-table">' + headers + '<tbody>' + rows + '</tbody></table></div>';
+}
+
+function renderReviewsFullPartial(url) {
+  const params = new URL(url || 'http://x/', 'http://x').searchParams;
+  const limit = parseInt(params.get('limit')) || 25;
+  const offset = parseInt(params.get('offset')) || 0;
+
+  let stats;
+  try { stats = getReviewStats(); } catch { stats = { total: 0, approve: 0, minor: 0, major: 0, unknown: 0, thisWeek: 0, avgFindings: 0 }; }
+
+  const badgeScript = '<span data-metric="reviews" style="display:none">' + stats.total + '</span>';
+
+  if (stats.total === 0) {
     return badgeScript +
       '<div class="empty-state">' +
         '<div class="empty-icon">&#9776;</div>' +
@@ -425,62 +518,47 @@ function renderReviewsFullPartial() {
       '</div>';
   }
 
-  const assessmentBadge = (a) => {
-    if (a === 'approve') return badge('ok', 'approve');
-    if (a === 'minor') return badge('warn', 'minor');
-    if (a === 'major') return badge('err', 'major');
-    return badge('muted', 'no verdict');
-  };
+  let reviews;
+  try { reviews = getReviews({ limit, offset }); } catch { reviews = []; }
 
-  const assessmentIcon = (a) => {
-    if (a === 'approve') return '<span class="verdict-icon verdict-approve">&#10003;</span>';
-    if (a === 'minor') return '<span class="verdict-icon verdict-minor">&#9888;</span>';
-    if (a === 'major') return '<span class="verdict-icon verdict-major">&#10007;</span>';
-    return '<span class="verdict-icon verdict-unknown">?</span>';
-  };
+  const hasMore = (offset + limit) < stats.total;
+  const nextOffset = offset + limit;
+  const loadMoreBtn = hasMore
+    ? '<div class="reviews-load-more">' +
+        '<button class="cmd-btn-ghost" id="reviews-load-more-btn" ' +
+          'hx-get="/dashboard/partials/reviews-more?limit=' + limit + '&offset=' + nextOffset + '" ' +
+          'hx-target="#reviews-table tbody" hx-swap="beforeend" hx-indicator="#poll-indicator">' +
+          'Load more (' + (stats.total - nextOffset) + ' remaining)</button>' +
+      '</div>'
+    : '';
 
-  const rows = reviews.map(r => {
-    const findingsTag = r.findings > 0
-      ? ' ' + badge(r.findings > 2 ? 'err' : 'warn', r.findings + ' finding' + (r.findings !== 1 ? 's' : ''))
-      : '';
-    const id = esc(r.id || `${r.repo}-${r.pr}-${r.timestamp}`);
+  return badgeScript + renderReviewStatsBanner(stats) + renderReviewsTable(reviews) + loadMoreBtn;
+}
 
-    return '<div class="review-entry" data-review-filter="' + esc((r.repo || '') + ' ' + (r.title || '') + ' ' + (r.assessment || '') + ' ' + (r.author || '')) + '">' +
-      // Header row (always visible)
-      '<div class="review-entry-header" onclick="toggleReviewDetail(\'' + id + '\')">' +
-        assessmentIcon(r.assessment) +
-        '<div class="review-entry-info">' +
-          '<div class="review-entry-title">' +
-            '<a href="' + esc(r.url || '#') + '" target="_blank" onclick="event.stopPropagation()">' + esc(r.repo) + ' #' + r.pr + '</a> ' +
-            assessmentBadge(r.assessment) + findingsTag +
-          '</div>' +
-          '<div class="review-entry-subtitle">' + esc(r.title || '') + '</div>' +
-        '</div>' +
-        '<div class="review-entry-meta">' +
-          '<span class="dim">' + esc(r.model || '') + '</span>' +
-          '<span class="dim">' + esc(timeAgo(r.timestamp)) + ' ago</span>' +
-        '</div>' +
-        '<span class="review-chevron">&#9660;</span>' +
-      '</div>' +
-      // Detail (collapsed by default)
-      '<div class="review-detail" id="review-detail-' + id + '">' +
-        '<div class="review-detail-summary">' +
-          '<strong>Summary:</strong> ' + esc(r.summary || 'No summary available') +
-        '</div>' +
-        '<div class="review-detail-body">' + (r.body || '<em>No review body stored</em>') + '</div>' +
-        '<div class="review-detail-actions">' +
-          '<div class="review-retrigger">' +
-            '<input class="filter-input" id="review-instructions-' + esc(r.repo) + '-' + r.pr +
-              '" placeholder="extra instructions (e.g. focus on security)" style="flex:1" />' +
-            '<button class="cmd-btn" onclick="triggerReview(\'' + esc(r.repo) + '\',' + r.pr + ')">RE-REVIEW</button>' +
-          '</div>' +
-          '<div class="review-action-status" id="review-status-' + esc(r.repo) + '-' + r.pr + '"></div>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-  }).join('');
+function renderReviewsMorePartial(url) {
+  const params = new URL(url || 'http://x/', 'http://x').searchParams;
+  const limit = parseInt(params.get('limit')) || 25;
+  const offset = parseInt(params.get('offset')) || 0;
 
-  return badgeScript + rows;
+  let reviews, stats;
+  try { reviews = getReviews({ limit, offset }); } catch { reviews = []; }
+  try { stats = getReviewStats(); } catch { stats = { total: 0 }; }
+
+  const rows = reviews.map(renderReviewRowPair).join('');
+
+  const hasMore = (offset + limit) < stats.total;
+  const nextOffset = offset + limit;
+  // OOB swap to update the load-more button
+  const oobBtn = hasMore
+    ? '<div id="reviews-load-more-btn" hx-swap-oob="outerHTML" class="reviews-load-more">' +
+        '<button class="cmd-btn-ghost" id="reviews-load-more-btn" ' +
+          'hx-get="/dashboard/partials/reviews-more?limit=' + limit + '&offset=' + nextOffset + '" ' +
+          'hx-target="#reviews-table tbody" hx-swap="beforeend" hx-indicator="#poll-indicator">' +
+          'Load more (' + (stats.total - nextOffset) + ' remaining)</button>' +
+      '</div>'
+    : '<div id="reviews-load-more-btn" hx-swap-oob="outerHTML"></div>';
+
+  return rows + oobBtn;
 }
 
 // ── Static assets ────────────────────────────────────────────────────
@@ -684,6 +762,24 @@ th[data-sort="desc"]::after{content:" \\25BC";color:var(--accent)}
 .empty-text{font-size:0.8rem;line-height:1.6}
 .empty-text code{color:var(--accent);background:var(--surface);padding:0.1rem 0.3rem;border-radius:2px}
 
+/* ── Reviews stats banner ── */
+.reviews-stats-banner{display:grid;grid-template-columns:repeat(6,1fr);gap:0.5rem;margin-bottom:1rem}
+.reviews-stats-banner .stat-card{text-align:center;padding:0.6rem 0.4rem}
+.stat-green .stat-value{color:var(--green)}
+.stat-yellow .stat-value{color:var(--yellow)}
+.stat-red .stat-value{color:var(--red)}
+
+/* ── Reviews table ── */
+#reviews-table{width:100%}
+#reviews-table th{font-size:0.6rem;text-transform:uppercase;letter-spacing:0.08em;padding:0.4rem 0.5rem;cursor:pointer;user-select:none;white-space:nowrap}
+#reviews-table td{font-size:0.75rem;padding:0.45rem 0.5rem;vertical-align:middle}
+#reviews-table .review-row{cursor:pointer;transition:background .1s}
+#reviews-table .review-row:hover{background:var(--surface2)}
+.review-row-title{max-width:18rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.review-detail-row{background:var(--surface)}
+.review-detail-inner{padding:0.8rem}
+.reviews-load-more{text-align:center;padding:1rem 0}
+@media(max-width:768px){.reviews-stats-banner{grid-template-columns:repeat(3,1fr)}}
 
 /* ── Insights ── */
 .insights-toggle{display:flex;gap:0.35rem;align-items:center}
@@ -725,7 +821,7 @@ th[data-sort="desc"]::after{content:" \\25BC";color:var(--accent)}
 // ── Review Insights ──────────────────────────────────────────────────
 function computeReviewInsights() {
   let reviews;
-  try { reviews = getReviews(100); } catch { reviews = []; }
+  try { reviews = getReviews({ limit: 100 }); } catch { reviews = []; }
   if (!reviews.length) return null;
 
   const now = Date.now();
@@ -986,7 +1082,7 @@ function renderDashboardPage() {
             '<button class="active" onclick="toggleInsightsView(false)">Reviews</button>' +
             '<button onclick="toggleInsightsView(true)">Insights</button>' +
           '</div>' +
-          '<input class="filter-input" id="reviews-filter" placeholder="filter by repo, PR, assessment..." style="width:14rem" />' +
+          '<input class="filter-input" data-filter="reviews-table" placeholder="filter by repo, PR, assessment..." style="width:14rem" />' +
         '</div>' +
       '</div>' +
       '<div id="insights-section" style="display:none" hx-get="/dashboard/partials/insights" hx-trigger="load, insightsLoad" hx-swap="morph:innerHTML">' +
@@ -1152,8 +1248,14 @@ export function createDashboardHandler() {
 
     // AI Reviews full partial (for dedicated Reviews tab)
     if (req.method === 'GET' && path === '/dashboard/partials/reviews-full') {
-      try { sendHtml(res, 200, renderReviewsFullPartial()); }
+      try { sendHtml(res, 200, renderReviewsFullPartial(req.url)); }
       catch (err) { getLogger().error({err},'Dashboard reviews-full error'); sendHtml(res, 200, renderError(err)); }
+      return true;
+    }
+    // AI Reviews "load more" partial (appends rows)
+    if (req.method === 'GET' && path === '/dashboard/partials/reviews-more') {
+      try { sendHtml(res, 200, renderReviewsMorePartial(req.url)); }
+      catch (err) { getLogger().error({err},'Dashboard reviews-more error'); sendHtml(res, 200, renderError(err)); }
       return true;
     }
 

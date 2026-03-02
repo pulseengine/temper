@@ -77,8 +77,13 @@ function toggleInsightsView(showInsights) {
 }
 
 function toggleReviewDetail(id) {
-  var el = document.getElementById("review-detail-" + id);
-  if (el) el.classList.toggle("open");
+  // Close any previously open detail row (accordion)
+  var prev = document.querySelector('tr.review-detail-row[style*="table-row"]');
+  if (prev && prev.getAttribute("data-pair-of") !== id) {
+    prev.style.display = "none";
+  }
+  var el = document.querySelector('tr.review-detail-row[data-pair-of="' + id + '"]');
+  if (el) el.style.display = el.style.display === "table-row" ? "none" : "table-row";
 }
 
 function runCmd(cmd, resultId) {
@@ -137,6 +142,14 @@ document.body.addEventListener("click", function(e) {
     return;
   }
 
+  // ── Review table row click → expand detail ──
+  var reviewRow = e.target.closest("tr.review-row");
+  if (reviewRow && !e.target.closest("a")) {
+    var rid = reviewRow.getAttribute("data-review-id");
+    if (rid) toggleReviewDetail(rid);
+    return;
+  }
+
   // ── Table sorting ──
   var th = e.target.closest("th[data-sort]");
   if (!th) return;
@@ -144,7 +157,7 @@ document.body.addEventListener("click", function(e) {
   var idx = Array.from(th.parentElement.children).indexOf(th);
   var tbody = table.querySelector("tbody");
   if (!tbody) return;
-  var rows = Array.from(tbody.querySelectorAll("tr"));
+  var rows = Array.from(tbody.querySelectorAll("tr:not([data-pair-of])"));
   var asc = th.getAttribute("data-sort") !== "asc";
   th.parentElement.querySelectorAll("th[data-sort]").forEach(function(h) { h.setAttribute("data-sort",""); });
   th.setAttribute("data-sort", asc ? "asc" : "desc");
@@ -153,7 +166,15 @@ document.body.addEventListener("click", function(e) {
     var bt = (b.children[idx]||{}).textContent || "";
     return (asc ? 1 : -1) * at.localeCompare(bt, undefined, {numeric:true});
   });
-  rows.forEach(function(r) { tbody.appendChild(r); });
+  rows.forEach(function(r) {
+    tbody.appendChild(r);
+    // Re-pair detail row after its data row
+    var pairId = r.getAttribute("data-review-id");
+    if (pairId) {
+      var detail = tbody.querySelector('tr[data-pair-of="' + pairId + '"]');
+      if (detail) tbody.appendChild(detail);
+    }
+  });
 });
 
 // ── Table filtering ──
@@ -163,18 +184,15 @@ document.body.addEventListener("input", function(e) {
   var id = e.target.getAttribute("data-filter");
   var tbody = document.querySelector("#" + id + " tbody");
   if (!tbody) return;
-  Array.from(tbody.querySelectorAll("tr")).forEach(function(row) {
-    row.style.display = row.textContent.toLowerCase().indexOf(q) !== -1 ? "" : "none";
-  });
-});
-
-// ── Reviews filter ──
-document.body.addEventListener("input", function(e) {
-  if (e.target.id !== "reviews-filter") return;
-  var q = e.target.value.toLowerCase();
-  document.querySelectorAll(".review-entry").forEach(function(entry) {
-    var filterText = entry.getAttribute("data-review-filter") || "";
-    entry.style.display = filterText.toLowerCase().indexOf(q) !== -1 ? "" : "none";
+  Array.from(tbody.querySelectorAll("tr:not([data-pair-of])")).forEach(function(row) {
+    var match = row.textContent.toLowerCase().indexOf(q) !== -1;
+    row.style.display = match ? "" : "none";
+    // Cascade: hide/close paired detail row when data row is hidden
+    var pairId = row.getAttribute("data-review-id");
+    if (pairId) {
+      var detail = tbody.querySelector('tr[data-pair-of="' + pairId + '"]');
+      if (detail) detail.style.display = match ? detail.style.display : "none";
+    }
   });
 });
 
