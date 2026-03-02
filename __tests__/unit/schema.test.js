@@ -59,4 +59,33 @@ describe('validateConfig', () => {
     const result = validateConfig({ ai_review: { enabled: true, temperature: 0.3 } });
     expect(result.valid).toBe(true);
   });
+
+  it('accepts valid self_update config', () => {
+    const result = validateConfig({ self_update: { enabled: true, repo: 'temper', branch: 'main' } });
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects non-boolean self_update.enabled', () => {
+    const result = validateConfig({ self_update: { enabled: 'yes' } });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('self_update.enabled');
+  });
+
+  it('rejects empty self_update.repo', () => {
+    const result = validateConfig({ self_update: { repo: '' } });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('self_update.repo');
+  });
+
+  it('rejects non-string self_update.branch', () => {
+    const result = validateConfig({ self_update: { branch: 123 } });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('self_update.branch');
+  });
+
+  it('rejects non-object self_update', () => {
+    const result = validateConfig({ self_update: 'yes' });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('self_update');
+  });
 });

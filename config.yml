@@ -50,6 +50,11 @@ auto_merge:
     - thrum
   merge_method: squash
 
+self_update:
+  enabled: true
+  repo: temper
+  branch: main
+
 issue_labels:
   - name: "bug"
     color: "d73a4a"
