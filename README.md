@@ -9,6 +9,10 @@
 ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=node.js&logoColor=white&labelColor=1a1b27)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square&labelColor=1a1b27)
 
+&nbsp;
+
+![Dashboard](docs/screenshots/dashboard.jpeg)
+
 </div>
 
 &nbsp;
@@ -30,13 +34,27 @@ repository in your GitHub organization.
 - **PR and issue templates** — pushes PR templates, issue templates, and CODEOWNERS into target repos
 - **Dependabot configuration** — applies `dependabot.yml` and fixes missing PR labels
 - **Signed-commit merge strategy** — temporarily enables merge commits to preserve GPG signatures, then auto-reverts
-- **AI-powered PR review** — sends diffs to a local OpenAI-compatible endpoint for automated code review
+- **AI-powered PR review** — sends diffs to a local OpenAI-compatible endpoint with smart file prioritization (source code first, lockfiles/generated files excluded) and stale review superseding on force-push
+- **Auto-merge for bots** — automatically enables auto-merge on Dependabot and configured bot PRs
 - **Organization-wide sync** — bulk-apply configuration to every repo in the org
 - **ChatOps commands** — 9 slash commands for on-demand configuration and diagnostics
 - **Fork-aware settings** — separate merge and branch-protection overrides for forked repositories
 - **PR-based changes** — optionally applies file changes via pull requests instead of direct commits
 - **Idempotent webhook processing** — deduplicates delivery IDs to prevent duplicate work
 - **Retry with backoff** — exponential backoff with jitter for transient GitHub API errors
+
+## Dashboard
+
+Temper ships with a real-time operations dashboard powered by **thrum** — a Rust/Axum
+backend with HTMX and SSE for live agent monitoring. The dashboard provides:
+
+- Task queue with approve/reject/retry actions
+- Live agent activity grid with streaming stdout/stderr
+- Per-task review pages with syntax-colored diffs and gate reports
+- Budget tracking, memory inspection, and agent-to-agent messaging
+
+Run `thrum` alongside the Probot app, or access the dashboard at `/dashboard` when
+deployed with the standalone HTTP handler.
 
 ## Quick Start
 
@@ -111,6 +129,7 @@ All behavior is controlled by [`config.yml`](config.yml). Key sections:
 | `change_strategy` | PR-based vs. direct-commit change application |
 | `templates` / `codeowners` | PR/issue templates and CODEOWNERS paths |
 | `ai_review` | AI review endpoint, model, prompt, and limits |
+| `auto_merge` | Auto-merge rules for Dependabot and bot PRs |
 
 See the file itself for the full schema and defaults.
 
