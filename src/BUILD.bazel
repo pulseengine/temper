@@ -10,6 +10,7 @@ js_library(
         "//:node_modules/js-yaml",
         "//:node_modules/helmet",
         "//:node_modules/pino",
+        "//:node_modules/better-sqlite3",
     ],
     visibility = ["//visibility:public"],
 )
