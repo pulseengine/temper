@@ -63,12 +63,14 @@ describe('src module imports', () => {
   it('src/labels.js exports expected functions', async () => {
     const mod = await import('../../src/labels.js');
     expect(typeof mod.synchronizeIssueLabels).toBe('function');
+    expect(typeof mod.ensureLabelsExist).toBe('function');
   });
 
   it('src/dependabot.js exports expected functions', async () => {
     const mod = await import('../../src/dependabot.js');
     expect(typeof mod.applyDependabotConfig).toBe('function');
     expect(typeof mod.checkExistingDependabotConfig).toBe('function');
+    expect(typeof mod.extractLabelsFromConfig).toBe('function');
     expect(typeof mod.fixDependabotPRLabels).toBe('function');
     expect(typeof mod.checkDependabotConfiguration).toBe('function');
   });

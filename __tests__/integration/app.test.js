@@ -19,9 +19,15 @@ jest.mock('../../src/reporting.js', () => ({
 jest.mock('../../src/dependabot.js', () => ({
   checkDependabotConfiguration: jest.fn(),
   checkExistingDependabotConfig: jest.fn(),
+  extractLabelsFromConfig: jest.fn().mockReturnValue([]),
   fixDependabotPRLabels: jest.fn(),
   generateDependabotConfig: jest.fn(),
   applyDependabotConfig: jest.fn()
+}));
+
+jest.mock('../../src/labels.js', () => ({
+  ensureLabelsExist: jest.fn().mockResolvedValue(undefined),
+  synchronizeIssueLabels: jest.fn().mockResolvedValue(undefined)
 }));
 
 jest.mock('../../src/merge-strategy.js', () => ({
@@ -75,10 +81,12 @@ import { generateConfigurationReport } from '../../src/reporting.js';
 import {
   checkDependabotConfiguration,
   checkExistingDependabotConfig,
+  extractLabelsFromConfig,
   fixDependabotPRLabels,
   generateDependabotConfig,
   applyDependabotConfig
 } from '../../src/dependabot.js';
+import { ensureLabelsExist } from '../../src/labels.js';
 import { handleSignedCommitMerge, checkPRMergeStrategy } from '../../src/merge-strategy.js';
 import { reviewPullRequest } from '../../src/ai-review.js';
 import { isProcessed, markProcessed } from '../../src/idempotency.js';
@@ -534,7 +542,9 @@ describe('app', () => {
       const context = createRepoCreatedContext();
       await handlers['repository.created'](context);
 
-      expect(configureRepository).toHaveBeenCalledWith(context.octokit, context.payload.repository);
+      expect(configureRepository).toHaveBeenCalledWith(
+        context.octokit, context.payload.repository, undefined, { enqueueTask: null }
+      );
       expect(context.octokit.issues.create).toHaveBeenCalledWith(
         expect.objectContaining({
           owner: 'pulseengine',
@@ -753,7 +763,7 @@ describe('app', () => {
         await handlers['issue_comment.created'](context);
 
         expect(configureRepository).toHaveBeenCalledWith(
-          context.octokit, context.payload.repository
+          context.octokit, context.payload.repository, undefined, { enqueueTask: null }
         );
         expect(context.octokit.issues.createComment).toHaveBeenCalledWith(
           expect.objectContaining({

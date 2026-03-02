@@ -13,10 +13,12 @@ import { generateConfigurationReport } from './reporting.js';
 import {
   checkDependabotConfiguration,
   checkExistingDependabotConfig,
+  extractLabelsFromConfig,
   fixDependabotPRLabels,
   generateDependabotConfig,
   applyDependabotConfig
 } from './dependabot.js';
+import { ensureLabelsExist } from './labels.js';
 import { handleSignedCommitMerge, checkPRMergeStrategy } from './merge-strategy.js';
 import { reviewPullRequest, updateReviewStatus } from './ai-review.js';
 import { isProcessed, markProcessed } from './idempotency.js';
@@ -34,6 +36,11 @@ let _scheduler = null;
 
 function getTaskStore() { return _taskStore; }
 function getScheduler() { return _scheduler; }
+function getEnqueueTask() {
+  return _taskStore
+    ? (type, key, payload) => _taskStore.enqueue(type, key, payload)
+    : null;
+}
 
 function applySecurityHeaders(res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -108,7 +115,9 @@ function registerApp(app, { getRouter, addHandler } = {}) {
     if (repoOrg === targetOrg) {
       getLogger().info({ repo: repository.full_name }, 'New repository created');
 
-      const result = await configureRepository(context.octokit, repository);
+      const result = await configureRepository(context.octokit, repository, undefined, {
+        enqueueTask: getEnqueueTask()
+      });
 
       if (repository.has_issues) {
         await context.octokit.issues.create({
@@ -203,7 +212,9 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       }
 
       getLogger().info({ repo: repository.full_name }, 'Manual configuration requested');
-      const result = await configureRepository(context.octokit, repository);
+      const result = await configureRepository(context.octokit, repository, undefined, {
+        enqueueTask: getEnqueueTask()
+      });
 
       await context.octokit.issues.createComment({
         owner,
@@ -518,45 +529,88 @@ function registerApp(app, { getRouter, addHandler } = {}) {
     }
   });
 
-  // Auto-merge for Dependabot and bot PRs
+  // PR opened: auto-merge for bots, AI review, dependabot generation check
   app.on('pull_request.opened', async (context) => {
     if (context.log) setLogger(context.log);
     const config = getConfig();
-    const autoMerge = config?.auto_merge;
-    if (!autoMerge?.enabled) return;
-
     const pr = context.payload.pull_request;
+    const { repository } = context.payload;
+    const owner = repository.owner.login;
+    const repo = repository.name;
     const sender = context.payload.sender?.login || "";
 
-    const isDependabot = sender === "dependabot[bot]" && autoMerge.on_dependabot;
-    const isBotUser = (autoMerge.on_bot_users || []).some(
-      bot => sender === bot || sender === bot + "[bot]"
-    );
+    // Auto-merge for Dependabot and bot PRs
+    const autoMerge = config?.auto_merge;
+    if (autoMerge?.enabled) {
+      const isDependabot = sender === "dependabot[bot]" && autoMerge.on_dependabot;
+      const isBotUser = (autoMerge.on_bot_users || []).some(
+        bot => sender === bot || sender === bot + "[bot]"
+      );
 
-    if (!isDependabot && !isBotUser) return;
+      if (isDependabot || isBotUser) {
+        const mergeMethod = autoMerge.merge_method || "squash";
+        getLogger().info({ pr: pr.number, sender, mergeMethod }, "Enabling auto-merge");
 
-    const mergeMethod = autoMerge.merge_method || "squash";
-    getLogger().info({ pr: pr.number, sender, mergeMethod }, "Enabling auto-merge");
+        try {
+          const query = `mutation($prId: ID!, $mergeMethod: PullRequestMergeMethod!) {
+            enablePullRequestAutoMerge(input: {
+              pullRequestId: $prId,
+              mergeMethod: $mergeMethod
+            }) {
+              pullRequest { number }
+            }
+          }`;
 
-    try {
-      // GitHub GraphQL is needed for enablePullRequestAutoMerge
-      const query = `mutation($prId: ID!, $mergeMethod: PullRequestMergeMethod!) {
-        enablePullRequestAutoMerge(input: {
-          pullRequestId: $prId,
-          mergeMethod: $mergeMethod
-        }) {
-          pullRequest { number }
+          await context.octokit.graphql(query, {
+            prId: pr.node_id,
+            mergeMethod: mergeMethod.toUpperCase()
+          });
+
+          getLogger().info({ pr: pr.number }, "Auto-merge enabled");
+        } catch (err) {
+          getLogger().warn({ pr: pr.number, err: err.message }, "Could not enable auto-merge");
         }
-      }`;
+      }
+    }
 
-      await context.octokit.graphql(query, {
-        prId: pr.node_id,
-        mergeMethod: mergeMethod.toUpperCase()
-      });
+    // Auto AI review on new PRs
+    if (config?.ai_review?.enabled) {
+      try {
+        const result = await reviewPullRequest(context.octokit, owner, repo, pr.number);
+        if (result.success) {
+          getLogger().info({ pr: pr.number, repo: `${owner}/${repo}` }, 'Auto AI review posted');
+        } else {
+          getLogger().warn({ pr: pr.number, error: result.error }, 'Auto AI review skipped');
+        }
+      } catch (err) {
+        getLogger().warn({ pr: pr.number, err: err.message }, 'Auto AI review failed');
+      }
+    }
 
-      getLogger().info({ pr: pr.number }, "Auto-merge enabled");
-    } catch (err) {
-      getLogger().warn({ pr: pr.number, err: err.message }, "Could not enable auto-merge");
+    // Check dependabot config exists; enqueue generation if missing
+    const genConfig = config?.dependabot_generation;
+    if (genConfig?.enabled && _taskStore) {
+      const key = `generate-dependabot:${owner}/${repo}`;
+
+      try {
+        await context.octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
+          owner,
+          repo,
+          path: '.github/dependabot.yml'
+        });
+      } catch (depErr) {
+        if (depErr.status === 404) {
+          _taskStore.enqueue('generate-dependabot', key, {
+            owner,
+            repo,
+            defaultBranch: repository.default_branch
+          });
+          getLogger().info(
+            { repo: `${owner}/${repo}` },
+            'Enqueued dependabot generation (missing config detected on PR)'
+          );
+        }
+      }
     }
   });
 
@@ -669,6 +723,10 @@ function initScheduler(octokit) {
 
     const result = await generateDependabotConfig(kit, owner, repo, defaultBranch);
     if (result.config) {
+      const labels = extractLabelsFromConfig(result.config);
+      if (labels.length > 0) {
+        await ensureLabelsExist(kit, owner, repo, labels);
+      }
       await applyDependabotConfig(kit, owner, repo, result.config);
       logger.info(`Scheduler: applied dependabot config to ${owner}/${repo}`);
     } else {

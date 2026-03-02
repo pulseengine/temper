@@ -5,6 +5,17 @@ import { upsertRepoFile, createConfigurationPR } from './github-api.js';
 import { detectEcosystems } from './ecosystem-detector.js';
 import { callLocalAI } from './ai-review.js';
 
+function extractLabelsFromConfig(dependabotConfig) {
+  if (!dependabotConfig?.updates) return [];
+  const labels = new Set();
+  for (const update of dependabotConfig.updates) {
+    if (Array.isArray(update.labels)) {
+      update.labels.forEach((l) => labels.add(l));
+    }
+  }
+  return [...labels];
+}
+
 async function applyDependabotConfig(octokit, owner, repo, dependabotConfig) {
   const config = getConfig();
 
@@ -347,6 +358,7 @@ async function generateDependabotConfig(octokit, owner, repo, defaultBranch) {
 export {
   applyDependabotConfig,
   checkExistingDependabotConfig,
+  extractLabelsFromConfig,
   fixDependabotPRLabels,
   checkDependabotConfiguration,
   generateDependabotConfig,

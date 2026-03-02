@@ -194,5 +194,37 @@ describe('config', () => {
       _setConfigForTesting({});
       expect(getTargetIssueLabels()).toEqual([]);
     });
+
+    it('includes labels from dependabot_generation.default_labels', () => {
+      _setConfigForTesting({
+        dependabot_generation: { default_labels: ['dependencies', 'github-actions'] }
+      });
+      const result = getTargetIssueLabels();
+      expect(result).toHaveLength(2);
+      expect(result[0].name).toBe('dependencies');
+      expect(result[0].color).toBe('0366d6');
+      expect(result[1].name).toBe('github-actions');
+      expect(result[1].color).toBe('ededed');
+    });
+
+    it('deduplicates labels from dependabot and dependabot_generation', () => {
+      _setConfigForTesting({
+        dependabot: { updates: [{ labels: ['dependencies'] }] },
+        dependabot_generation: { default_labels: ['dependencies', 'automation'] }
+      });
+      const result = getTargetIssueLabels();
+      expect(result).toHaveLength(2);
+      expect(result.map((l) => l.name)).toEqual(['dependencies', 'automation']);
+    });
+
+    it('deduplicates against issue_labels too', () => {
+      _setConfigForTesting({
+        issue_labels: [{ name: 'dependencies', color: 'custom', description: 'Custom' }],
+        dependabot_generation: { default_labels: ['dependencies'] }
+      });
+      const result = getTargetIssueLabels();
+      expect(result).toHaveLength(1);
+      expect(result[0].color).toBe('custom');
+    });
   });
 });

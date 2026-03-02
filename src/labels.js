@@ -1,4 +1,31 @@
 import { getLogger } from './logger.js';
+import { DEPENDABOT_LABEL_DEFAULTS } from './config.js';
+
+async function ensureLabelsExist(octokit, owner, repo, labelNames) {
+  const currentLabels = await octokit.paginate('GET /repos/{owner}/{repo}/labels', {
+    owner,
+    repo,
+    per_page: 100
+  });
+  const existingNames = new Set(currentLabels.map((l) => l.name));
+
+  for (const name of labelNames) {
+    if (!existingNames.has(name)) {
+      const defaults = DEPENDABOT_LABEL_DEFAULTS[name] || {
+        color: 'ededed',
+        description: 'Automated label'
+      };
+      await octokit.request('POST /repos/{owner}/{repo}/labels', {
+        owner,
+        repo,
+        name,
+        color: defaults.color,
+        description: defaults.description
+      });
+      getLogger().info(`Created label: ${name}`);
+    }
+  }
+}
 
 async function synchronizeIssueLabels(octokit, owner, repo, targetLabels) {
   try {
@@ -58,5 +85,6 @@ async function synchronizeIssueLabels(octokit, owner, repo, targetLabels) {
 }
 
 export {
+  ensureLabelsExist,
   synchronizeIssueLabels
 };

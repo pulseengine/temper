@@ -19,6 +19,7 @@ jest.mock('../../src/logger.js', () => {
 import {
   applyDependabotConfig,
   checkExistingDependabotConfig,
+  extractLabelsFromConfig,
   fixDependabotPRLabels,
   checkDependabotConfiguration,
   generateDependabotConfig,
@@ -629,6 +630,43 @@ describe('dependabot', () => {
 
       const result = await enhanceDependabotWithAI(baseConfig, ['package.json'], aiConfig);
       expect(result).toEqual(baseConfig);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // extractLabelsFromConfig
+  // ---------------------------------------------------------------------------
+  describe('extractLabelsFromConfig', () => {
+    it('returns unique labels from all update entries', () => {
+      const result = extractLabelsFromConfig({
+        version: 2,
+        updates: [
+          { 'package-ecosystem': 'npm', labels: ['dependencies', 'javascript'] },
+          { 'package-ecosystem': 'docker', labels: ['dependencies', 'docker'] }
+        ]
+      });
+      expect(result).toEqual(expect.arrayContaining(['dependencies', 'javascript', 'docker']));
+      expect(result).toHaveLength(3);
+    });
+
+    it('returns empty array for missing config', () => {
+      expect(extractLabelsFromConfig(null)).toEqual([]);
+      expect(extractLabelsFromConfig(undefined)).toEqual([]);
+    });
+
+    it('returns empty array for config without updates', () => {
+      expect(extractLabelsFromConfig({ version: 2 })).toEqual([]);
+      expect(extractLabelsFromConfig({})).toEqual([]);
+    });
+
+    it('skips updates without labels', () => {
+      const result = extractLabelsFromConfig({
+        updates: [
+          { 'package-ecosystem': 'npm', directory: '/' },
+          { 'package-ecosystem': 'docker', labels: ['docker'] }
+        ]
+      });
+      expect(result).toEqual(['docker']);
     });
   });
 

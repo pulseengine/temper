@@ -180,9 +180,11 @@ export function getDependabotLabels(dependabotConfig = {}) {
 export function getTargetIssueLabels() {
   const baseLabels = Array.isArray(config?.issue_labels) ? [...config.issue_labels] : [];
   const dependabotLabels = getDependabotLabels(config?.dependabot);
+  const genLabels = config?.dependabot_generation?.default_labels || [];
+  const allDependabotLabels = [...new Set([...dependabotLabels, ...genLabels])];
 
   const existingNames = new Set(baseLabels.map((label) => label.name));
-  dependabotLabels.forEach((labelName) => {
+  allDependabotLabels.forEach((labelName) => {
     if (!existingNames.has(labelName)) {
       const defaults = DEPENDABOT_LABEL_DEFAULTS[labelName] || {
         color: 'ededed',

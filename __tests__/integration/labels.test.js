@@ -1,4 +1,4 @@
-import { synchronizeIssueLabels } from '../../src/labels.js';
+import { synchronizeIssueLabels, ensureLabelsExist } from '../../src/labels.js';
 
 function createMockOctokit() {
   return {
@@ -112,5 +112,78 @@ describe('synchronizeIssueLabels', () => {
     await expect(
       synchronizeIssueLabels(octokit, 'owner', 'repo', [])
     ).rejects.toThrow('API down');
+  });
+});
+
+describe('ensureLabelsExist', () => {
+  let octokit;
+  beforeEach(() => { octokit = createMockOctokit(); });
+
+  it('creates missing labels with DEPENDABOT_LABEL_DEFAULTS', async () => {
+    octokit.paginate.mockResolvedValue([]);
+
+    await ensureLabelsExist(octokit, 'owner', 'repo', ['dependencies']);
+
+    expect(octokit.request).toHaveBeenCalledWith(
+      'POST /repos/{owner}/{repo}/labels',
+      expect.objectContaining({ name: 'dependencies', color: '0366d6', description: 'Dependency updates' })
+    );
+  });
+
+  it('uses fallback defaults for unknown labels', async () => {
+    octokit.paginate.mockResolvedValue([]);
+
+    await ensureLabelsExist(octokit, 'owner', 'repo', ['custom-label']);
+
+    expect(octokit.request).toHaveBeenCalledWith(
+      'POST /repos/{owner}/{repo}/labels',
+      expect.objectContaining({ name: 'custom-label', color: 'ededed', description: 'Automated label' })
+    );
+  });
+
+  it('skips labels that already exist', async () => {
+    octokit.paginate.mockResolvedValue([{ name: 'dependencies', color: '0366d6', description: 'Deps' }]);
+
+    await ensureLabelsExist(octokit, 'owner', 'repo', ['dependencies']);
+
+    expect(octokit.request).not.toHaveBeenCalled();
+  });
+
+  it('never updates or deletes existing labels', async () => {
+    octokit.paginate.mockResolvedValue([
+      { name: 'dependencies', color: 'ffffff', description: 'Old' },
+      { name: 'extra', color: 'aaa', description: 'Extra' }
+    ]);
+
+    await ensureLabelsExist(octokit, 'owner', 'repo', ['dependencies']);
+
+    expect(octokit.request).not.toHaveBeenCalledWith(
+      'PATCH /repos/{owner}/{repo}/labels/{name}',
+      expect.anything()
+    );
+    expect(octokit.request).not.toHaveBeenCalledWith(
+      'DELETE /repos/{owner}/{repo}/labels/{name}',
+      expect.anything()
+    );
+  });
+
+  it('creates only missing labels from a mixed set', async () => {
+    octokit.paginate.mockResolvedValue([{ name: 'dependencies', color: '0366d6', description: 'Deps' }]);
+
+    await ensureLabelsExist(octokit, 'owner', 'repo', ['dependencies', 'automation']);
+
+    expect(octokit.request).toHaveBeenCalledTimes(1);
+    expect(octokit.request).toHaveBeenCalledWith(
+      'POST /repos/{owner}/{repo}/labels',
+      expect.objectContaining({ name: 'automation', color: '0e8a16' })
+    );
+  });
+
+  it('handles empty label list', async () => {
+    octokit.paginate.mockResolvedValue([{ name: 'existing' }]);
+
+    await ensureLabelsExist(octokit, 'owner', 'repo', []);
+
+    expect(octokit.request).not.toHaveBeenCalled();
   });
 });
