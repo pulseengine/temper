@@ -5,9 +5,43 @@ import {
   getRequiredSignaturesFlag,
   getDependabotLabels,
   getTargetIssueLabels,
+  deepMerge,
   _setConfigForTesting,
   DEFAULT_MERGE_SETTINGS
 } from '../../src/config.js';
+
+describe('deepMerge', () => {
+  it('merges top-level keys from both objects', () => {
+    const result = deepMerge({ a: 1 }, { b: 2 });
+    expect(result).toEqual({ a: 1, b: 2 });
+  });
+
+  it('overrides primitive values from source', () => {
+    const result = deepMerge({ a: 1, b: 'old' }, { b: 'new' });
+    expect(result).toEqual({ a: 1, b: 'new' });
+  });
+
+  it('recursively merges nested objects', () => {
+    const result = deepMerge(
+      { nested: { a: 1, b: 2 } },
+      { nested: { b: 3, c: 4 } }
+    );
+    expect(result).toEqual({ nested: { a: 1, b: 3, c: 4 } });
+  });
+
+  it('replaces arrays entirely from source', () => {
+    const result = deepMerge(
+      { items: [1, 2, 3] },
+      { items: [4, 5] }
+    );
+    expect(result).toEqual({ items: [4, 5] });
+  });
+
+  it('allows null to override a value', () => {
+    const result = deepMerge({ a: { b: 1 } }, { a: null });
+    expect(result).toEqual({ a: null });
+  });
+});
 
 describe('config', () => {
   afterEach(() => {
