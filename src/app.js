@@ -458,8 +458,6 @@ function registerApp(app, { getRouter, addHandler } = {}) {
 
     const pr = context.payload.pull_request;
     const sender = context.payload.sender?.login || "";
-    const owner = context.payload.repository.owner.login;
-    const repo = context.payload.repository.name;
 
     const isDependabot = sender === "dependabot[bot]" && autoMerge.on_dependabot;
     const isBotUser = (autoMerge.on_bot_users || []).some(

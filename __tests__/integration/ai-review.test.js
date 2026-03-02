@@ -30,7 +30,6 @@ import {
   updateReviewStatus,
   _reviewTimestamps,
   _resetReviews,
-  AI_REVIEW_SIGNATURE
 } from '../../src/ai-review.js';
 import { _setConfigForTesting } from '../../src/config.js';
 import { getLogger } from '../../src/logger.js';
