@@ -309,7 +309,6 @@ function renderPRsPartial(data) {
     // Sort PRs within repo by age (oldest first)
     prs.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
-    const hasFailure = prs.some(p => p.checkStatus === 'fail' || p.checkStatus === 'failure');
     const statusBadges = [];
     const passing = prs.filter(p => p.checkStatus === 'pass' || p.checkStatus === 'success').length;
     const failing = prs.filter(p => p.checkStatus === 'fail' || p.checkStatus === 'failure').length;

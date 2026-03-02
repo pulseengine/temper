@@ -1,0 +1,8 @@
+[package]
+name = "temper-self-update"
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+strip = true
+lto = true

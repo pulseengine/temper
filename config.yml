@@ -31,8 +31,11 @@ branch_protection:
     required_status_checks:
       strict: true
       contexts: []
-    enforce_admins: false
-    required_pull_request_reviews: null
+    enforce_admins: true
+    required_pull_request_reviews:
+      required_approving_review_count: 1
+      dismiss_stale_reviews: true
+      require_code_owner_reviews: false
     required_linear_history: false
     required_conversation_resolution: false
     restrictions: null
@@ -46,6 +49,11 @@ auto_merge:
   on_bot_users:
     - thrum
   merge_method: squash
+
+self_update:
+  enabled: true
+  repo: temper
+  branch: main
 
 issue_labels:
   - name: "bug"

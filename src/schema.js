@@ -55,6 +55,23 @@ export function validateConfig(config) {
     }
   }
 
+  if (config.self_update !== undefined) {
+    const su = config.self_update;
+    if (typeof su !== 'object' || su === null) {
+      errors.push('self_update must be an object');
+    } else {
+      if (su.enabled !== undefined && typeof su.enabled !== 'boolean') {
+        errors.push('self_update.enabled must be a boolean');
+      }
+      if (su.repo !== undefined && (typeof su.repo !== 'string' || su.repo.length === 0)) {
+        errors.push('self_update.repo must be a non-empty string');
+      }
+      if (su.branch !== undefined && typeof su.branch !== 'string') {
+        errors.push('self_update.branch must be a string');
+      }
+    }
+  }
+
   if (config.ai_review?.enabled) {
     if (config.ai_review.endpoint !== undefined && typeof config.ai_review.endpoint !== 'string') {
       errors.push('ai_review.endpoint must be a string');

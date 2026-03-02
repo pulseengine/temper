@@ -298,7 +298,7 @@ describe('app', () => {
 
     it('works without getRouter option', () => {
       const { app } = setupApp({ skipRouter: true });
-      expect(app.on).toHaveBeenCalledTimes(4);
+      expect(app.on).toHaveBeenCalledTimes(5);
       expect(app.onError).toHaveBeenCalledTimes(1);
     });
 

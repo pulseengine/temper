@@ -5,7 +5,7 @@ module.exports = {
     '^.+\\.js$': ['babel-jest', { configFile: './babel.config.cjs' }]
   },
   transformIgnorePatterns: [
-    '/node_modules/(?!probot|@probot|@octokit|before-after-hook|universal-user-agent|universal-github-app-jwt|octokit-auth-probot)'
+    '/node_modules/(?!\\.pnpm|\\.aspect_rules_js|probot|@probot|@octokit|before-after-hook|universal-user-agent|universal-github-app-jwt|octokit-auth-probot)'
   ],
   testMatch: [
     '**/__tests__/unit/**/*.test.js',
@@ -15,6 +15,7 @@ module.exports = {
   ],
   collectCoverageFrom: [
     'src/**/*.js',
+    '!src/dashboard.js',
     'index.js',
     '!**/node_modules/**'
   ],

@@ -16,6 +16,7 @@ import {
 import { handleSignedCommitMerge, checkPRMergeStrategy } from './merge-strategy.js';
 import { reviewPullRequest, updateReviewStatus } from './ai-review.js';
 import { isProcessed, markProcessed } from './idempotency.js';
+import { triggerSelfUpdate } from './self-update.js';
 import { defaultQueue } from './queue.js';
 import { applySecurityMiddleware } from './middleware.js';
 
@@ -458,8 +459,6 @@ function registerApp(app, { getRouter, addHandler } = {}) {
 
     const pr = context.payload.pull_request;
     const sender = context.payload.sender?.login || "";
-    const owner = context.payload.repository.owner.login;
-    const repo = context.payload.repository.name;
 
     const isDependabot = sender === "dependabot[bot]" && autoMerge.on_dependabot;
     const isBotUser = (autoMerge.on_bot_users || []).some(
@@ -509,6 +508,33 @@ function registerApp(app, { getRouter, addHandler } = {}) {
     if (updated > 0) {
       getLogger().info({ repo, pr: pr.number, status }, `Marked ${updated} review(s) as ${status}`);
     }
+
+    if (deliveryId) markProcessed(deliveryId);
+  });
+
+  app.on('push', async (context) => {
+    if (context.log) setLogger(context.log);
+    const deliveryId = context.id;
+    if (deliveryId && isProcessed(deliveryId)) {
+      getLogger().info({ deliveryId }, 'Skipping duplicate webhook delivery');
+      return;
+    }
+
+    const config = getConfig();
+    const selfUpdate = config?.self_update;
+    if (!selfUpdate?.enabled) return;
+
+    const { repository, ref } = context.payload;
+    const expectedRef = `refs/heads/${selfUpdate.branch || 'main'}`;
+
+    if (repository.name !== selfUpdate.repo || ref !== expectedRef) return;
+
+    getLogger().info(
+      { repo: repository.name, ref },
+      'Push to own repo detected — triggering self-update'
+    );
+
+    triggerSelfUpdate(getLogger());
 
     if (deliveryId) markProcessed(deliveryId);
   });

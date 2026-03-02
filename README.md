@@ -45,16 +45,15 @@ repository in your GitHub organization.
 
 ## Dashboard
 
-Temper ships with a real-time operations dashboard powered by **thrum** — a Rust/Axum
-backend with HTMX and SSE for live agent monitoring. The dashboard provides:
+Temper includes a built-in operations dashboard for monitoring compliance and
+activity across your organization. The dashboard provides:
 
-- Task queue with approve/reject/retry actions
-- Live agent activity grid with streaming stdout/stderr
-- Per-task review pages with syntax-colored diffs and gate reports
-- Budget tracking, memory inspection, and agent-to-agent messaging
+- Organization-wide compliance score with per-repo breakdown
+- Repository health cards — branch protection, signed commits, CI status, merge settings, labels
+- Active pull request tracker with check status, labels, and age
+- Signal feed for real-time webhook events and configuration drift
 
-Run `thrum` alongside the Probot app, or access the dashboard at `/dashboard` when
-deployed with the standalone HTTP handler.
+Access the dashboard at `/dashboard` when running with the standalone HTTP handler.
 
 ## Quick Start
 
