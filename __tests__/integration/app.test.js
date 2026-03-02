@@ -81,12 +81,10 @@ import { generateConfigurationReport } from '../../src/reporting.js';
 import {
   checkDependabotConfiguration,
   checkExistingDependabotConfig,
-  extractLabelsFromConfig,
   fixDependabotPRLabels,
   generateDependabotConfig,
   applyDependabotConfig
 } from '../../src/dependabot.js';
-import { ensureLabelsExist } from '../../src/labels.js';
 import { handleSignedCommitMerge, checkPRMergeStrategy } from '../../src/merge-strategy.js';
 import { reviewPullRequest } from '../../src/ai-review.js';
 import { isProcessed, markProcessed } from '../../src/idempotency.js';
