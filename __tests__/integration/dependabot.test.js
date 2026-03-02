@@ -7,6 +7,10 @@ jest.mock('../../src/github-api.js', () => ({
   createConfigurationPR: jest.fn().mockResolvedValue({})
 }));
 
+jest.mock('../../src/ai-review.js', () => ({
+  callLocalAI: jest.fn()
+}));
+
 jest.mock('../../src/logger.js', () => {
   const mockLogger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   return { getLogger: () => mockLogger };
@@ -16,10 +20,14 @@ import {
   applyDependabotConfig,
   checkExistingDependabotConfig,
   fixDependabotPRLabels,
-  checkDependabotConfiguration
+  checkDependabotConfiguration,
+  generateDependabotConfig,
+  buildDependabotYaml,
+  enhanceDependabotWithAI
 } from '../../src/dependabot.js';
 import { _setConfigForTesting } from '../../src/config.js';
 import { upsertRepoFile, createConfigurationPR } from '../../src/github-api.js';
+import { callLocalAI } from '../../src/ai-review.js';
 import { getLogger } from '../../src/logger.js';
 import yaml from 'js-yaml';
 
@@ -520,6 +528,182 @@ describe('dependabot', () => {
       // Verify the report contains YAML code blocks
       expect(report).toContain('```yaml');
       expect(report).toContain('```');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // buildDependabotYaml
+  // ---------------------------------------------------------------------------
+  describe('buildDependabotYaml', () => {
+    it('builds config from ecosystems', () => {
+      const ecosystems = [
+        { ecosystem: 'npm', directory: '/' },
+        { ecosystem: 'github-actions', directory: '/' }
+      ];
+      const result = buildDependabotYaml(ecosystems);
+
+      expect(result.version).toBe(2);
+      expect(result.updates).toHaveLength(2);
+      expect(result.updates[0]['package-ecosystem']).toBe('npm');
+      expect(result.updates[0].directory).toBe('/');
+      expect(result.updates[0].schedule.interval).toBe('weekly');
+      expect(result.updates[0].labels).toEqual(['dependencies']);
+    });
+
+    it('uses custom schedule and labels from genConfig', () => {
+      const ecosystems = [{ ecosystem: 'cargo', directory: '/' }];
+      const result = buildDependabotYaml(ecosystems, {
+        default_schedule: 'daily',
+        default_labels: ['deps', 'auto']
+      });
+
+      expect(result.updates[0].schedule.interval).toBe('daily');
+      expect(result.updates[0].labels).toEqual(['deps', 'auto']);
+    });
+
+    it('handles empty ecosystems', () => {
+      const result = buildDependabotYaml([]);
+      expect(result.version).toBe(2);
+      expect(result.updates).toEqual([]);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // enhanceDependabotWithAI
+  // ---------------------------------------------------------------------------
+  describe('enhanceDependabotWithAI', () => {
+    const baseConfig = {
+      version: 2,
+      updates: [{ 'package-ecosystem': 'npm', directory: '/', schedule: { interval: 'weekly' }, labels: ['dependencies'] }]
+    };
+    const aiConfig = { endpoint: 'http://localhost:8080/v1/chat/completions', model: 'test-model' };
+
+    it('returns enhanced config from AI', async () => {
+      const enhanced = {
+        version: 2,
+        updates: [{ 'package-ecosystem': 'npm', directory: '/', schedule: { interval: 'daily' }, labels: ['dependencies'], groups: { minor: { 'update-types': ['minor', 'patch'] } } }]
+      };
+      callLocalAI.mockResolvedValue(yaml.dump(enhanced));
+
+      const result = await enhanceDependabotWithAI(baseConfig, ['package.json'], aiConfig);
+
+      expect(result.version).toBe(2);
+      expect(result.updates[0].schedule.interval).toBe('daily');
+      expect(callLocalAI).toHaveBeenCalled();
+    });
+
+    it('falls back to base config when AI returns empty response', async () => {
+      callLocalAI.mockResolvedValue('');
+
+      const result = await enhanceDependabotWithAI(baseConfig, ['package.json'], aiConfig);
+      expect(result).toEqual(baseConfig);
+    });
+
+    it('falls back to base config when AI returns invalid YAML', async () => {
+      callLocalAI.mockResolvedValue('this is not yaml: [[[');
+
+      const result = await enhanceDependabotWithAI(baseConfig, ['package.json'], aiConfig);
+      expect(result).toEqual(baseConfig);
+    });
+
+    it('falls back to base config when AI returns wrong version', async () => {
+      callLocalAI.mockResolvedValue(yaml.dump({ version: 1, updates: [] }));
+
+      const result = await enhanceDependabotWithAI(baseConfig, ['package.json'], aiConfig);
+      expect(result).toEqual(baseConfig);
+    });
+
+    it('falls back to base config when AI returns unknown ecosystem', async () => {
+      const bad = {
+        version: 2,
+        updates: [{ 'package-ecosystem': 'fake-ecosystem', directory: '/', schedule: { interval: 'weekly' } }]
+      };
+      callLocalAI.mockResolvedValue(yaml.dump(bad));
+
+      const result = await enhanceDependabotWithAI(baseConfig, ['package.json'], aiConfig);
+      expect(result).toEqual(baseConfig);
+    });
+
+    it('falls back to base config when AI call throws', async () => {
+      callLocalAI.mockRejectedValue(new Error('AI timeout'));
+
+      const result = await enhanceDependabotWithAI(baseConfig, ['package.json'], aiConfig);
+      expect(result).toEqual(baseConfig);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // generateDependabotConfig
+  // ---------------------------------------------------------------------------
+  describe('generateDependabotConfig', () => {
+    it('generates config from file tree', async () => {
+      _setConfigForTesting({
+        dependabot_generation: { enabled: true, default_schedule: 'weekly', default_labels: ['dependencies'] }
+      });
+
+      octokit.request.mockResolvedValue({
+        data: {
+          tree: [
+            { path: 'package.json', type: 'blob' },
+            { path: '.github/workflows/ci.yml', type: 'blob' },
+            { path: 'src/index.js', type: 'blob' }
+          ]
+        }
+      });
+
+      const result = await generateDependabotConfig(octokit, 'owner', 'repo', 'main');
+
+      expect(result.config).not.toBeNull();
+      expect(result.config.version).toBe(2);
+      expect(result.ecosystems).toHaveLength(2);
+      expect(result.report).toContain('npm');
+      expect(result.report).toContain('github-actions');
+    });
+
+    it('returns null config when no ecosystems detected', async () => {
+      _setConfigForTesting({
+        dependabot_generation: { enabled: true }
+      });
+
+      octokit.request.mockResolvedValue({
+        data: {
+          tree: [
+            { path: 'README.md', type: 'blob' },
+            { path: 'LICENSE', type: 'blob' }
+          ]
+        }
+      });
+
+      const result = await generateDependabotConfig(octokit, 'owner', 'repo', 'main');
+
+      expect(result.config).toBeNull();
+      expect(result.ecosystems).toEqual([]);
+    });
+
+    it('throws on API error', async () => {
+      _setConfigForTesting({ dependabot_generation: {} });
+      octokit.request.mockRejectedValue(new Error('API error'));
+
+      await expect(
+        generateDependabotConfig(octokit, 'owner', 'repo', 'main')
+      ).rejects.toThrow('API error');
+    });
+
+    it('skips tree entries that are not blobs', async () => {
+      _setConfigForTesting({ dependabot_generation: {} });
+
+      octokit.request.mockResolvedValue({
+        data: {
+          tree: [
+            { path: 'package.json', type: 'blob' },
+            { path: 'src', type: 'tree' }
+          ]
+        }
+      });
+
+      const result = await generateDependabotConfig(octokit, 'owner', 'repo', 'main');
+      expect(result.ecosystems).toHaveLength(1);
+      expect(result.ecosystems[0].ecosystem).toBe('npm');
     });
   });
 });

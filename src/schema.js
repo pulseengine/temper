@@ -72,6 +72,57 @@ export function validateConfig(config) {
     }
   }
 
+  if (config.dependabot_generation !== undefined) {
+    const dg = config.dependabot_generation;
+    if (typeof dg !== 'object' || dg === null) {
+      errors.push('dependabot_generation must be an object');
+    } else {
+      if (dg.enabled !== undefined && typeof dg.enabled !== 'boolean') {
+        errors.push('dependabot_generation.enabled must be a boolean');
+      }
+      if (dg.ai_enhance !== undefined && typeof dg.ai_enhance !== 'boolean') {
+        errors.push('dependabot_generation.ai_enhance must be a boolean');
+      }
+      if (dg.default_schedule !== undefined) {
+        const validSchedules = ['daily', 'weekly', 'monthly'];
+        if (!validSchedules.includes(dg.default_schedule)) {
+          errors.push('dependabot_generation.default_schedule must be one of: daily, weekly, monthly');
+        }
+      }
+      if (dg.default_labels !== undefined && !Array.isArray(dg.default_labels)) {
+        errors.push('dependabot_generation.default_labels must be an array');
+      }
+      if (dg.max_directories_per_ecosystem !== undefined) {
+        if (typeof dg.max_directories_per_ecosystem !== 'number' || dg.max_directories_per_ecosystem < 1) {
+          errors.push('dependabot_generation.max_directories_per_ecosystem must be a positive number');
+        }
+      }
+    }
+  }
+
+  if (config.scheduler !== undefined) {
+    const sc = config.scheduler;
+    if (typeof sc !== 'object' || sc === null) {
+      errors.push('scheduler must be an object');
+    } else {
+      if (sc.interval_minutes !== undefined) {
+        if (typeof sc.interval_minutes !== 'number' || sc.interval_minutes < 1) {
+          errors.push('scheduler.interval_minutes must be a positive number');
+        }
+      }
+      if (sc.max_tasks_per_tick !== undefined) {
+        if (typeof sc.max_tasks_per_tick !== 'number' || sc.max_tasks_per_tick < 1) {
+          errors.push('scheduler.max_tasks_per_tick must be a positive number');
+        }
+      }
+      if (sc.rate_limit_threshold !== undefined) {
+        if (typeof sc.rate_limit_threshold !== 'number' || sc.rate_limit_threshold < 0) {
+          errors.push('scheduler.rate_limit_threshold must be a non-negative number');
+        }
+      }
+    }
+  }
+
   if (config.ai_review?.enabled) {
     if (config.ai_review.endpoint !== undefined && typeof config.ai_review.endpoint !== 'string') {
       errors.push('ai_review.endpoint must be a string');

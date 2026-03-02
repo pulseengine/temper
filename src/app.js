@@ -1,3 +1,5 @@
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { createDashboardHandler } from './dashboard.js';
 import { getConfig } from './config.js';
 import { getLogger, setLogger } from './logger.js';
@@ -11,7 +13,9 @@ import { generateConfigurationReport } from './reporting.js';
 import {
   checkDependabotConfiguration,
   checkExistingDependabotConfig,
-  fixDependabotPRLabels
+  fixDependabotPRLabels,
+  generateDependabotConfig,
+  applyDependabotConfig
 } from './dependabot.js';
 import { handleSignedCommitMerge, checkPRMergeStrategy } from './merge-strategy.js';
 import { reviewPullRequest, updateReviewStatus } from './ai-review.js';
@@ -19,6 +23,17 @@ import { isProcessed, markProcessed } from './idempotency.js';
 import { triggerSelfUpdate } from './self-update.js';
 import { defaultQueue } from './queue.js';
 import { applySecurityMiddleware } from './middleware.js';
+import { initTaskStore } from './task-store.js';
+import { createScheduler } from './scheduler.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Module-level state for the task store and scheduler
+let _taskStore = null;
+let _scheduler = null;
+
+function getTaskStore() { return _taskStore; }
+function getScheduler() { return _scheduler; }
 
 function applySecurityHeaders(res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -33,12 +48,19 @@ function createCustomRoutesHandler() {
 
     if (req.method === 'GET' && pathname === '/health') {
       applySecurityHeaders(res);
-      const body = JSON.stringify({
+      const healthData = {
         status: 'healthy',
         timestamp: new Date().toISOString(),
         version: '1.0.0',
         queue: defaultQueue.stats()
-      });
+      };
+      if (_taskStore) {
+        healthData.tasks = _taskStore.getStats();
+      }
+      if (_scheduler) {
+        healthData.scheduler = { running: _scheduler.isRunning() };
+      }
+      const body = JSON.stringify(healthData);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(body);
       return true;
@@ -273,6 +295,52 @@ function registerApp(app, { getRouter, addHandler } = {}) {
           repo,
           issue_number: issueNumber,
           body: '✅ No Dependabot PR label issues found.'
+        });
+      }
+      if (deliveryId) markProcessed(deliveryId);
+      return;
+    }
+
+    if (cmd === '/generate-dependabot') {
+      if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
+        return;
+      }
+
+      try {
+        // Get default branch
+        const repoData = await context.octokit.request('GET /repos/{owner}/{repo}', { owner, repo });
+        const defaultBranch = repoData.data.default_branch;
+
+        const result = await generateDependabotConfig(context.octokit, owner, repo, defaultBranch);
+
+        if (!result.config) {
+          await context.octokit.issues.createComment({
+            owner, repo, issue_number: issueNumber,
+            body: `No package ecosystems detected in ${owner}/${repo}. Nothing to generate.`
+          });
+        } else {
+          const yaml = (await import('js-yaml')).default;
+          let body = `## Generated Dependabot Configuration for ${owner}/${repo}\n\n`;
+          body += `${result.report}\n\n`;
+          body += '```yaml\n' + yaml.dump(result.config) + '```\n\n';
+          body += 'Applying configuration...';
+
+          await context.octokit.issues.createComment({
+            owner, repo, issue_number: issueNumber,
+            body
+          });
+
+          await applyDependabotConfig(context.octokit, owner, repo, result.config);
+
+          await context.octokit.issues.createComment({
+            owner, repo, issue_number: issueNumber,
+            body: '✅ Dependabot configuration applied!'
+          });
+        }
+      } catch (error) {
+        await context.octokit.issues.createComment({
+          owner, repo, issue_number: issueNumber,
+          body: `❌ Error generating Dependabot config: ${error.message}`
         });
       }
       if (deliveryId) markProcessed(deliveryId);
@@ -546,12 +614,19 @@ function registerApp(app, { getRouter, addHandler } = {}) {
     applySecurityMiddleware(router);
 
     router.get('/health', (req, res) => {
-      res.status(200).json({
+      const healthData = {
         status: 'healthy',
         timestamp: new Date().toISOString(),
         version: '1.0.0',
         queue: defaultQueue.stats()
-      });
+      };
+      if (_taskStore) {
+        healthData.tasks = _taskStore.getStats();
+      }
+      if (_scheduler) {
+        healthData.scheduler = { running: _scheduler.isRunning() };
+      }
+      res.status(200).json(healthData);
     });
 
     router.get('/webhook', (req, res) => {
@@ -568,6 +643,43 @@ function registerApp(app, { getRouter, addHandler } = {}) {
   app.onError((error) => {
     getLogger().error({ err: error }, 'Probot error');
   });
+}
+
+/**
+ * Initialize the task store and scheduler.
+ * Call this once at startup with an authenticated octokit instance.
+ */
+function initScheduler(octokit) {
+  const config = getConfig();
+  const schedulerConfig = config.scheduler || {};
+
+  const dbPath = path.join(__dirname, '..', 'data', 'tasks.db');
+  _taskStore = initTaskStore(dbPath);
+
+  _scheduler = createScheduler(_taskStore, octokit, {
+    intervalMs: (schedulerConfig.interval_minutes || 5) * 60 * 1000,
+    maxTasksPerTick: schedulerConfig.max_tasks_per_tick || 5,
+    rateLimitThreshold: schedulerConfig.rate_limit_threshold || 100
+  });
+
+  // Register the generate-dependabot handler
+  _scheduler.registerHandler('generate-dependabot', async (payload, { octokit: kit, logger }) => {
+    const { owner, repo, defaultBranch } = payload;
+    logger.info(`Scheduler: generating dependabot config for ${owner}/${repo}`);
+
+    const result = await generateDependabotConfig(kit, owner, repo, defaultBranch);
+    if (result.config) {
+      await applyDependabotConfig(kit, owner, repo, result.config);
+      logger.info(`Scheduler: applied dependabot config to ${owner}/${repo}`);
+    } else {
+      logger.info(`Scheduler: no ecosystems detected in ${owner}/${repo}, skipping`);
+    }
+  });
+
+  _scheduler.start();
+  getLogger().info('Task store and scheduler initialized');
+
+  return { store: _taskStore, scheduler: _scheduler };
 }
 
 function mapLegacyEnvVars() {
@@ -589,5 +701,8 @@ export {
   registerApp,
   mapLegacyEnvVars,
   createCustomRoutesHandler,
-  applySecurityHeaders
+  applySecurityHeaders,
+  initScheduler,
+  getTaskStore,
+  getScheduler
 };

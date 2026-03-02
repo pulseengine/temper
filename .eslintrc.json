@@ -9,6 +9,11 @@
     "ecmaVersion": 2022,
     "sourceType": "module"
   },
+  "ignorePatterns": [
+    "src/htmx.min.js",
+    "src/idiomorph-ext.min.js",
+    "src/dashboard-client.js"
+  ],
   "rules": {
     "no-console": "off",
     "prefer-const": "error",

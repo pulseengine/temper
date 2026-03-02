@@ -16,7 +16,7 @@ import {
   fixDependabotPRLabels
 } from './dependabot.js';
 
-async function configureRepository(octokit, repoOrOwner, maybeRepo) {
+async function configureRepository(octokit, repoOrOwner, maybeRepo, { enqueueTask } = {}) {
   const config = getConfig();
   const repoInfo = normalizeRepoInput(repoOrOwner, maybeRepo);
   const owner = repoInfo.owner.login;
@@ -53,7 +53,25 @@ async function configureRepository(octokit, repoOrOwner, maybeRepo) {
       await applyCodeowners(octokit, owner, repo, config.codeowners);
     }
 
-    if (config?.dependabot) {
+    if (config?.dependabot_generation?.enabled) {
+      const dependabotCheck = await checkExistingDependabotConfig(octokit, owner, repo);
+
+      if (dependabotCheck.labelIssues.length > 0) {
+        await fixDependabotPRLabels(octokit, owner, repo, dependabotCheck.labelIssues);
+      }
+
+      if (!dependabotCheck.exists) {
+        // Enqueue for async generation rather than blocking the webhook
+        if (enqueueTask) {
+          enqueueTask(
+            'generate-dependabot',
+            `generate-dependabot:${owner}/${repo}`,
+            { owner, repo, defaultBranch }
+          );
+          getLogger().info(`Enqueued dependabot generation for ${owner}/${repo}`);
+        }
+      }
+    } else if (config?.dependabot) {
       const dependabotCheck = await checkExistingDependabotConfig(octokit, owner, repo);
 
       if (dependabotCheck.labelIssues.length > 0) {

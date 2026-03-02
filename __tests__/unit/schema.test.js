@@ -88,4 +88,80 @@ describe('validateConfig', () => {
     expect(result.valid).toBe(false);
     expect(result.errors[0]).toContain('self_update');
   });
+
+  // dependabot_generation validation
+  it('accepts valid dependabot_generation config', () => {
+    const result = validateConfig({
+      dependabot_generation: {
+        enabled: true,
+        ai_enhance: false,
+        default_schedule: 'weekly',
+        default_labels: ['dependencies'],
+        max_directories_per_ecosystem: 5
+      }
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects non-object dependabot_generation', () => {
+    const result = validateConfig({ dependabot_generation: 'yes' });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('dependabot_generation');
+  });
+
+  it('rejects non-boolean dependabot_generation.enabled', () => {
+    const result = validateConfig({ dependabot_generation: { enabled: 'true' } });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('dependabot_generation.enabled');
+  });
+
+  it('rejects invalid dependabot_generation.default_schedule', () => {
+    const result = validateConfig({ dependabot_generation: { default_schedule: 'hourly' } });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('default_schedule');
+  });
+
+  it('rejects non-array dependabot_generation.default_labels', () => {
+    const result = validateConfig({ dependabot_generation: { default_labels: 'deps' } });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('default_labels');
+  });
+
+  it('rejects non-positive max_directories_per_ecosystem', () => {
+    const result = validateConfig({ dependabot_generation: { max_directories_per_ecosystem: 0 } });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('max_directories_per_ecosystem');
+  });
+
+  // scheduler validation
+  it('accepts valid scheduler config', () => {
+    const result = validateConfig({
+      scheduler: { interval_minutes: 5, max_tasks_per_tick: 10, rate_limit_threshold: 100 }
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects non-object scheduler', () => {
+    const result = validateConfig({ scheduler: 42 });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('scheduler');
+  });
+
+  it('rejects non-positive scheduler.interval_minutes', () => {
+    const result = validateConfig({ scheduler: { interval_minutes: 0 } });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('interval_minutes');
+  });
+
+  it('rejects non-positive scheduler.max_tasks_per_tick', () => {
+    const result = validateConfig({ scheduler: { max_tasks_per_tick: -1 } });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('max_tasks_per_tick');
+  });
+
+  it('rejects negative scheduler.rate_limit_threshold', () => {
+    const result = validateConfig({ scheduler: { rate_limit_threshold: -5 } });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('rate_limit_threshold');
+  });
 });

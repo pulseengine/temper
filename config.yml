@@ -55,6 +55,18 @@ self_update:
   repo: temper
   branch: main
 
+dependabot_generation:
+  enabled: true
+  ai_enhance: false
+  default_schedule: "weekly"
+  default_labels: ["dependencies"]
+  max_directories_per_ecosystem: 5
+
+scheduler:
+  interval_minutes: 5
+  max_tasks_per_tick: 5
+  rate_limit_threshold: 100
+
 issue_labels:
   - name: "bug"
     color: "d73a4a"

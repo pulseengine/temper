@@ -2,6 +2,8 @@ import yaml from 'js-yaml';
 import { getConfig, getDependabotLabels } from './config.js';
 import { getLogger } from './logger.js';
 import { upsertRepoFile, createConfigurationPR } from './github-api.js';
+import { detectEcosystems } from './ecosystem-detector.js';
+import { callLocalAI } from './ai-review.js';
 
 async function applyDependabotConfig(octokit, owner, repo, dependabotConfig) {
   const config = getConfig();
@@ -203,9 +205,151 @@ async function checkDependabotConfiguration(octokit, owner, repo) {
   }
 }
 
+/**
+ * Build a dependabot.yml config object from detected ecosystems.
+ * @param {Array<{ecosystem: string, directory: string}>} ecosystems
+ * @param {object} [genConfig] - dependabot_generation config section
+ * @returns {object} dependabot config {version: 2, updates: [...]}
+ */
+function buildDependabotYaml(ecosystems, genConfig = {}) {
+  const schedule = genConfig.default_schedule || 'weekly';
+  const labels = genConfig.default_labels || ['dependencies'];
+
+  const updates = ecosystems.map(({ ecosystem, directory }) => ({
+    'package-ecosystem': ecosystem,
+    directory,
+    schedule: { interval: schedule },
+    labels
+  }));
+
+  return { version: 2, updates };
+}
+
+/**
+ * Use AI to enhance a heuristic dependabot config (schedules, grouping).
+ * Falls back to the base config on any failure.
+ * @param {object} baseConfig - heuristic dependabot config
+ * @param {string[]} filePaths - repo file tree for context
+ * @param {object} aiConfig - ai_review config section
+ * @returns {Promise<object>} enhanced or original config
+ */
+async function enhanceDependabotWithAI(baseConfig, filePaths, aiConfig) {
+  try {
+    const systemPrompt =
+      'You are a Dependabot configuration expert. Given a base dependabot.yml and the repository file tree, ' +
+      'improve the configuration with better schedules, grouping strategies, and ignore patterns. ' +
+      'Return ONLY valid YAML for a dependabot.yml file (version 2). Do not include markdown fences.';
+
+    const userPrompt =
+      `Base dependabot.yml:\n${yaml.dump(baseConfig)}\n\n` +
+      `Repository files (sample):\n${filePaths.slice(0, 200).join('\n')}`;
+
+    const response = await callLocalAI(
+      aiConfig.endpoint,
+      aiConfig.model || 'local-model',
+      systemPrompt,
+      userPrompt,
+      { maxTokens: 2000, temperature: 0.2, timeout: aiConfig.timeout || 60000 }
+    );
+
+    if (!response || !response.trim()) {
+      getLogger().warn('AI returned empty response for dependabot enhancement, using heuristic');
+      return baseConfig;
+    }
+
+    const enhanced = yaml.load(response);
+
+    // Validate: must be version 2 with updates array
+    if (!enhanced || enhanced.version !== 2 || !Array.isArray(enhanced.updates)) {
+      getLogger().warn('AI returned invalid dependabot config, using heuristic');
+      return baseConfig;
+    }
+
+    // Validate ecosystem values
+    const validEcosystems = new Set([
+      'npm', 'gomod', 'cargo', 'bundler', 'pip', 'maven', 'gradle',
+      'composer', 'docker', 'github-actions', 'mix', 'pub', 'nuget',
+      'terraform', 'elm', 'gitsubmodule', 'hex', 'swift'
+    ]);
+    for (const update of enhanced.updates) {
+      if (!validEcosystems.has(update['package-ecosystem'])) {
+        getLogger().warn(
+          { ecosystem: update['package-ecosystem'] },
+          'AI returned unknown ecosystem, using heuristic'
+        );
+        return baseConfig;
+      }
+    }
+
+    return enhanced;
+  } catch (error) {
+    getLogger().warn({ err: error.message }, 'AI enhancement failed, using heuristic config');
+    return baseConfig;
+  }
+}
+
+/**
+ * Generate a tailored dependabot.yml for a repository.
+ * Fetches the file tree, detects ecosystems, builds config, optionally enhances with AI.
+ * @param {object} octokit
+ * @param {string} owner
+ * @param {string} repo
+ * @param {string} defaultBranch
+ * @returns {Promise<{config: object|null, ecosystems: Array, report: string}>}
+ */
+async function generateDependabotConfig(octokit, owner, repo, defaultBranch) {
+  const appConfig = getConfig();
+  const genConfig = appConfig.dependabot_generation || {};
+
+  try {
+    getLogger().info(`Generating Dependabot config for ${owner}/${repo}`);
+
+    // Fetch the full file tree
+    const treeResponse = await octokit.request(
+      'GET /repos/{owner}/{repo}/git/trees/{tree_sha}',
+      { owner, repo, tree_sha: defaultBranch, recursive: '1' }
+    );
+
+    const filePaths = (treeResponse.data.tree || [])
+      .filter(item => item.type === 'blob')
+      .map(item => item.path);
+
+    // Detect ecosystems
+    const ecosystems = detectEcosystems(filePaths, {
+      maxDirectoriesPerEcosystem: genConfig.max_directories_per_ecosystem || 5
+    });
+
+    if (ecosystems.length === 0) {
+      getLogger().info(`No package ecosystems detected in ${owner}/${repo}`);
+      return { config: null, ecosystems: [], report: 'No package ecosystems detected.' };
+    }
+
+    // Build heuristic config
+    let config = buildDependabotYaml(ecosystems, genConfig);
+
+    // Optionally enhance with AI
+    const aiConfig = appConfig.ai_review;
+    if (genConfig.ai_enhance && aiConfig?.enabled && aiConfig?.endpoint) {
+      config = await enhanceDependabotWithAI(config, filePaths, aiConfig);
+    }
+
+    const ecosystemList = ecosystems.map(e => `${e.ecosystem} (${e.directory})`).join(', ');
+    const report = `Detected ${ecosystems.length} ecosystem(s): ${ecosystemList}`;
+    getLogger().info(`Generated Dependabot config for ${owner}/${repo}: ${ecosystemList}`);
+
+    return { config, ecosystems, report };
+  } catch (error) {
+    getLogger().error(`Error generating Dependabot config for ${owner}/${repo}:`, error.message);
+    throw error;
+  }
+}
+
 export {
   applyDependabotConfig,
   checkExistingDependabotConfig,
   fixDependabotPRLabels,
-  checkDependabotConfiguration
+  checkDependabotConfiguration,
+  generateDependabotConfig,
+  buildDependabotYaml,
+  enhanceDependabotWithAI
 };

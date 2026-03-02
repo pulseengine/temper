@@ -19,7 +19,9 @@ jest.mock('../../src/reporting.js', () => ({
 jest.mock('../../src/dependabot.js', () => ({
   checkDependabotConfiguration: jest.fn(),
   checkExistingDependabotConfig: jest.fn(),
-  fixDependabotPRLabels: jest.fn()
+  fixDependabotPRLabels: jest.fn(),
+  generateDependabotConfig: jest.fn(),
+  applyDependabotConfig: jest.fn()
 }));
 
 jest.mock('../../src/merge-strategy.js', () => ({
@@ -28,7 +30,8 @@ jest.mock('../../src/merge-strategy.js', () => ({
 }));
 
 jest.mock('../../src/ai-review.js', () => ({
-  reviewPullRequest: jest.fn()
+  reviewPullRequest: jest.fn(),
+  updateReviewStatus: jest.fn()
 }));
 
 jest.mock('../../src/idempotency.js', () => ({
@@ -42,6 +45,14 @@ jest.mock('../../src/queue.js', () => ({
 
 jest.mock('../../src/middleware.js', () => ({
   applySecurityMiddleware: jest.fn()
+}));
+
+jest.mock('../../src/task-store.js', () => ({
+  initTaskStore: jest.fn()
+}));
+
+jest.mock('../../src/scheduler.js', () => ({
+  createScheduler: jest.fn()
 }));
 
 jest.mock('../../src/logger.js', () => {
@@ -64,7 +75,9 @@ import { generateConfigurationReport } from '../../src/reporting.js';
 import {
   checkDependabotConfiguration,
   checkExistingDependabotConfig,
-  fixDependabotPRLabels
+  fixDependabotPRLabels,
+  generateDependabotConfig,
+  applyDependabotConfig
 } from '../../src/dependabot.js';
 import { handleSignedCommitMerge, checkPRMergeStrategy } from '../../src/merge-strategy.js';
 import { reviewPullRequest } from '../../src/ai-review.js';
@@ -953,6 +966,68 @@ describe('app', () => {
         await handlers['issue_comment.created'](context);
 
         expect(markProcessed).not.toHaveBeenCalled();
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // /generate-dependabot
+    // -----------------------------------------------------------------------
+    describe('/generate-dependabot', () => {
+      it('generates and applies dependabot config', async () => {
+        generateDependabotConfig.mockResolvedValue({
+          config: { version: 2, updates: [{ 'package-ecosystem': 'npm', directory: '/' }] },
+          ecosystems: [{ ecosystem: 'npm', directory: '/' }],
+          report: 'Detected 1 ecosystem(s): npm (/)'
+        });
+        applyDependabotConfig.mockResolvedValue();
+
+        const { handlers } = setupApp();
+        const context = createIssueCommentContext('/generate-dependabot');
+        context.octokit.request.mockResolvedValue({ data: { default_branch: 'main' } });
+        await handlers['issue_comment.created'](context);
+
+        expect(generateDependabotConfig).toHaveBeenCalledWith(context.octokit, 'myorg', 'myrepo', 'main');
+        expect(applyDependabotConfig).toHaveBeenCalled();
+        // Two comments: the config preview + the success message
+        expect(context.octokit.issues.createComment).toHaveBeenCalledTimes(2);
+      });
+
+      it('posts message when no ecosystems detected', async () => {
+        generateDependabotConfig.mockResolvedValue({
+          config: null,
+          ecosystems: [],
+          report: 'No package ecosystems detected.'
+        });
+
+        const { handlers } = setupApp();
+        const context = createIssueCommentContext('/generate-dependabot');
+        context.octokit.request.mockResolvedValue({ data: { default_branch: 'main' } });
+        await handlers['issue_comment.created'](context);
+
+        expect(applyDependabotConfig).not.toHaveBeenCalled();
+        const body = context.octokit.issues.createComment.mock.calls[0][0].body;
+        expect(body).toContain('No package ecosystems detected');
+      });
+
+      it('posts error message on failure', async () => {
+        generateDependabotConfig.mockRejectedValue(new Error('API error'));
+
+        const { handlers } = setupApp();
+        const context = createIssueCommentContext('/generate-dependabot');
+        context.octokit.request.mockResolvedValue({ data: { default_branch: 'main' } });
+        await handlers['issue_comment.created'](context);
+
+        const body = context.octokit.issues.createComment.mock.calls[0][0].body;
+        expect(body).toContain('Error generating Dependabot config');
+      });
+
+      it('rejects non-members', async () => {
+        checkOrganizationMembership.mockResolvedValue(false);
+        const { handlers } = setupApp();
+        const context = createIssueCommentContext('/generate-dependabot');
+        await handlers['issue_comment.created'](context);
+
+        expect(generateDependabotConfig).not.toHaveBeenCalled();
       });
     });
 
