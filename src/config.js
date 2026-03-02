@@ -27,12 +27,45 @@ export const DEPENDABOT_LABEL_DEFAULTS = {
 };
 
 const CONFIG_PATH = path.join(__dirname, '..', 'config.yml');
+const LOCAL_CONFIG_PATH = path.join(__dirname, '..', 'config.local.yml');
 let config = {};
 let TARGET_SETTINGS = { ...DEFAULT_MERGE_SETTINGS };
+
+/**
+ * Deep-merge source into target. Objects merge recursively;
+ * arrays and primitives from source replace target values.
+ */
+export function deepMerge(target, source) {
+  const result = { ...target };
+  for (const key of Object.keys(source)) {
+    const srcVal = source[key];
+    const tgtVal = target[key];
+    if (
+      srcVal !== null &&
+      typeof srcVal === 'object' &&
+      !Array.isArray(srcVal) &&
+      tgtVal !== null &&
+      typeof tgtVal === 'object' &&
+      !Array.isArray(tgtVal)
+    ) {
+      result[key] = deepMerge(tgtVal, srcVal);
+    } else {
+      result[key] = srcVal;
+    }
+  }
+  return result;
+}
 
 export function loadConfig() {
   try {
     config = yaml.load(fs.readFileSync(CONFIG_PATH, 'utf8')) || {};
+
+    if (fs.existsSync(LOCAL_CONFIG_PATH)) {
+      const localConfig = yaml.load(fs.readFileSync(LOCAL_CONFIG_PATH, 'utf8')) || {};
+      config = deepMerge(config, localConfig);
+      getLogger().info('Merged local overrides from config.local.yml');
+    }
+
     TARGET_SETTINGS = config?.settings?.merge || { ...DEFAULT_MERGE_SETTINGS };
     const validation = validateConfig(config);
     if (!validation.valid) {
