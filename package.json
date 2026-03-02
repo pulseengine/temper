@@ -56,6 +56,6 @@
     "provenance": true
   },
   "pnpm": {
-    "onlyBuiltDependencies": []
+    "onlyBuiltDependencies": ["better-sqlite3"]
   }
 }

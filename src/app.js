@@ -1,6 +1,6 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createDashboardHandler } from './dashboard.js';
+import { createDashboardHandler, DEPLOY_SHA } from './dashboard.js';
 import { getConfig } from './config.js';
 import { getLogger, setLogger } from './logger.js';
 import { configureRepository } from './repository.js';
@@ -51,7 +51,7 @@ function createCustomRoutesHandler() {
       const healthData = {
         status: 'healthy',
         timestamp: new Date().toISOString(),
-        version: '1.0.0',
+        version: DEPLOY_SHA || '1.0.0',
         queue: defaultQueue.stats()
       };
       if (_taskStore) {
@@ -617,7 +617,7 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       const healthData = {
         status: 'healthy',
         timestamp: new Date().toISOString(),
-        version: '1.0.0',
+        version: DEPLOY_SHA || '1.0.0',
         queue: defaultQueue.stats()
       };
       if (_taskStore) {
