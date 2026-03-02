@@ -298,7 +298,7 @@ describe('app', () => {
 
     it('works without getRouter option', () => {
       const { app } = setupApp({ skipRouter: true });
-      expect(app.on).toHaveBeenCalledTimes(2);
+      expect(app.on).toHaveBeenCalledTimes(4);
       expect(app.onError).toHaveBeenCalledTimes(1);
     });
 
@@ -369,8 +369,8 @@ describe('app', () => {
     it('registers a handler via addHandler when getRouter is absent', () => {
       const { mockAddHandler, addedHandlers } = setupApp({ useAddHandler: true });
 
-      expect(mockAddHandler).toHaveBeenCalledTimes(1);
-      expect(addedHandlers).toHaveLength(1);
+      expect(mockAddHandler).toHaveBeenCalledTimes(2);
+      expect(addedHandlers).toHaveLength(2);
       expect(typeof addedHandlers[0]).toBe('function');
     });
 

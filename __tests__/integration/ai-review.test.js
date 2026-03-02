@@ -7,6 +7,13 @@ jest.mock('../../src/logger.js', () => {
   return { getLogger: () => mockLogger };
 });
 
+jest.mock('fs', () => ({
+  existsSync: jest.fn().mockReturnValue(false),
+  readFileSync: jest.fn().mockReturnValue('[]'),
+  writeFileSync: jest.fn(),
+  mkdirSync: jest.fn()
+}));
+
 import {
   buildReviewPrompt,
   callLocalAI,
@@ -14,7 +21,16 @@ import {
   isLocalEndpoint,
   reviewPullRequest,
   sanitizeAIOutput,
-  _reviewTimestamps
+  parseDiffByFile,
+  classifyFile,
+  prioritizeFiles,
+  supersedePreviousReviews,
+  storeReview,
+  getReviews,
+  updateReviewStatus,
+  _reviewTimestamps,
+  _resetReviews,
+  AI_REVIEW_SIGNATURE
 } from '../../src/ai-review.js';
 import { _setConfigForTesting } from '../../src/config.js';
 import { getLogger } from '../../src/logger.js';
@@ -27,7 +43,9 @@ function createMockOctokit() {
   return {
     request: jest.fn().mockResolvedValue({ status: 200, data: {} }),
     issues: {
-      createComment: jest.fn().mockResolvedValue({ status: 201, data: {} })
+      createComment: jest.fn().mockResolvedValue({ status: 201, data: {} }),
+      listComments: jest.fn().mockResolvedValue({ data: [] }),
+      updateComment: jest.fn().mockResolvedValue({ status: 200, data: {} })
     }
   };
 }
@@ -38,7 +56,7 @@ function makePrData(overrides = {}) {
     title: 'Fix bug',
     user: { login: 'dev' },
     base: { ref: 'main' },
-    head: { ref: 'fix-branch' },
+    head: { ref: 'fix-branch', sha: 'abc1234567890abcdef' },
     body: 'Fixes #1',
     ...overrides
   };
@@ -55,6 +73,14 @@ function makeAiConfig(overrides = {}) {
     timeout: 120000,
     ...overrides
   };
+}
+
+function makeDiff(filename, content = '+added') {
+  return `diff --git a/${filename} b/${filename}\n--- a/${filename}\n+++ b/${filename}\n@@ -1,3 +1,4 @@\n${content}`;
+}
+
+function makeMultiDiff(files) {
+  return files.map(({ name, content }) => makeDiff(name, content || '+changed')).join('\n');
 }
 
 function mockFetchSuccess(content = 'Looks good!') {
@@ -76,6 +102,7 @@ const mockOriginalFetch = global.fetch;
 
 afterEach(() => {
   _reviewTimestamps.clear();
+  _resetReviews();
   _setConfigForTesting({});
   global.fetch = mockOriginalFetch;
   jest.clearAllMocks();
@@ -165,9 +192,9 @@ describe('ai-review', () => {
   // =========================================================================
 
   describe('buildReviewPrompt', () => {
-    it('builds a prompt with PR data', () => {
+    it('builds a prompt with PR metadata', () => {
       const prData = makePrData();
-      const diff = '+ added line';
+      const diff = makeDiff('src/foo.js', '+added line');
       const files = [{ filename: 'src/foo.js', additions: 1, deletions: 0 }];
       const result = buildReviewPrompt(prData, diff, files, 10000);
       expect(result).toContain('Pull Request #42');
@@ -175,22 +202,77 @@ describe('ai-review', () => {
       expect(result).toContain('src/foo.js');
       expect(result).toContain('dev');
       expect(result).toContain('Fixes #1');
-      expect(result).toContain('+ added line');
     });
 
-    it('truncates large diffs', () => {
-      const prData = makePrData({ number: 1, title: 'T', body: '' });
-      const diff = 'x'.repeat(200);
-      const result = buildReviewPrompt(prData, diff, [], 100);
-      expect(result).toContain('[... diff truncated due to size ...]');
+    it('includes source file diff in code block', () => {
+      const prData = makePrData();
+      const diff = makeDiff('src/main.rs', '+fn main() {}');
+      const files = [{ filename: 'src/main.rs', additions: 1, deletions: 0 }];
+      const result = buildReviewPrompt(prData, diff, files, 10000);
+      expect(result).toContain('```diff');
+      expect(result).toContain('+fn main() {}');
     });
 
-    it('does not truncate small diffs', () => {
-      const prData = makePrData({ number: 1, title: 'T', body: '' });
-      const diff = 'small diff';
-      const result = buildReviewPrompt(prData, diff, [], 10000);
-      expect(result).not.toContain('[... diff truncated due to size ...]');
-      expect(result).toContain('small diff');
+    it('annotates files with tier labels in manifest', () => {
+      const prData = makePrData();
+      const diff = makeMultiDiff([
+        { name: 'src/main.rs' },
+        { name: 'Cargo.lock' },
+        { name: 'src/main.test.js' }
+      ]);
+      const files = [
+        { filename: 'src/main.rs', additions: 1, deletions: 0 },
+        { filename: 'Cargo.lock', additions: 500, deletions: 200 },
+        { filename: 'src/main.test.js', additions: 3, deletions: 0 }
+      ];
+      const result = buildReviewPrompt(prData, diff, files, 50000);
+      expect(result).toContain('[source]');
+      expect(result).toContain('[skipped: lockfile/generated]');
+      expect(result).toContain('[test]');
+    });
+
+    it('excludes tier 0 files from diff content', () => {
+      const prData = makePrData();
+      const diff = makeMultiDiff([
+        { name: 'src/app.js', content: '+source code' },
+        { name: 'Cargo.lock', content: '+lockfile data' }
+      ]);
+      const files = [
+        { filename: 'src/app.js', additions: 1, deletions: 0 },
+        { filename: 'Cargo.lock', additions: 100, deletions: 0 }
+      ];
+      const result = buildReviewPrompt(prData, diff, files, 50000);
+      expect(result).toContain('+source code');
+      expect(result).not.toContain('+lockfile data');
+    });
+
+    it('omits files that exceed remaining budget', () => {
+      const prData = makePrData();
+      const smallDiff = makeDiff('src/small.js', '+tiny');
+      const largeDiff = makeDiff('src/large.js', '+' + 'x'.repeat(500));
+      const diff = smallDiff + '\n' + largeDiff;
+      const files = [
+        { filename: 'src/small.js', additions: 1, deletions: 0 },
+        { filename: 'src/large.js', additions: 1, deletions: 0 }
+      ];
+      // Budget only fits the small file
+      const result = buildReviewPrompt(prData, diff, files, smallDiff.length);
+      expect(result).toContain('+tiny');
+      expect(result).toContain('omitted for size/type');
+    });
+
+    it('shows diff header with file counts', () => {
+      const prData = makePrData();
+      const diff = makeMultiDiff([
+        { name: 'src/a.js', content: '+a' },
+        { name: 'src/b.js', content: '+b' }
+      ]);
+      const files = [
+        { filename: 'src/a.js', additions: 1, deletions: 0 },
+        { filename: 'src/b.js', additions: 1, deletions: 0 }
+      ];
+      const result = buildReviewPrompt(prData, diff, files, 50000);
+      expect(result).toContain('2 of 2 files shown');
     });
 
     it('handles null body with (no description)', () => {
@@ -211,15 +293,15 @@ describe('ai-review', () => {
       expect(result).toContain('(no description)');
     });
 
-    it('lists multiple files', () => {
+    it('lists multiple files with additions/deletions', () => {
       const prData = makePrData();
       const files = [
         { filename: 'a.js', additions: 5, deletions: 2 },
         { filename: 'b.js', additions: 0, deletions: 10 }
       ];
       const result = buildReviewPrompt(prData, '', files, 10000);
-      expect(result).toContain('a.js (+5/-2)');
-      expect(result).toContain('b.js (+0/-10)');
+      expect(result).toContain('a.js` (+5/-2)');
+      expect(result).toContain('b.js` (+0/-10)');
     });
 
     it('includes base and head branch refs', () => {
@@ -229,28 +311,42 @@ describe('ai-review', () => {
       expect(result).toContain('feature/new');
     });
 
-    it('wraps diff in code block', () => {
+    it('wraps diff content in code block', () => {
       const prData = makePrData();
-      const result = buildReviewPrompt(prData, 'some diff', [], 10000);
-      expect(result).toContain('```diff\nsome diff\n```');
+      const diff = makeDiff('src/app.js', '+new line');
+      const result = buildReviewPrompt(prData, diff, [{ filename: 'src/app.js', additions: 1, deletions: 0 }], 10000);
+      expect(result).toContain('```diff');
+      expect(result).toContain('```');
     });
 
-    it('truncates diff exactly at maxDiffSize boundary', () => {
+    it('continues packing after skipping oversized file', () => {
       const prData = makePrData();
-      const diff = 'a'.repeat(100);
-      // Diff of exactly maxDiffSize should NOT be truncated
-      const result = buildReviewPrompt(prData, diff, [], 100);
-      expect(result).not.toContain('[... diff truncated due to size ...]');
-      expect(result).toContain('a'.repeat(100));
+      // Large file first (alphabetically), small file second
+      const largeDiff = makeDiff('src/big.js', '+' + 'x'.repeat(1000));
+      const smallDiff = makeDiff('src/tiny.js', '+small');
+      const diff = largeDiff + '\n' + smallDiff;
+      const files = [
+        { filename: 'src/big.js', additions: 1, deletions: 0 },
+        { filename: 'src/tiny.js', additions: 1, deletions: 0 }
+      ];
+      // Budget fits small but not large. Since we sort by size, small comes first.
+      const result = buildReviewPrompt(prData, diff, files, 500);
+      expect(result).toContain('+small');
+      expect(result).toContain('1 omitted');
     });
 
-    it('truncates diff at maxDiffSize + 1', () => {
+    it('handles empty diff string', () => {
       const prData = makePrData();
-      const diff = 'a'.repeat(101);
-      const result = buildReviewPrompt(prData, diff, [], 100);
-      expect(result).toContain('[... diff truncated due to size ...]');
-      // The truncated content should be exactly 100 chars
-      expect(result).toContain('a'.repeat(100));
+      const result = buildReviewPrompt(prData, '', [], 10000);
+      expect(result).toContain('Diff');
+      expect(result).toContain('```diff');
+    });
+
+    it('handles non-string diff gracefully', () => {
+      const prData = makePrData();
+      const result = buildReviewPrompt(prData, { not: 'a string' }, [], 10000);
+      expect(result).toContain('```diff');
+      expect(result).not.toContain('[object Object]');
     });
   });
 
@@ -285,6 +381,22 @@ describe('ai-review', () => {
     it('includes may contain inaccuracies disclaimer', () => {
       const result = formatReviewComment('test', 99);
       expect(result).toContain('may contain inaccuracies');
+    });
+
+    it('includes commit SHA when provided', () => {
+      const result = formatReviewComment('review', 1, 'abc1234567890');
+      expect(result).toContain('Reviewed at `abc1234`');
+    });
+
+    it('omits commit SHA line when not provided', () => {
+      const result = formatReviewComment('review', 1);
+      expect(result).not.toContain('Reviewed at');
+    });
+
+    it('truncates long SHA to 7 characters', () => {
+      const result = formatReviewComment('review', 1, 'a'.repeat(40));
+      expect(result).toContain('`aaaaaaa`');
+      expect(result).not.toContain('a'.repeat(40));
     });
   });
 
@@ -720,12 +832,13 @@ describe('ai-review', () => {
       expect(fetchBody.model).toBe('deepseek-coder');
     });
 
-    it('uses default max_diff_size when not configured', async () => {
+    it('uses default max_diff_size budget when not configured', async () => {
       _setConfigForTesting({
         ai_review: makeAiConfig({ max_diff_size: undefined })
       });
 
-      const largeDiff = 'x'.repeat(15000);
+      // Create a large valid diff that exceeds the 12000 default budget
+      const largeDiff = makeDiff('src/huge.js', '+' + 'x'.repeat(15000));
       octokit.request
         .mockResolvedValueOnce({ data: makePrData() })
         .mockResolvedValueOnce({ data: largeDiff })
@@ -734,9 +847,9 @@ describe('ai-review', () => {
       mockFetchSuccess('review');
       await reviewPullRequest(octokit, 'owner', 'repo', 1);
 
-      // Default max_diff_size is 12000, so the diff should be truncated
+      // The file exceeds the 12000 budget, so it should be omitted
       const fetchBody = JSON.parse(global.fetch.mock.calls[0][1].body);
-      expect(fetchBody.messages[1].content).toContain('[... diff truncated due to size ...]');
+      expect(fetchBody.messages[1].content).toContain('omitted for size/type');
     });
 
     it('uses default max_tokens when not configured', async () => {
@@ -1089,6 +1202,507 @@ describe('ai-review', () => {
       const fetchBody = JSON.parse(global.fetch.mock.calls[0][1].body);
       expect(fetchBody.max_tokens).toBe(500);
       expect(fetchBody.temperature).toBe(0.8);
+    });
+
+    it('includes commit SHA in review comment', async () => {
+      _setConfigForTesting({ ai_review: makeAiConfig() });
+
+      octokit.request
+        .mockResolvedValueOnce({ data: makePrData({ head: { ref: 'fix', sha: 'deadbeef12345678' } }) })
+        .mockResolvedValueOnce({ data: 'diff' })
+        .mockResolvedValueOnce({ data: [] });
+
+      mockFetchSuccess('review');
+      const result = await reviewPullRequest(octokit, 'owner', 'repo', 42);
+
+      expect(result.success).toBe(true);
+      expect(result.comment).toContain('Reviewed at `deadbee`');
+    });
+
+    it('calls supersedePreviousReviews before posting', async () => {
+      _setConfigForTesting({ ai_review: makeAiConfig() });
+
+      const existingReview = {
+        id: 100,
+        body: '## AI Code Review for PR #42\n\nOld review content'
+      };
+      octokit.issues.listComments.mockResolvedValue({ data: [existingReview] });
+
+      octokit.request
+        .mockResolvedValueOnce({ data: makePrData() })
+        .mockResolvedValueOnce({ data: 'diff' })
+        .mockResolvedValueOnce({ data: [] });
+
+      mockFetchSuccess('New review');
+      await reviewPullRequest(octokit, 'owner', 'repo', 42);
+
+      // Old review should be updated with outdated prefix
+      expect(octokit.issues.updateComment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          comment_id: 100,
+          body: expect.stringContaining('Outdated')
+        })
+      );
+      // New review should still be posted
+      expect(octokit.issues.createComment).toHaveBeenCalled();
+    });
+
+    it('stores review record after successful review', async () => {
+      _setConfigForTesting({ ai_review: makeAiConfig() });
+
+      octokit.request
+        .mockResolvedValueOnce({ data: makePrData() })
+        .mockResolvedValueOnce({ data: 'diff' })
+        .mockResolvedValueOnce({ data: [] });
+
+      mockFetchSuccess('review');
+      await reviewPullRequest(octokit, 'owner', 'repo', 42);
+
+      const reviews = getReviews();
+      expect(reviews.length).toBe(1);
+      expect(reviews[0].repo).toBe('owner/repo');
+      expect(reviews[0].prNumber).toBe(42);
+      expect(reviews[0].status).toBe('open');
+    });
+  });
+
+  // =========================================================================
+  // parseDiffByFile
+  // =========================================================================
+
+  describe('parseDiffByFile', () => {
+    it('returns empty array for empty input', () => {
+      expect(parseDiffByFile('')).toEqual([]);
+    });
+
+    it('returns empty array for null input', () => {
+      expect(parseDiffByFile(null)).toEqual([]);
+    });
+
+    it('returns empty array for undefined input', () => {
+      expect(parseDiffByFile(undefined)).toEqual([]);
+    });
+
+    it('returns empty array for non-string input', () => {
+      expect(parseDiffByFile(12345)).toEqual([]);
+    });
+
+    it('parses a single file diff', () => {
+      const diff = makeDiff('src/main.rs', '+fn main() {}');
+      const result = parseDiffByFile(diff);
+      expect(result).toHaveLength(1);
+      expect(result[0].filename).toBe('src/main.rs');
+      expect(result[0].diff).toContain('+fn main() {}');
+      expect(result[0].size).toBeGreaterThan(0);
+    });
+
+    it('parses multiple file diffs', () => {
+      const diff = makeMultiDiff([
+        { name: 'src/a.js', content: '+line a' },
+        { name: 'src/b.js', content: '+line b' },
+        { name: 'src/c.js', content: '+line c' }
+      ]);
+      const result = parseDiffByFile(diff);
+      expect(result).toHaveLength(3);
+      expect(result[0].filename).toBe('src/a.js');
+      expect(result[1].filename).toBe('src/b.js');
+      expect(result[2].filename).toBe('src/c.js');
+    });
+
+    it('handles renamed files (uses destination path)', () => {
+      const diff = 'diff --git a/old/name.js b/new/name.js\n--- a/old/name.js\n+++ b/new/name.js\n@@ -1 +1 @@\n-old\n+new';
+      const result = parseDiffByFile(diff);
+      expect(result).toHaveLength(1);
+      expect(result[0].filename).toBe('new/name.js');
+    });
+
+    it('handles new file diffs', () => {
+      const diff = 'diff --git a/brand-new.ts b/brand-new.ts\nnew file mode 100644\n--- /dev/null\n+++ b/brand-new.ts\n@@ -0,0 +1,3 @@\n+export const x = 1;';
+      const result = parseDiffByFile(diff);
+      expect(result).toHaveLength(1);
+      expect(result[0].filename).toBe('brand-new.ts');
+    });
+
+    it('skips content without diff --git headers', () => {
+      const diff = 'this is not a diff\njust random text';
+      const result = parseDiffByFile(diff);
+      expect(result).toEqual([]);
+    });
+
+    it('sets size to diff segment length', () => {
+      const diff = makeDiff('file.js', '+x');
+      const result = parseDiffByFile(diff);
+      expect(result[0].size).toBe(result[0].diff.length);
+    });
+  });
+
+  // =========================================================================
+  // classifyFile
+  // =========================================================================
+
+  describe('classifyFile', () => {
+    // Tier 0: skip
+    it('classifies .lock files as tier 0', () => {
+      expect(classifyFile('Cargo.lock').tier).toBe(0);
+    });
+
+    it('classifies MODULE.bazel.lock as tier 0', () => {
+      expect(classifyFile('MODULE.bazel.lock').tier).toBe(0);
+    });
+
+    it('classifies go.sum as tier 0', () => {
+      expect(classifyFile('go.sum').tier).toBe(0);
+    });
+
+    it('classifies package-lock.json as tier 0', () => {
+      expect(classifyFile('package-lock.json').tier).toBe(0);
+    });
+
+    it('classifies yarn.lock as tier 0', () => {
+      expect(classifyFile('yarn.lock').tier).toBe(0);
+    });
+
+    it('classifies pnpm-lock.yaml as tier 0', () => {
+      expect(classifyFile('pnpm-lock.yaml').tier).toBe(0);
+    });
+
+    it('classifies .min.js as tier 0', () => {
+      expect(classifyFile('dist/bundle.min.js').tier).toBe(0);
+    });
+
+    it('classifies .min.css as tier 0', () => {
+      expect(classifyFile('styles/app.min.css').tier).toBe(0);
+    });
+
+    it('classifies .generated. files as tier 0', () => {
+      expect(classifyFile('src/schema.generated.ts').tier).toBe(0);
+    });
+
+    it('classifies .pb.go as tier 0', () => {
+      expect(classifyFile('proto/service.pb.go').tier).toBe(0);
+    });
+
+    it('classifies vendor/ files as tier 0', () => {
+      expect(classifyFile('vendor/github.com/pkg/errors/errors.go').tier).toBe(0);
+    });
+
+    it('classifies vendor/ at root as tier 0', () => {
+      expect(classifyFile('vendor/lib.js').tier).toBe(0);
+    });
+
+    // Tier 1: source
+    it('classifies .rs files as tier 1 source', () => {
+      expect(classifyFile('src/main.rs')).toEqual({ tier: 1, label: 'source' });
+    });
+
+    it('classifies .ts files as tier 1 source', () => {
+      expect(classifyFile('src/app.ts')).toEqual({ tier: 1, label: 'source' });
+    });
+
+    it('classifies .js files as tier 1 source', () => {
+      expect(classifyFile('src/index.js')).toEqual({ tier: 1, label: 'source' });
+    });
+
+    it('classifies .py files as tier 1 source', () => {
+      expect(classifyFile('main.py')).toEqual({ tier: 1, label: 'source' });
+    });
+
+    it('classifies .go files as tier 1 source', () => {
+      expect(classifyFile('cmd/server.go')).toEqual({ tier: 1, label: 'source' });
+    });
+
+    it('classifies .c files as tier 1 source', () => {
+      expect(classifyFile('src/main.c')).toEqual({ tier: 1, label: 'source' });
+    });
+
+    it('classifies .vue files as tier 1 source', () => {
+      expect(classifyFile('components/App.vue')).toEqual({ tier: 1, label: 'source' });
+    });
+
+    // Tier 2: tests (takes priority over source)
+    it('classifies test files as tier 2', () => {
+      expect(classifyFile('src/app.test.js')).toEqual({ tier: 2, label: 'test' });
+    });
+
+    it('classifies spec files as tier 2', () => {
+      expect(classifyFile('src/app.spec.ts')).toEqual({ tier: 2, label: 'test' });
+    });
+
+    it('classifies __tests__/ files as tier 2', () => {
+      expect(classifyFile('__tests__/unit/app.js')).toEqual({ tier: 2, label: 'test' });
+    });
+
+    it('classifies nested __tests__/ files as tier 2', () => {
+      expect(classifyFile('src/__tests__/helper.js')).toEqual({ tier: 2, label: 'test' });
+    });
+
+    // Tier 3: config/docs
+    it('classifies .yml files as tier 3', () => {
+      expect(classifyFile('.github/workflows/ci.yml')).toEqual({ tier: 3, label: 'config/docs' });
+    });
+
+    it('classifies .md files as tier 3', () => {
+      expect(classifyFile('README.md')).toEqual({ tier: 3, label: 'config/docs' });
+    });
+
+    it('classifies .json files as tier 3', () => {
+      expect(classifyFile('tsconfig.json')).toEqual({ tier: 3, label: 'config/docs' });
+    });
+
+    it('classifies Dockerfile as tier 3', () => {
+      expect(classifyFile('Dockerfile')).toEqual({ tier: 3, label: 'config/docs' });
+    });
+
+    it('classifies .toml files as tier 3', () => {
+      expect(classifyFile('Cargo.toml')).toEqual({ tier: 3, label: 'config/docs' });
+    });
+
+    // Edge cases
+    it('is case-insensitive for extensions', () => {
+      expect(classifyFile('SRC/Main.JS').tier).toBe(1);
+    });
+
+    it('classifies composer.lock as tier 0', () => {
+      expect(classifyFile('composer.lock').tier).toBe(0);
+    });
+
+    it('classifies poetry.lock as tier 0', () => {
+      expect(classifyFile('poetry.lock').tier).toBe(0);
+    });
+  });
+
+  // =========================================================================
+  // prioritizeFiles
+  // =========================================================================
+
+  describe('prioritizeFiles', () => {
+    it('sorts by tier ascending', () => {
+      const files = [
+        { filename: 'README.md', diff: 'a', size: 10 },
+        { filename: 'src/main.rs', diff: 'b', size: 10 },
+        { filename: 'Cargo.lock', diff: 'c', size: 10 }
+      ];
+      const result = prioritizeFiles(files);
+      expect(result[0].tier).toBe(0);  // lock
+      expect(result[1].tier).toBe(1);  // source
+      expect(result[2].tier).toBe(3);  // config
+    });
+
+    it('sorts by size ascending within same tier', () => {
+      const files = [
+        { filename: 'src/big.js', diff: 'x'.repeat(500), size: 500 },
+        { filename: 'src/small.js', diff: 'x', size: 1 },
+        { filename: 'src/medium.js', diff: 'x'.repeat(100), size: 100 }
+      ];
+      const result = prioritizeFiles(files);
+      expect(result[0].filename).toBe('src/small.js');
+      expect(result[1].filename).toBe('src/medium.js');
+      expect(result[2].filename).toBe('src/big.js');
+    });
+
+    it('adds tier and label to each entry', () => {
+      const files = [{ filename: 'src/app.rs', diff: 'x', size: 1 }];
+      const result = prioritizeFiles(files);
+      expect(result[0]).toEqual(expect.objectContaining({
+        tier: 1,
+        label: 'source',
+        filename: 'src/app.rs'
+      }));
+    });
+
+    it('returns empty array for empty input', () => {
+      expect(prioritizeFiles([])).toEqual([]);
+    });
+
+    it('places source before tests before config', () => {
+      const files = [
+        { filename: 'config.yml', diff: 'c', size: 10 },
+        { filename: 'src/app.test.js', diff: 't', size: 10 },
+        { filename: 'src/app.js', diff: 's', size: 10 }
+      ];
+      const result = prioritizeFiles(files);
+      expect(result[0].label).toBe('source');
+      expect(result[1].label).toBe('test');
+      expect(result[2].label).toBe('config/docs');
+    });
+
+    it('lockfiles sort last despite being tier 0', () => {
+      // Tier 0 files have the lowest tier value (0), so they come first in sort order.
+      // But buildReviewPrompt skips them entirely.
+      const files = [
+        { filename: 'src/app.js', diff: 's', size: 10 },
+        { filename: 'Cargo.lock', diff: 'l', size: 1000 }
+      ];
+      const result = prioritizeFiles(files);
+      // Tier 0 sorts first numerically
+      expect(result[0].tier).toBe(0);
+      expect(result[1].tier).toBe(1);
+    });
+  });
+
+  // =========================================================================
+  // supersedePreviousReviews
+  // =========================================================================
+
+  describe('supersedePreviousReviews', () => {
+    let octokit;
+
+    beforeEach(() => {
+      octokit = createMockOctokit();
+    });
+
+    it('marks old bot reviews as outdated', async () => {
+      octokit.issues.listComments.mockResolvedValue({
+        data: [
+          { id: 1, body: '## AI Code Review for PR #5\n\nOld review' },
+          { id: 2, body: 'Regular user comment' }
+        ]
+      });
+
+      await supersedePreviousReviews(octokit, 'owner', 'repo', 5);
+
+      expect(octokit.issues.updateComment).toHaveBeenCalledTimes(1);
+      expect(octokit.issues.updateComment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          comment_id: 1,
+          body: expect.stringContaining('Outdated')
+        })
+      );
+    });
+
+    it('does not modify non-bot comments', async () => {
+      octokit.issues.listComments.mockResolvedValue({
+        data: [
+          { id: 1, body: 'Just a regular comment' },
+          { id: 2, body: 'Another comment' }
+        ]
+      });
+
+      await supersedePreviousReviews(octokit, 'owner', 'repo', 5);
+
+      expect(octokit.issues.updateComment).not.toHaveBeenCalled();
+    });
+
+    it('does not re-mark already outdated reviews', async () => {
+      octokit.issues.listComments.mockResolvedValue({
+        data: [
+          { id: 1, body: '> ⚠️ **Outdated**\n\n## AI Code Review for PR #5\n\nOld' }
+        ]
+      });
+
+      await supersedePreviousReviews(octokit, 'owner', 'repo', 5);
+
+      // Already starts with '>', should be skipped
+      expect(octokit.issues.updateComment).not.toHaveBeenCalled();
+    });
+
+    it('handles multiple bot reviews', async () => {
+      octokit.issues.listComments.mockResolvedValue({
+        data: [
+          { id: 1, body: '## AI Code Review for PR #5\n\nFirst' },
+          { id: 2, body: '## AI Code Review for PR #5\n\nSecond' }
+        ]
+      });
+
+      await supersedePreviousReviews(octokit, 'owner', 'repo', 5);
+
+      expect(octokit.issues.updateComment).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not throw on API failure', async () => {
+      octokit.issues.listComments.mockRejectedValue(new Error('API error'));
+
+      // Should not throw
+      await expect(
+        supersedePreviousReviews(octokit, 'owner', 'repo', 5)
+      ).resolves.toBeUndefined();
+
+      expect(getLogger().warn).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to supersede')
+      );
+    });
+
+    it('handles empty comment list', async () => {
+      octokit.issues.listComments.mockResolvedValue({ data: [] });
+
+      await supersedePreviousReviews(octokit, 'owner', 'repo', 5);
+
+      expect(octokit.issues.updateComment).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // Review storage and status tracking
+  // =========================================================================
+
+  describe('review storage', () => {
+    it('stores a review entry', () => {
+      storeReview({ repo: 'owner/repo', prNumber: 1, status: 'open' });
+      const reviews = getReviews();
+      expect(reviews).toHaveLength(1);
+      expect(reviews[0]).toEqual(expect.objectContaining({
+        repo: 'owner/repo',
+        prNumber: 1,
+        status: 'open'
+      }));
+    });
+
+    it('accumulates multiple reviews', () => {
+      storeReview({ repo: 'owner/repo', prNumber: 1, status: 'open' });
+      storeReview({ repo: 'owner/repo', prNumber: 2, status: 'open' });
+      expect(getReviews()).toHaveLength(2);
+    });
+
+    it('resets reviews with _resetReviews', () => {
+      storeReview({ repo: 'owner/repo', prNumber: 1, status: 'open' });
+      _resetReviews();
+      expect(getReviews()).toHaveLength(0);
+    });
+  });
+
+  describe('updateReviewStatus', () => {
+    it('updates matching reviews to merged', () => {
+      storeReview({ repo: 'owner/repo', prNumber: 1, status: 'open' });
+      const updated = updateReviewStatus('owner/repo', 1, 'merged');
+      expect(updated).toBe(1);
+      expect(getReviews()[0].status).toBe('merged');
+    });
+
+    it('updates matching reviews to closed', () => {
+      storeReview({ repo: 'owner/repo', prNumber: 1, status: 'open' });
+      const updated = updateReviewStatus('owner/repo', 1, 'closed');
+      expect(updated).toBe(1);
+      expect(getReviews()[0].status).toBe('closed');
+    });
+
+    it('updates all reviews for same repo+PR', () => {
+      storeReview({ repo: 'owner/repo', prNumber: 1, status: 'open' });
+      storeReview({ repo: 'owner/repo', prNumber: 1, status: 'open' });
+      const updated = updateReviewStatus('owner/repo', 1, 'merged');
+      expect(updated).toBe(2);
+      expect(getReviews().every((r) => r.status === 'merged')).toBe(true);
+    });
+
+    it('does not update reviews for different PR', () => {
+      storeReview({ repo: 'owner/repo', prNumber: 1, status: 'open' });
+      storeReview({ repo: 'owner/repo', prNumber: 2, status: 'open' });
+      updateReviewStatus('owner/repo', 1, 'merged');
+      expect(getReviews()[0].status).toBe('merged');
+      expect(getReviews()[1].status).toBe('open');
+    });
+
+    it('does not update reviews for different repo', () => {
+      storeReview({ repo: 'owner/repo-a', prNumber: 1, status: 'open' });
+      storeReview({ repo: 'owner/repo-b', prNumber: 1, status: 'open' });
+      updateReviewStatus('owner/repo-a', 1, 'closed');
+      expect(getReviews()[0].status).toBe('closed');
+      expect(getReviews()[1].status).toBe('open');
+    });
+
+    it('returns 0 when no reviews match', () => {
+      storeReview({ repo: 'owner/repo', prNumber: 1, status: 'open' });
+      const updated = updateReviewStatus('owner/other', 99, 'merged');
+      expect(updated).toBe(0);
     });
   });
 });

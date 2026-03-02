@@ -14,7 +14,7 @@ import {
   fixDependabotPRLabels
 } from './dependabot.js';
 import { handleSignedCommitMerge, checkPRMergeStrategy } from './merge-strategy.js';
-import { reviewPullRequest } from './ai-review.js';
+import { reviewPullRequest, updateReviewStatus } from './ai-review.js';
 import { isProcessed, markProcessed } from './idempotency.js';
 import { defaultQueue } from './queue.js';
 import { applySecurityMiddleware } from './middleware.js';
@@ -449,7 +449,6 @@ function registerApp(app, { getRouter, addHandler } = {}) {
     }
   });
 
-
   // Auto-merge for Dependabot and bot PRs
   app.on('pull_request.opened', async (context) => {
     if (context.log) setLogger(context.log);
@@ -494,12 +493,31 @@ function registerApp(app, { getRouter, addHandler } = {}) {
     }
   });
 
-    // Add health check endpoint with queue stats
+  app.on('pull_request.closed', async (context) => {
+    if (context.log) setLogger(context.log);
+    const deliveryId = context.id;
+    if (deliveryId && isProcessed(deliveryId)) {
+      getLogger().info({ deliveryId }, 'Skipping duplicate webhook delivery');
+      return;
+    }
+
+    const { pull_request: pr, repository } = context.payload;
+    const repo = `${repository.owner.login}/${repository.name}`;
+    const status = pr.merged ? 'merged' : 'closed';
+
+    const updated = updateReviewStatus(repo, pr.number, status);
+    if (updated > 0) {
+      getLogger().info({ repo, pr: pr.number, status }, `Marked ${updated} review(s) as ${status}`);
+    }
+
+    if (deliveryId) markProcessed(deliveryId);
+  });
+
+  // Add health check endpoint with queue stats
   if (getRouter) {
     const router = getRouter('/');
 
     applySecurityMiddleware(router);
-
 
     router.get('/health', (req, res) => {
       res.status(200).json({
