@@ -1272,8 +1272,8 @@ function renderDashboardPage() {
 }
 
 // ── Request handler ──────────────────────────────────────────────────
-function sendHtml(res, s, html) { res.writeHead(s, {'Content-Type':'text/html; charset=utf-8'}); res.end(html); }
-function sendJson(res, s, obj) { res.writeHead(s, {'Content-Type':'application/json'}); res.end(JSON.stringify(obj)); }
+function sendHtml(res, s, html) { res.writeHead(s, {'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}); res.end(html); }
+function sendJson(res, s, obj) { res.writeHead(s, {'Content-Type':'application/json','Cache-Control':'no-store'}); res.end(JSON.stringify(obj)); }
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = '';
