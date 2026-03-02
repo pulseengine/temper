@@ -573,8 +573,15 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       }
     }
 
-    // Auto AI review on new PRs
-    if (config?.ai_review?.enabled) {
+    // Auto AI review on new PRs (skip bot/dependabot PRs — they auto-merge
+    // and the small model hallucinates on lockfile diffs)
+    const isBotPR = sender === "dependabot[bot]" ||
+      sender.endsWith("[bot]") ||
+      (config?.auto_merge?.on_bot_users || []).some(
+        bot => sender === bot || sender === bot + "[bot]"
+      );
+
+    if (config?.ai_review?.enabled && !isBotPR) {
       try {
         const result = await reviewPullRequest(context.octokit, owner, repo, pr.number);
         if (result.success) {
