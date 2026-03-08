@@ -61,13 +61,13 @@ dependabot_generation:
   max_directories_per_ecosystem: 5
 
 ai_review:
-  enabled: false
+  enabled: true
   endpoint: "http://localhost:11434/v1/chat/completions"
   model: "qwen2.5-coder:3b"
   max_diff_size: 12000
   max_tokens: 2000
   temperature: 0.3
-  timeout: 120000
+  timeout: 300000
   allow_remote_endpoint: false
 
 scheduler:

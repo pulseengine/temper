@@ -144,6 +144,9 @@ function createMockOctokit() {
       updateComment: jest.fn().mockResolvedValue({}),
       deleteComment: jest.fn().mockResolvedValue({})
     },
+    repos: {
+      getBranch: jest.fn().mockResolvedValue({ data: { name: 'main' } })
+    },
     request: jest.fn().mockResolvedValue({ status: 200, data: {} })
   };
 }
@@ -159,6 +162,7 @@ function createRepoCreatedContext(overrides = {}) {
         full_name: 'pulseengine/test-repo',
         name: 'test-repo',
         has_issues: true,
+        default_branch: 'main',
         owner: { login: 'pulseengine' },
         ...(overrides.repository || {})
       },

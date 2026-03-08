@@ -115,20 +115,70 @@ function registerApp(app, { getRouter, addHandler } = {}) {
     if (repoOrg === targetOrg) {
       getLogger().info({ repo: repository.full_name }, 'New repository created');
 
+      // Wait for the default branch to exist before configuring.
+      // When GitHub fires repository.created, the repo exists but the default
+      // branch is only created after the first commit.
+      const defaultBranch = repository.default_branch || 'main';
+      const owner = repository.owner.login;
+      const repoName = repository.name;
+      let branchReady = false;
+
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        try {
+          await context.octokit.repos.getBranch({
+            owner,
+            repo: repoName,
+            branch: defaultBranch
+          });
+          branchReady = true;
+          break;
+        } catch (err) {
+          if (err.status === 404) {
+            getLogger().info(
+              { repo: repository.full_name, branch: defaultBranch, attempt },
+              `Default branch not ready yet, retrying in 2s (attempt ${attempt}/5)`
+            );
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          } else {
+            getLogger().warn(
+              { repo: repository.full_name, err: err.message },
+              'Unexpected error checking for default branch'
+            );
+            break;
+          }
+        }
+      }
+
+      if (!branchReady) {
+        getLogger().warn(
+          { repo: repository.full_name, branch: defaultBranch },
+          'Default branch never appeared — repo may still be empty. Skipping configuration.'
+        );
+        if (deliveryId) markProcessed(deliveryId);
+        return;
+      }
+
       const result = await configureRepository(context.octokit, repository, undefined, {
         enqueueTask: getEnqueueTask()
       });
 
       if (repository.has_issues) {
-        await context.octokit.issues.create({
-          owner: repository.owner.login,
-          repo: repository.name,
-          title: 'Repository Configuration',
-          body: result.success
-            ? '✅ This repository has been automatically configured with standard merge settings and branch protection.'
-            : `❌ Configuration failed: ${result.error}`,
-          labels: ['automation', 'configuration']
-        });
+        try {
+          await context.octokit.issues.create({
+            owner,
+            repo: repoName,
+            title: 'Repository Configuration',
+            body: result.success
+              ? '✅ This repository has been automatically configured with standard merge settings and branch protection.'
+              : `❌ Configuration failed: ${result.error}`,
+            labels: ['automation', 'configuration']
+          });
+        } catch (issueErr) {
+          getLogger().warn(
+            { repo: repository.full_name, err: issueErr.message },
+            'Failed to create configuration issue — issues may not be fully initialized yet'
+          );
+        }
       }
     }
 
