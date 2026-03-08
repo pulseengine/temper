@@ -185,7 +185,7 @@ function buildReviewPrompt(prData, diff, files, maxDiffSize) {
 }
 
 async function callLocalAI(endpoint, model, systemPrompt, userPrompt, options = {}) {
-  const { maxTokens = 2000, temperature = 0.3, timeout = 120000 } = options;
+  const { maxTokens = 2000, temperature = 0.3, timeout = 300000 } = options;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
@@ -201,7 +201,8 @@ async function callLocalAI(endpoint, model, systemPrompt, userPrompt, options = 
           { role: 'user', content: userPrompt }
         ],
         max_tokens: maxTokens,
-        temperature
+        temperature,
+        stream: false
       }),
       signal: controller.signal
     });
