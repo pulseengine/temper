@@ -285,13 +285,14 @@ function formatReviewComment(aiResponse, prNumber, headSha, meta) {
  */
 async function supersedePreviousReviews(octokit, owner, repo, prNumber) {
   try {
-    // List all comments on the PR
-    const { data: comments } = await octokit.issues.listComments({
-      owner,
-      repo,
-      issue_number: prNumber,
-      per_page: 100
-    });
+    // Use octokit.request() form (not .issues.listComments) because Probot v14's
+    // bundled Octokit does not always expose the .issues namespace plugin in the
+    // pull_request.opened event context \u2014 that mismatch was silently breaking
+    // every auto AI review with "Cannot read properties of undefined".
+    const { data: comments } = await octokit.request(
+      'GET /repos/{owner}/{repo}/issues/{issue_number}/comments',
+      { owner, repo, issue_number: prNumber, per_page: 100 }
+    );
 
     const outdatedPrefix =
       '> \u26a0\ufe0f **Outdated** \u2014 this review was for an earlier revision. See the latest review below.\n\n';
@@ -302,12 +303,15 @@ async function supersedePreviousReviews(octokit, owner, repo, prNumber) {
         comment.body.includes(AI_REVIEW_SIGNATURE) &&
         !comment.body.startsWith('>')
       ) {
-        await octokit.issues.updateComment({
-          owner,
-          repo,
-          comment_id: comment.id,
-          body: outdatedPrefix + comment.body
-        });
+        await octokit.request(
+          'PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}',
+          {
+            owner,
+            repo,
+            comment_id: comment.id,
+            body: outdatedPrefix + comment.body
+          }
+        );
       }
     }
   } catch (error) {
@@ -396,12 +400,10 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
     // Mark previous bot reviews as outdated
     await supersedePreviousReviews(octokit, owner, repo, prNumber);
 
-    await octokit.issues.createComment({
-      owner,
-      repo,
-      issue_number: prNumber,
-      body: comment
-    });
+    await octokit.request(
+      'POST /repos/{owner}/{repo}/issues/{issue_number}/comments',
+      { owner, repo, issue_number: prNumber, body: comment }
+    );
 
     // Store the review record
     storeReview({
