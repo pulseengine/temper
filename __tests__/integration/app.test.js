@@ -229,6 +229,92 @@ describe('app', () => {
   });
 
   // =========================================================================
+  // issues.opened — controller repo / issue-driven provisioning
+  // =========================================================================
+  describe('issues.opened (controller-repo provisioning)', () => {
+    function createIssueOpenedContext(overrides = {}) {
+      const octokit = createMockOctokit();
+      return {
+        id: overrides.id ?? 'delivery-issues-1',
+        log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+        octokit,
+        payload: {
+          issue: {
+            number: 42,
+            body:
+              '### Repository name\n\nnew-svc\n\n' +
+              '### Visibility\n\nprivate\n\n' +
+              '### Description\n\nA new service\n',
+            labels: [{ name: 'repo-request' }],
+            ...(overrides.issue || {})
+          },
+          repository: {
+            full_name: 'pulseengine/repo-requests',
+            name: 'repo-requests',
+            owner: { login: 'pulseengine' },
+            ...(overrides.repository || {})
+          },
+          ...(overrides.payload || {})
+        }
+      };
+    }
+
+    it('ignores issues when controller_repo is disabled', async () => {
+      _setConfigForTesting({});
+      const { handlers } = setupApp();
+      const context = createIssueOpenedContext();
+      await handlers['issues.opened'](context);
+      expect(context.octokit.issues.createComment).not.toHaveBeenCalled();
+    });
+
+    it('ignores issues filed in a non-controller repo', async () => {
+      _setConfigForTesting({
+        controller_repo: { enabled: true, repo: 'pulseengine/repo-requests', label: 'repo-request' }
+      });
+      const { handlers } = setupApp();
+      const context = createIssueOpenedContext({
+        repository: { full_name: 'pulseengine/some-other-repo', name: 'some-other-repo' }
+      });
+      await handlers['issues.opened'](context);
+      expect(context.octokit.issues.createComment).not.toHaveBeenCalled();
+    });
+
+    it('ignores issues that lack the configured label', async () => {
+      _setConfigForTesting({
+        controller_repo: { enabled: true, repo: 'pulseengine/repo-requests', label: 'repo-request' }
+      });
+      const { handlers } = setupApp();
+      const context = createIssueOpenedContext({ issue: { labels: [{ name: 'bug' }] } });
+      await handlers['issues.opened'](context);
+      expect(context.octokit.issues.createComment).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid form bodies with a comment', async () => {
+      _setConfigForTesting({
+        controller_repo: { enabled: true, repo: 'pulseengine/repo-requests', label: 'repo-request' }
+      });
+      const { handlers } = setupApp();
+      const context = createIssueOpenedContext({
+        issue: { body: '### Repository name\n\n' /* missing */, labels: [{ name: 'repo-request' }] }
+      });
+      await handlers['issues.opened'](context);
+      const body = context.octokit.issues.createComment.mock.calls[0][0].body;
+      expect(body).toMatch(/rejected/i);
+    });
+
+    it('warns when task store is unavailable (instead of silently dropping the request)', async () => {
+      _setConfigForTesting({
+        controller_repo: { enabled: true, repo: 'pulseengine/repo-requests', label: 'repo-request' }
+      });
+      const { handlers } = setupApp();
+      const context = createIssueOpenedContext();
+      await handlers['issues.opened'](context);
+      const body = context.octokit.issues.createComment.mock.calls[0][0].body;
+      expect(body).toMatch(/task store offline/i);
+    });
+  });
+
+  // =========================================================================
   // mapLegacyEnvVars
   // =========================================================================
   describe('mapLegacyEnvVars', () => {
@@ -321,7 +407,9 @@ describe('app', () => {
 
     it('works without getRouter option', () => {
       const { app } = setupApp({ skipRouter: true });
-      expect(app.on).toHaveBeenCalledTimes(5);
+      // 6 events: repository.created, issues.opened, issue_comment.created,
+      //          pull_request.opened, pull_request.closed, push
+      expect(app.on).toHaveBeenCalledTimes(6);
       expect(app.onError).toHaveBeenCalledTimes(1);
     });
 
@@ -537,6 +625,25 @@ describe('app', () => {
       expect(configureRepository).not.toHaveBeenCalled();
     });
 
+    it('passes skipBranchScopedWork=true when default branch never appears', async () => {
+      _setConfigForTesting({ organization: 'pulseengine' });
+      configureRepository.mockResolvedValue({ success: true, partial: true });
+      const { handlers } = setupApp();
+      const context = createRepoCreatedContext();
+      // Make getBranch always 404 — empty repo
+      const err404 = Object.assign(new Error('Not Found'), { status: 404 });
+      context.octokit.repos.getBranch.mockRejectedValue(err404);
+
+      await handlers['repository.created'](context);
+
+      expect(configureRepository).toHaveBeenCalledWith(
+        context.octokit,
+        context.payload.repository,
+        undefined,
+        { enqueueTask: null, skipBranchScopedWork: true }
+      );
+    });
+
     it('configures matching org repo and creates success issue', async () => {
       _setConfigForTesting({ organization: 'pulseengine' });
       configureRepository.mockResolvedValue({ success: true });
@@ -545,7 +652,10 @@ describe('app', () => {
       await handlers['repository.created'](context);
 
       expect(configureRepository).toHaveBeenCalledWith(
-        context.octokit, context.payload.repository, undefined, { enqueueTask: null }
+        context.octokit,
+        context.payload.repository,
+        undefined,
+        { enqueueTask: null, skipBranchScopedWork: false }
       );
       expect(context.octokit.issues.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1218,7 +1328,13 @@ describe('app', () => {
         const context = createIssueCommentContext('/allow-merge-commit');
         await handlers['issue_comment.created'](context);
 
-        expect(handleSignedCommitMerge).toHaveBeenCalledWith(context.octokit, 'myorg', 'myrepo', 7);
+        expect(handleSignedCommitMerge).toHaveBeenCalledWith(
+          context.octokit,
+          'myorg',
+          'myrepo',
+          7,
+          { enqueueTask: null }
+        );
         const body = context.octokit.issues.createComment.mock.calls[0][0].body;
         expect(body).toContain('Merge commits temporarily allowed.');
         expect(body).toContain('merge commit strategy to preserve signed commits');

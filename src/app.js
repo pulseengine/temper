@@ -1,7 +1,8 @@
 import path from 'path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'url';
 import { createDashboardHandler, DEPLOY_SHA } from './dashboard.js';
-import { getConfig } from './config.js';
+import { getConfig, getControllerRepoConfig } from './config.js';
 import { getLogger, setLogger } from './logger.js';
 import { configureRepository } from './repository.js';
 import {
@@ -20,13 +21,15 @@ import {
 } from './dependabot.js';
 import { ensureLabelsExist } from './labels.js';
 import { handleSignedCommitMerge, checkPRMergeStrategy } from './merge-strategy.js';
-import { reviewPullRequest, updateReviewStatus } from './ai-review.js';
-import { isProcessed, markProcessed } from './idempotency.js';
+import { reviewPullRequest, updateReviewStatus, setRateLimitStore } from './ai-review.js';
+import { isProcessed, markProcessed, setIdempotencyStore } from './idempotency.js';
 import { triggerSelfUpdate } from './self-update.js';
 import { defaultQueue } from './queue.js';
 import { applySecurityMiddleware } from './middleware.js';
 import { initTaskStore } from './task-store.js';
 import { createScheduler } from './scheduler.js';
+import { initKVStore } from './persistent-kv.js';
+import { provisionRepo, parseIssueFormBody, validateProvisionRequest } from './provisioning.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -88,7 +91,8 @@ function createCustomRoutesHandler() {
   };
 }
 
-function registerApp(app, { getRouter, addHandler } = {}) {
+function registerApp(app, options = {}) {
+  const { getRouter, addHandler } = options;
   app.on('repository.created', async (context) => {
     if (context.log) setLogger(context.log);
     const deliveryId = context.id;
@@ -115,15 +119,15 @@ function registerApp(app, { getRouter, addHandler } = {}) {
     if (repoOrg === targetOrg) {
       getLogger().info({ repo: repository.full_name }, 'New repository created');
 
-      // Wait for the default branch to exist before configuring.
-      // When GitHub fires repository.created, the repo exists but the default
-      // branch is only created after the first commit.
+      // Check whether the default branch exists yet. Rulesets work on empty
+      // repos (they target ref patterns, not branches), so we no longer bail
+      // when the branch is missing — we just defer the branch-scoped work.
       const defaultBranch = repository.default_branch || 'main';
       const owner = repository.owner.login;
       const repoName = repository.name;
       let branchReady = false;
 
-      for (let attempt = 1; attempt <= 5; attempt++) {
+      for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           await context.octokit.repos.getBranch({
             owner,
@@ -134,11 +138,9 @@ function registerApp(app, { getRouter, addHandler } = {}) {
           break;
         } catch (err) {
           if (err.status === 404) {
-            getLogger().info(
-              { repo: repository.full_name, branch: defaultBranch, attempt },
-              `Default branch not ready yet, retrying in 2s (attempt ${attempt}/5)`
-            );
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            if (attempt < 3) {
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+            }
           } else {
             getLogger().warn(
               { repo: repository.full_name, err: err.message },
@@ -150,16 +152,15 @@ function registerApp(app, { getRouter, addHandler } = {}) {
       }
 
       if (!branchReady) {
-        getLogger().warn(
+        getLogger().info(
           { repo: repository.full_name, branch: defaultBranch },
-          'Default branch never appeared — repo may still be empty. Skipping configuration.'
+          'Default branch missing — applying partial configuration; remainder deferred until first push'
         );
-        if (deliveryId) markProcessed(deliveryId);
-        return;
       }
 
       const result = await configureRepository(context.octokit, repository, undefined, {
-        enqueueTask: getEnqueueTask()
+        enqueueTask: getEnqueueTask(),
+        skipBranchScopedWork: !branchReady
       });
 
       if (repository.has_issues) {
@@ -181,6 +182,84 @@ function registerApp(app, { getRouter, addHandler } = {}) {
         }
       }
     }
+
+    if (deliveryId) markProcessed(deliveryId);
+  });
+
+  // Issue-driven repo provisioning (Cut A): user files an issue in the
+  // controller repo with the issue form; we validate and enqueue.
+  app.on('issues.opened', async (context) => {
+    if (context.log) setLogger(context.log);
+    const deliveryId = context.id;
+    if (deliveryId && isProcessed(deliveryId)) return;
+
+    const ctrl = getControllerRepoConfig();
+    if (!ctrl?.enabled) {
+      if (deliveryId) markProcessed(deliveryId);
+      return;
+    }
+
+    const { issue, repository } = context.payload;
+    const fullName = repository.full_name;
+    if (fullName !== ctrl.repo) {
+      if (deliveryId) markProcessed(deliveryId);
+      return;
+    }
+
+    const expectedLabel = ctrl.label || 'repo-request';
+    const hasLabel = (issue.labels || []).some((l) => l.name === expectedLabel);
+    if (!hasLabel) {
+      if (deliveryId) markProcessed(deliveryId);
+      return;
+    }
+
+    const fields = parseIssueFormBody(issue.body || '');
+    const validation = validateProvisionRequest(fields);
+
+    const owner = repository.owner.login;
+    const repo = repository.name;
+
+    if (!validation.valid) {
+      await context.octokit.issues.createComment({
+        owner,
+        repo,
+        issue_number: issue.number,
+        body: `❌ Provisioning request rejected: ${validation.error}`
+      });
+      if (deliveryId) markProcessed(deliveryId);
+      return;
+    }
+
+    const enqueueTask = getEnqueueTask();
+    if (!enqueueTask) {
+      getLogger().warn('Task store not initialized — cannot enqueue provision-repo task');
+      await context.octokit.issues.createComment({
+        owner,
+        repo,
+        issue_number: issue.number,
+        body: '⚠️  Provisioning is not currently available (task store offline). Please retry later.'
+      });
+      if (deliveryId) markProcessed(deliveryId);
+      return;
+    }
+
+    enqueueTask(
+      'provision-repo',
+      `provision-repo:${owner}/${repo}#${issue.number}`,
+      {
+        sourceOwner: owner,
+        sourceRepo: repo,
+        sourceIssue: issue.number,
+        params: validation.params
+      }
+    );
+
+    await context.octokit.issues.createComment({
+      owner,
+      repo,
+      issue_number: issue.number,
+      body: `✅ Request accepted. Provisioning \`${validation.params.name}\` (${validation.params.visibility}) — you'll get a confirmation comment when the repo is ready.`
+    });
 
     if (deliveryId) markProcessed(deliveryId);
   });
@@ -501,7 +580,13 @@ function registerApp(app, { getRouter, addHandler } = {}) {
         return;
       }
 
-      const result = await handleSignedCommitMerge(context.octokit, owner, repo, issueNumber);
+      const result = await handleSignedCommitMerge(
+        context.octokit,
+        owner,
+        repo,
+        issueNumber,
+        { enqueueTask: getEnqueueTask() }
+      );
       if (result.success) {
         if (result.action === 'temporarily_allowed_merge_commits') {
           await context.octokit.issues.createComment({
@@ -754,26 +839,84 @@ function registerApp(app, { getRouter, addHandler } = {}) {
   app.onError((error) => {
     getLogger().error({ err: error }, 'Probot error');
   });
+
+  // Initialize persistence + scheduler unless caller opted out (e.g. tests).
+  // Auto-skip in jest to avoid opening real SQLite files in unit tests.
+  const inTest = process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID !== undefined;
+  if (!options.skipPersistence && !inTest) {
+    initPersistence();
+    initScheduler(app);
+  }
+}
+
+// Resolve the data directory. Created on first use.
+function getDataDir() {
+  const dir = path.join(__dirname, '..', 'data');
+  return dir;
 }
 
 /**
- * Initialize the task store and scheduler.
- * Call this once at startup with an authenticated octokit instance.
+ * Initialize SQLite-backed persistence for idempotency and AI rate limits,
+ * replacing the in-memory Maps. Called once at app startup.
  */
-function initScheduler(octokit) {
+function initPersistence() {
+  try {
+    const dataDir = getDataDir();
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+    const dedupStore = initKVStore(path.join(dataDir, 'dedup.db'), 'webhook_dedup', {
+      ttlMs: 60 * 60 * 1000
+    });
+    setIdempotencyStore(dedupStore);
+
+    const rateStore = initKVStore(path.join(dataDir, 'dedup.db'), 'ai_rate_limits', {
+      ttlMs: 5 * 60 * 1000
+    });
+    setRateLimitStore(rateStore);
+
+    getLogger().info('Persistent KV stores initialized (idempotency, ai_rate_limits)');
+  } catch (err) {
+    getLogger().warn({ err: err.message }, 'Failed to initialise persistent KV — falling back to in-memory');
+  }
+}
+
+/**
+ * Initialize the task store and scheduler. Probot installation tokens expire
+ * after 1 hour, so the scheduler is given a factory that mints a fresh
+ * installation-scoped Octokit per tick.
+ *
+ * @param {object} app - Probot app instance
+ */
+function initScheduler(app) {
   const config = getConfig();
   const schedulerConfig = config.scheduler || {};
+  const targetOrg = config?.organization || process.env.ORGANIZATION;
 
-  const dbPath = path.join(__dirname, '..', 'data', 'tasks.db');
+  if (!targetOrg) {
+    getLogger().warn('No target organization — scheduler not started');
+    return null;
+  }
+
+  const dbPath = path.join(getDataDir(), 'tasks.db');
   _taskStore = initTaskStore(dbPath);
 
-  _scheduler = createScheduler(_taskStore, octokit, {
+  // Per-tick factory: get app-level octokit, look up installation for the org,
+  // mint installation-scoped octokit. Keeps installation tokens fresh.
+  async function octokitFactory() {
+    const appOctokit = await app.auth();
+    const { data: installation } = await appOctokit.request(
+      'GET /orgs/{org}/installation',
+      { org: targetOrg }
+    );
+    return await app.auth(installation.id);
+  }
+
+  _scheduler = createScheduler(_taskStore, octokitFactory, {
     intervalMs: (schedulerConfig.interval_minutes || 5) * 60 * 1000,
     maxTasksPerTick: schedulerConfig.max_tasks_per_tick || 5,
     rateLimitThreshold: schedulerConfig.rate_limit_threshold || 100
   });
 
-  // Register the generate-dependabot handler
   _scheduler.registerHandler('generate-dependabot', async (payload, { octokit: kit, logger }) => {
     const { owner, repo, defaultBranch } = payload;
     logger.info(`Scheduler: generating dependabot config for ${owner}/${repo}`);
@@ -781,14 +924,35 @@ function initScheduler(octokit) {
     const result = await generateDependabotConfig(kit, owner, repo, defaultBranch);
     if (result.config) {
       const labels = extractLabelsFromConfig(result.config);
-      if (labels.length > 0) {
-        await ensureLabelsExist(kit, owner, repo, labels);
-      }
+      if (labels.length > 0) await ensureLabelsExist(kit, owner, repo, labels);
       await applyDependabotConfig(kit, owner, repo, result.config);
       logger.info(`Scheduler: applied dependabot config to ${owner}/${repo}`);
     } else {
       logger.info(`Scheduler: no ecosystems detected in ${owner}/${repo}, skipping`);
     }
+  });
+
+  _scheduler.registerHandler('revert-merge-settings', async (payload, { octokit: kit, logger }) => {
+    const { owner, repo, allow_merge_commit } = payload;
+    await kit.request('PATCH /repos/{owner}/{repo}', { owner, repo, allow_merge_commit });
+    logger.info(`Scheduler: reverted merge settings on ${owner}/${repo} (allow_merge_commit=${allow_merge_commit})`);
+  });
+
+  _scheduler.registerHandler('reconcile-repo', async (payload, { octokit: kit, logger }) => {
+    const { owner, repo } = payload;
+    logger.info(`Scheduler: reconciling ${owner}/${repo}`);
+    // Re-run full configuration. configureRepository is itself idempotent.
+    const repoData = await kit.request('GET /repos/{owner}/{repo}', { owner, repo });
+    const result = await configureRepository(kit, repoData.data, undefined, {
+      enqueueTask: (type, key, p, opts) => _taskStore.enqueue(type, key, p, opts)
+    });
+    if (!result.success) {
+      throw new Error(result.error || 'reconcile-repo failed');
+    }
+  });
+
+  _scheduler.registerHandler('provision-repo', async (payload, ctx) => {
+    await provisionRepo(payload, ctx);
   });
 
   _scheduler.start();

@@ -5,7 +5,15 @@
 
 import { getLogger } from './logger.js';
 
-function createScheduler(store, octokit, options = {}) {
+/**
+ * @param {object} store - task store with claimNextTask / completeTask / failTask
+ * @param {object|Function} octokitOrFactory - either an octokit instance, or
+ *   an async () => octokit factory called once per tick. Probot installation
+ *   tokens expire after 1 hour; use the factory form in production so each
+ *   tick gets a fresh, installation-scoped client.
+ * @param {object} [options]
+ */
+function createScheduler(store, octokitOrFactory, options = {}) {
   const {
     intervalMs = 5 * 60 * 1000,
     maxTasksPerTick = 5,
@@ -16,7 +24,14 @@ function createScheduler(store, octokit, options = {}) {
   let timer = null;
   let running = false;
 
-  async function checkRateLimit() {
+  async function getOctokit() {
+    if (typeof octokitOrFactory === 'function') {
+      return await octokitOrFactory();
+    }
+    return octokitOrFactory;
+  }
+
+  async function checkRateLimit(octokit) {
     try {
       const response = await octokit.request('GET /rate_limit');
       const { remaining } = response.data.resources.core;
@@ -39,7 +54,15 @@ function createScheduler(store, octokit, options = {}) {
     running = true;
 
     try {
-      const rateLimitOk = await checkRateLimit();
+      let octokit;
+      try {
+        octokit = await getOctokit();
+      } catch (err) {
+        getLogger().warn({ err: err.message }, 'Scheduler: could not obtain octokit, skipping tick');
+        return;
+      }
+
+      const rateLimitOk = await checkRateLimit(octokit);
       if (!rateLimitOk) return;
 
       let processed = 0;

@@ -8,21 +8,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Branch protection feature
-- Issue/PR templates management
-- CODEOWNERS file management
-- Web dashboard for monitoring
-- Advanced error handling
+- **Repository Rulesets** support (`src/rulesets.js`). Branch protection now uses
+  the modern Rulesets API (`POST /repos/{owner}/{repo}/rulesets`) which targets
+  `~DEFAULT_BRANCH` instead of a specific branch. Eliminates the `repository.created`
+  race condition on empty repos. Translates the existing `branch_protection.default`
+  config block into a ruleset payload — no config rewrite required.
+- **Issue-driven repo provisioning** (Cut A: Temper as the brain). New
+  `issues.opened` handler watches a configured controller repo. When an issue
+  with the `repo-request` label is filed, Temper parses the issue-form body,
+  validates it, and enqueues a `provision-repo` task that creates the repo
+  (template-based when requested), applies full configuration, and replies on
+  the source issue. See `docs/controller-repo-template/` for the issue form
+  starter.
+- **Persistent task scheduler** wired from `registerApp` (was exported but
+  never imported). The scheduler now uses an installation-token factory so each
+  tick gets a fresh, installation-scoped Octokit. New task handlers:
+  `revert-merge-settings`, `reconcile-repo`, `provision-repo`.
+- **`docs/controller-repo-template/`** — starter for the controller repo with
+  an issue-form schema (`new-repo.yml`). Operators fill in pulseengine-specific
+  fields (license list, custom properties, default CODEOWNERS team).
 
 ### Changed
-- Improved logging system
-- Better error messages
-- Enhanced configuration options
+- **Empty-repo bootstrap** no longer skips configuration when the default branch
+  is missing. Rulesets, merge settings, and labels are applied immediately;
+  branch-scoped work (templates, codeowners, dependabot) is deferred to a
+  `reconcile-repo` task that fires after the first push.
+- **Idempotency and AI review rate limits** moved from in-memory `Map` to
+  SQLite-backed KV (`src/persistent-kv.js`). Survives PM2 restarts — webhooks
+  are no longer re-processed and PRs no longer re-reviewed after a deploy.
+- **`handleSignedCommitMerge`** uses the persistent task store (with `delayMs`)
+  for the 1-hour revert instead of `setTimeout`. The revert now survives a
+  restart, eliminating the audit-violation case where the repo was left in
+  the wrong merge mode after a process crash.
+- `config.yml` gains `rulesets:` and `controller_repo:` sections (both opt-in
+  via `enabled`).
 
 ### Fixed
-- Various bug fixes
-- Performance improvements
-- Memory leak fixes
+- 5×2s retry race on `repository.created` for empty repositories.
+- AI review rate limits and webhook idempotency no longer reset on restart.
 
 ## [1.0.0] - 2026-01-24
 

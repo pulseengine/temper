@@ -1,7 +1,7 @@
 import { getConfig } from './config.js';
 import { getLogger } from './logger.js';
 
-async function handleSignedCommitMerge(octokit, owner, repo, prNumber) {
+async function handleSignedCommitMerge(octokit, owner, repo, prNumber, { enqueueTask } = {}) {
   const config = getConfig();
 
   try {
@@ -59,18 +59,31 @@ async function handleSignedCommitMerge(octokit, owner, repo, prNumber) {
 
         getLogger().info('✅ Temporarily allowed merge commits for signed commit preservation');
 
-        setTimeout(async () => {
-          try {
-            await octokit.request('PATCH /repos/{owner}/{repo}', {
-              owner,
-              repo,
-              allow_merge_commit: originalAllowMergeCommits
-            });
-            getLogger().info('⏳ Re-enabled rebase-only merge after timeout');
-          } catch (error) {
-            getLogger().error('❌ Failed to restore merge settings:', error.message);
-          }
-        }, config.signed_commit_strategy?.temporary_rule_timeout || 3600000);
+        const timeoutMs = config.signed_commit_strategy?.temporary_rule_timeout || 3600000;
+
+        if (enqueueTask) {
+          // Persistent revert: survives process restart, unlike setTimeout.
+          enqueueTask(
+            'revert-merge-settings',
+            `revert-merge-settings:${owner}/${repo}:${prNumber}`,
+            { owner, repo, allow_merge_commit: originalAllowMergeCommits },
+            { delayMs: timeoutMs }
+          );
+        } else {
+          // Best-effort fallback when no task store is wired (tests, dev).
+          setTimeout(async () => {
+            try {
+              await octokit.request('PATCH /repos/{owner}/{repo}', {
+                owner,
+                repo,
+                allow_merge_commit: originalAllowMergeCommits
+              });
+              getLogger().info('⏳ Re-enabled rebase-only merge after timeout');
+            } catch (error) {
+              getLogger().error('❌ Failed to restore merge settings:', error.message);
+            }
+          }, timeoutMs);
+        }
 
         return {
           success: true,
