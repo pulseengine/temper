@@ -40,12 +40,33 @@ import { getLogger } from '../../src/logger.js';
 // ---------------------------------------------------------------------------
 
 function createMockOctokit() {
+  // Production code now calls octokit.request(route, params) for issue comments
+  // (was octokit.issues.X — that namespace turned out to be undefined at runtime
+  // in Probot v14's pull_request.opened context). Existing tests assert against
+  // octokit.issues.X mocks, so we retrofit the shape: route the request mock
+  // into the namespaced jest.fn()s for the three relevant routes.
+  const issuesListComments = jest.fn().mockResolvedValue({ data: [] });
+  const issuesCreateComment = jest.fn().mockResolvedValue({ status: 201, data: {} });
+  const issuesUpdateComment = jest.fn().mockResolvedValue({ status: 200, data: {} });
+
+  const routeDispatch = {
+    'GET /repos/{owner}/{repo}/issues/{issue_number}/comments': issuesListComments,
+    'POST /repos/{owner}/{repo}/issues/{issue_number}/comments': issuesCreateComment,
+    'PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}': issuesUpdateComment
+  };
+
+  const request = jest.fn((route, params) => {
+    const dispatch = routeDispatch[route];
+    if (dispatch) return dispatch(params);
+    return Promise.resolve({ status: 200, data: {} });
+  });
+
   return {
-    request: jest.fn().mockResolvedValue({ status: 200, data: {} }),
+    request,
     issues: {
-      createComment: jest.fn().mockResolvedValue({ status: 201, data: {} }),
-      listComments: jest.fn().mockResolvedValue({ data: [] }),
-      updateComment: jest.fn().mockResolvedValue({ status: 200, data: {} })
+      listComments: issuesListComments,
+      createComment: issuesCreateComment,
+      updateComment: issuesUpdateComment
     }
   };
 }
