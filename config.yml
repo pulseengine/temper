@@ -41,6 +41,28 @@ branch_protection:
     allow_deletions: false
     require_signed_commits: true
 
+# Repository Rulesets (modern replacement for legacy branch protection).
+# When enabled, Temper applies a Repository Ruleset derived from
+# branch_protection.default. Rulesets target ~DEFAULT_BRANCH so they apply on
+# empty repos — no more 5x retry race on repository.created.
+rulesets:
+  enabled: true
+  # Set to false to keep using the legacy branch-protection API only.
+  fall_back_to_legacy: true
+  # Optional: name of the managed ruleset (allows multiple managed rulesets later).
+  name: temper-default-branch-protection
+
+# Issue-driven repo provisioning. Users open an issue in the controller repo,
+# Temper validates the issue form and creates the new repo with full config.
+controller_repo:
+  enabled: false
+  # owner/repo of the controller. Issues here drive new-repo creation.
+  repo: pulseengine/repo-requests
+  # Label that marks an issue as a repo-provision request.
+  label: repo-request
+  # Reaction approvers must add to authorise provisioning.
+  approval_reaction: "+1"
+
 auto_merge:
   enabled: true
   on_dependabot: true

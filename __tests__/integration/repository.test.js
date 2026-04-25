@@ -67,6 +67,33 @@ describe('configureRepository', () => {
     );
   });
 
+  it('skipBranchScopedWork=true applies merge+labels but enqueues reconcile-repo for the rest', async () => {
+    _setConfigForTesting({
+      settings: { merge: { allow_rebase_merge: true, allow_merge_commit: false, allow_squash_merge: false, delete_branch_on_merge: true } },
+      issue_labels: [{ name: 'bug', color: 'd73a4a', description: 'Bug' }],
+      templates: { pull_request: '.github/PULL_REQUEST_TEMPLATE.md' }
+    });
+
+    const enqueueTask = jest.fn();
+    const result = await configureRepository(octokit, 'owner', 'repo', {
+      enqueueTask,
+      skipBranchScopedWork: true
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.partial).toBe(true);
+    // Templates should NOT have been applied (require commits / branch)
+    const calls = octokit.request.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContain('PUT /repos/{owner}/{repo}/contents/{path}');
+    // Reconcile task must be enqueued for the deferred work
+    expect(enqueueTask).toHaveBeenCalledWith(
+      'reconcile-repo',
+      'reconcile-repo:owner/repo',
+      { owner: 'owner', repo: 'repo' },
+      { delayMs: 60000 }
+    );
+  });
+
   it('returns error on failure', async () => {
     octokit.request.mockRejectedValue(new Error('API error'));
     const result = await configureRepository(octokit, 'owner', 'repo');

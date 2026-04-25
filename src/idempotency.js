@@ -1,92 +1,79 @@
 /**
  * Webhook idempotency guard.
  *
- * Keeps an in-memory record of GitHub webhook delivery IDs that have already
- * been processed so that re-delivered webhooks are silently skipped.
+ * Backed by SQLite when `setIdempotencyStore` has been called; falls back to an
+ * in-memory `Map` otherwise (tests, dev). Either backend dedupes GitHub webhook
+ * delivery IDs so re-delivered webhooks are silently skipped.
  *
  * Entries older than 1 hour are cleaned up automatically every 10 minutes to
- * prevent unbounded memory growth.
+ * prevent unbounded growth in either backend.
  */
 
-const ENTRY_TTL_MS = 60 * 60 * 1000;          // 1 hour
-const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;   // 10 minutes
+const ENTRY_TTL_MS = 60 * 60 * 1000; // 1 hour
+const CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
-/** @type {Map<string, number>} deliveryId -> timestamp */
-const store = new Map();
+/** @type {Map<string, number>} deliveryId -> timestamp (in-memory fallback) */
+const memStore = new Map();
+
+/** @type {{has, set, sweep}|null} optional SQLite-backed KV store */
+let persistStore = null;
 
 let cleanupTimer = null;
 
 /**
- * Returns true if the given delivery ID has already been processed.
- * @param {string} deliveryId
- * @returns {boolean}
+ * Swap in a persistent KV store (SQLite). Calling with `null` reverts to
+ * in-memory behaviour. The caller owns the lifecycle of the store.
  */
-function isProcessed(deliveryId) {
-  return store.has(deliveryId);
+export function setIdempotencyStore(store) {
+  persistStore = store;
 }
 
-/**
- * Records a delivery ID as processed, with the current timestamp.
- * @param {string} deliveryId
- */
-function markProcessed(deliveryId) {
-  store.set(deliveryId, Date.now());
-}
-
-/**
- * Removes entries older than ENTRY_TTL_MS.
- */
-function cleanup() {
-  const cutoff = Date.now() - ENTRY_TTL_MS;
-  for (const [id, ts] of store) {
-    if (ts < cutoff) {
-      store.delete(id);
-    }
+export function isProcessed(deliveryId) {
+  if (persistStore) return persistStore.has(deliveryId);
+  const ts = memStore.get(deliveryId);
+  if (ts === undefined) return false;
+  if (ts < Date.now() - ENTRY_TTL_MS) {
+    memStore.delete(deliveryId);
+    return false;
   }
+  return true;
 }
 
-/**
- * Start the automatic cleanup interval.  Safe to call more than once (will
- * not create duplicate timers).
- */
-function startAutoCleanup() {
-  if (cleanupTimer) {
+export function markProcessed(deliveryId) {
+  if (persistStore) {
+    persistStore.set(deliveryId, '1', { ttl: ENTRY_TTL_MS });
     return;
   }
-  cleanupTimer = setInterval(cleanup, CLEANUP_INTERVAL_MS);
-  // Allow the process to exit even if the timer is still active.
-  if (cleanupTimer.unref) {
-    cleanupTimer.unref();
+  memStore.set(deliveryId, Date.now());
+}
+
+export function cleanup() {
+  if (persistStore) {
+    persistStore.sweep();
+    return;
+  }
+  const cutoff = Date.now() - ENTRY_TTL_MS;
+  for (const [id, ts] of memStore) {
+    if (ts < cutoff) memStore.delete(id);
   }
 }
 
-/**
- * Stop the automatic cleanup interval (useful in tests).
- */
-function stopAutoCleanup() {
+export function startAutoCleanup() {
+  if (cleanupTimer) return;
+  cleanupTimer = setInterval(cleanup, CLEANUP_INTERVAL_MS);
+  if (cleanupTimer.unref) cleanupTimer.unref();
+}
+
+export function stopAutoCleanup() {
   if (cleanupTimer) {
     clearInterval(cleanupTimer);
     cleanupTimer = null;
   }
 }
 
-// Start auto-cleanup on module load.
 startAutoCleanup();
 
-/**
- * Exposed for testing only -- returns the internal Map so tests can inspect
- * state directly.
- * @returns {Map<string, number>}
- */
-function _getStore() {
-  return store;
+/** Exposed for tests only — returns the in-memory Map. */
+export function _getStore() {
+  return memStore;
 }
-
-export {
-  isProcessed,
-  markProcessed,
-  cleanup,
-  startAutoCleanup,
-  stopAutoCleanup,
-  _getStore
-};

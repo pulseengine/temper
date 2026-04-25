@@ -123,6 +123,40 @@ export function validateConfig(config) {
     }
   }
 
+  if (config.rulesets !== undefined) {
+    const rs = config.rulesets;
+    if (typeof rs !== 'object' || rs === null) {
+      errors.push('rulesets must be an object');
+    } else {
+      if (rs.enabled !== undefined && typeof rs.enabled !== 'boolean') {
+        errors.push('rulesets.enabled must be a boolean');
+      }
+      if (rs.fall_back_to_legacy !== undefined && typeof rs.fall_back_to_legacy !== 'boolean') {
+        errors.push('rulesets.fall_back_to_legacy must be a boolean');
+      }
+      if (rs.name !== undefined && (typeof rs.name !== 'string' || rs.name.length === 0)) {
+        errors.push('rulesets.name must be a non-empty string');
+      }
+    }
+  }
+
+  if (config.controller_repo !== undefined) {
+    const cr = config.controller_repo;
+    if (typeof cr !== 'object' || cr === null) {
+      errors.push('controller_repo must be an object');
+    } else {
+      if (cr.enabled !== undefined && typeof cr.enabled !== 'boolean') {
+        errors.push('controller_repo.enabled must be a boolean');
+      }
+      if (cr.enabled && (typeof cr.repo !== 'string' || !cr.repo.includes('/'))) {
+        errors.push('controller_repo.repo must be "owner/repo" when enabled');
+      }
+      if (cr.label !== undefined && typeof cr.label !== 'string') {
+        errors.push('controller_repo.label must be a string');
+      }
+    }
+  }
+
   if (config.ai_review?.enabled) {
     if (config.ai_review.endpoint !== undefined && typeof config.ai_review.endpoint !== 'string') {
       errors.push('ai_review.endpoint must be a string');

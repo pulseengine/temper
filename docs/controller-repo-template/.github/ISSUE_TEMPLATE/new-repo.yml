@@ -1,0 +1,91 @@
+name: New repository request
+description: Ask Temper to create a new repository in the PulseEngine org with full standard configuration applied.
+title: "Provision: <repository-name>"
+labels: ["repo-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fill in the form below. After you submit, Temper will validate the request and post an acknowledgement comment.
+        An authorised approver must react with 👍 before the repo is actually created.
+
+  - type: input
+    id: repository_name
+    attributes:
+      label: Repository name
+      description: Lowercase letters, numbers, dots, hyphens, underscores. No spaces.
+      placeholder: my-new-repo
+    validations:
+      required: true
+
+  - type: dropdown
+    id: visibility
+    attributes:
+      label: Visibility
+      description: GitHub visibility for the new repository.
+      options:
+        - private
+        - internal
+        - public
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: One-line description shown on the repo page.
+      placeholder: Short description of what the repo is for.
+    validations:
+      required: true
+
+  - type: input
+    id: template_repository
+    attributes:
+      label: Template repository
+      description: Optional. Format `owner/repo`. If set, the new repo is generated from this template.
+      placeholder: pulseengine/template-rust-crate
+    validations:
+      required: false
+
+  - type: input
+    id: topics
+    attributes:
+      label: Topics
+      description: Optional. Comma-separated GitHub topics applied after creation.
+      placeholder: webassembly, safety-critical, formal-verification
+    validations:
+      required: false
+
+  # ---------------------------------------------------------------------------
+  # ⬇️ The fields below are placeholders. They define the contract between
+  # PulseEngine maintainers and Temper. Replace / extend them to match your
+  # actual standards. (The Temper bot reads field labels case-insensitively.)
+  #
+  # YOUR INPUT GOES HERE — consider:
+  #   - which licenses are pre-approved (MIT, Apache-2.0, dual?)
+  #   - which custom properties the org uses (compliance tier, owning team)
+  #   - whether a CODEOWNERS team is required up front
+  #   - any pulseengine-specific topic that MUST be on every new repo
+  # ---------------------------------------------------------------------------
+
+  - type: dropdown
+    id: license
+    attributes:
+      label: License
+      description: TODO — replace this list with licenses your org actually allows.
+      options:
+        - MIT
+        - Apache-2.0
+        - "MIT OR Apache-2.0"
+        - Other (please specify in description)
+    validations:
+      required: true
+
+  - type: input
+    id: codeowners_team
+    attributes:
+      label: CODEOWNERS team
+      description: TODO — set to a sensible default (e.g. `@pulseengine/maintainers`).
+      placeholder: "@pulseengine/maintainers"

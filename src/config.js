@@ -152,6 +152,14 @@ export function mergePullRequestRules(protectionConfig = {}) {
   return merged;
 }
 
+export function getRulesetConfig() {
+  return config?.rulesets || { enabled: false };
+}
+
+export function getControllerRepoConfig() {
+  return config?.controller_repo || { enabled: false };
+}
+
 export function getRequiredSignaturesFlag(protectionConfig = {}) {
   if (typeof protectionConfig.require_signed_commits === 'boolean') {
     return protectionConfig.require_signed_commits;

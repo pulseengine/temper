@@ -6,6 +6,35 @@ import { getLogger } from './logger.js';
 
 const _reviewTimestamps = new Map();
 
+/** @type {{has, get, set, sweep}|null} optional SQLite-backed KV store for rate limits */
+let _rateLimitStore = null;
+
+/**
+ * Swap in a persistent KV store (SQLite). Calling with `null` reverts to
+ * in-memory behaviour. The caller owns the lifecycle of the store.
+ */
+export function setRateLimitStore(store) {
+  _rateLimitStore = store;
+}
+
+const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+
+function isRateLimited(key) {
+  if (_rateLimitStore) {
+    return _rateLimitStore.has(key);
+  }
+  const last = _reviewTimestamps.get(key);
+  return !!(last && Date.now() - last < RATE_LIMIT_WINDOW_MS);
+}
+
+function recordReview(key) {
+  if (_rateLimitStore) {
+    _rateLimitStore.set(key, '1', { ttl: RATE_LIMIT_WINDOW_MS });
+    return;
+  }
+  _reviewTimestamps.set(key, Date.now());
+}
+
 function isLocalEndpoint(endpoint) {
   try {
     const url = new URL(endpoint);
@@ -297,8 +326,7 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
 
   // Rate limiting: reject if <5min since last review on same PR
   const rateKey = `${owner}/${repo}#${prNumber}`;
-  const lastReview = _reviewTimestamps.get(rateKey);
-  if (lastReview && Date.now() - lastReview < 300000) {
+  if (isRateLimited(rateKey)) {
     return {
       success: false,
       error: 'Rate limited: please wait at least 5 minutes between reviews on the same PR.'
@@ -355,7 +383,7 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
       }
     );
 
-    _reviewTimestamps.set(rateKey, Date.now());
+    recordReview(rateKey);
 
     const headSha = prData.data.head?.sha || '';
     const comment = formatReviewComment(aiResponse, prNumber, headSha, {
