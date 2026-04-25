@@ -63,6 +63,20 @@ controller_repo:
   # Reaction approvers must add to authorise provisioning.
   approval_reaction: "+1"
 
+# Configuration changes (dependabot.yml, templates, CODEOWNERS) are applied via
+# pull request rather than direct push. Required because branch protection
+# (PR #19) blocks direct commits to default branches.
+change_strategy:
+  use_pull_requests: true
+  pr_title: "[temper] Configuration update"
+  pr_body: |
+    Automated configuration update from the Temper bot.
+
+    Review the changes and merge if they match the org standard.
+  pr_labels:
+    - automation
+    - dependencies
+
 auto_merge:
   enabled: true
   on_dependabot: true

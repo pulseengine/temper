@@ -140,6 +140,20 @@ export function validateConfig(config) {
     }
   }
 
+  if (config.change_strategy !== undefined) {
+    const cs = config.change_strategy;
+    if (typeof cs !== 'object' || cs === null) {
+      errors.push('change_strategy must be an object');
+    } else {
+      if (cs.use_pull_requests !== undefined && typeof cs.use_pull_requests !== 'boolean') {
+        errors.push('change_strategy.use_pull_requests must be a boolean');
+      }
+      if (cs.pr_labels !== undefined && !Array.isArray(cs.pr_labels)) {
+        errors.push('change_strategy.pr_labels must be an array');
+      }
+    }
+  }
+
   if (config.controller_repo !== undefined) {
     const cr = config.controller_repo;
     if (typeof cr !== 'object' || cr === null) {
