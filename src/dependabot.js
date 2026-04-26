@@ -23,7 +23,10 @@ async function applyDependabotConfig(octokit, owner, repo, dependabotConfig) {
     getLogger().info(`Applying Dependabot configuration to ${owner}/${repo}`);
 
     const usePR = config.change_strategy?.use_pull_requests || false;
-    const yamlContent = yaml.dump(dependabotConfig);
+    // noRefs: true inlines repeated structures (e.g. shared `labels` arrays)
+    // instead of emitting YAML anchors (`&ref_0` / `*ref_0`) that GitHub's
+    // dependabot.yml parser rejects.
+    const yamlContent = yaml.dump(dependabotConfig, { noRefs: true });
 
     if (usePR) {
       await createConfigurationPR(
