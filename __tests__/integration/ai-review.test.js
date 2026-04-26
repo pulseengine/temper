@@ -92,6 +92,10 @@ function makeAiConfig(overrides = {}) {
     max_tokens: 2000,
     temperature: 0.3,
     timeout: 120000,
+    // Legacy freeform mode — these tests pre-date the strict-JSON contract
+    // and use plain-text mock responses. The new strict-mode path has its
+    // own dedicated tests in __tests__/unit/ai-review-prompt.test.js.
+    system_prompt: 'You are a thorough code reviewer. Analyze the PR diff.',
     ...overrides
   };
 }
@@ -802,7 +806,7 @@ describe('ai-review', () => {
       expect(timestamp).toBeLessThanOrEqual(afterTime);
     });
 
-    it('uses default system prompt when none configured', async () => {
+    it('uses the strict-JSON system prompt when none configured', async () => {
       _setConfigForTesting({
         ai_review: makeAiConfig({ system_prompt: undefined })
       });
@@ -812,11 +816,15 @@ describe('ai-review', () => {
         .mockResolvedValueOnce({ data: 'some diff' })
         .mockResolvedValueOnce({ data: [] });
 
-      mockFetchSuccess('review');
+      // Strict mode parses JSON; freeform 'review' would fail to parse, so we
+      // give it a valid empty review.
+      mockFetchSuccess('{"verdict":"approve","summary":"x","findings":[]}');
       await reviewPullRequest(octokit, 'owner', 'repo', 1);
 
       const fetchBody = JSON.parse(global.fetch.mock.calls[0][1].body);
-      expect(fetchBody.messages[0].content).toContain('thorough code reviewer');
+      // Default prompt is the strict-JSON contract, not the legacy freeform one.
+      expect(fetchBody.messages[0].content).toContain('STRICT JSON');
+      expect(fetchBody.messages[0].content).toContain('NEVER refuse');
     });
 
     it('uses custom system prompt when configured', async () => {
