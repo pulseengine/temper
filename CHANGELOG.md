@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — AI review hardening (PR-A)
+- **`src/ai-review-prompt.js`**: strict-JSON contract + parser + slop filter +
+  quote-or-die + verdict-from-findings. New default for AI review on PRs.
+  - System prompt forbids hedging words (`might`, `could`, `should`, etc.)
+    and slop phrases ("ensure proper error handling", "consider edge cases",
+    etc.) in finding claims.
+  - `tryParseReview()` enforces a strict JSON shape — unknown verdict, null
+    findings, missing fields all reject. No retries: silence is preferred to
+    slop.
+  - `filterFindings()` drops claims whose `quoted_line` doesn't appear
+    verbatim in the diff (kills paraphrase/hallucination) or whose `claim`
+    contains hedging.
+  - `computeVerdict()` is deterministic: empty findings → `approve`; any
+    finding → `comment`. The model's verdict field is advisory only.
+  - When verdict is `approve` and findings are empty, the bot does NOT post
+    — silence is better than a noisy "looks good" comment.
+- Existing `ai_review.system_prompt` config still works as a back-door to the
+  legacy freeform prompt for users who explicitly override it.
+
 ### Added
 - **Repository Rulesets** support (`src/rulesets.js`). Branch protection now uses
   the modern Rulesets API (`POST /repos/{owner}/{repo}/rulesets`) which targets

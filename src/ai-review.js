@@ -3,6 +3,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { getConfig } from './config.js';
 import { getLogger } from './logger.js';
+import {
+  STRICT_SYSTEM_PROMPT,
+  tryParseReview,
+  filterFindings,
+  computeVerdict,
+  renderReviewMarkdown
+} from './ai-review-prompt.js';
 
 const _reviewTimestamps = new Map();
 
@@ -364,13 +371,15 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
       { owner, repo, pull_number: prNumber }
     );
 
-    const systemPrompt =
-      aiConfig.system_prompt ||
-      'You are a thorough code reviewer. Analyze the PR diff and provide: 1. Summary of changes 2. Potential bugs or issues 3. Security concerns 4. Suggestions for improvement 5. Overall assessment';
+    // Strict-JSON contract by default; legacy freeform if user explicitly
+    // overrides system_prompt in config.
+    const systemPrompt = aiConfig.system_prompt || STRICT_SYSTEM_PROMPT;
+    const useStrictMode = !aiConfig.system_prompt;
 
+    const diffText = typeof diffResponse.data === 'string' ? diffResponse.data : '';
     const userPrompt = buildReviewPrompt(
       prData.data,
-      typeof diffResponse.data === 'string' ? diffResponse.data : '',
+      diffText,
       filesResponse.data,
       aiConfig.max_diff_size || 12000
     );
@@ -390,12 +399,62 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
     recordReview(rateKey);
 
     const headSha = prData.data.head?.sha || '';
-    const comment = formatReviewComment(aiResponse, prNumber, headSha, {
+    const meta = {
       baseRepo: prData.data.base?.repo?.full_name || `${owner}/${repo}`,
       baseBranch: prData.data.base?.ref || '',
       headRepo: prData.data.head?.repo?.full_name || `${owner}/${repo}`,
       headBranch: prData.data.head?.ref || '',
-    });
+    };
+
+    let comment;
+    let assessment = 'unknown';
+    let findingsCount = 0;
+
+    if (useStrictMode) {
+      const parsed = tryParseReview(aiResponse);
+      if (!parsed.ok) {
+        getLogger().warn(
+          { pr: prNumber, error: parsed.error, sample: aiResponse.slice(0, 200) },
+          'AI review JSON parse failed — skipping post (silence is better than slop)'
+        );
+        return { success: false, error: `parse: ${parsed.error}`, skipped: true };
+      }
+
+      const filtered = filterFindings(parsed.data.findings, diffText);
+      const droppedCount = parsed.data.findings.length - filtered.length;
+      if (droppedCount > 0) {
+        getLogger().info(
+          { pr: prNumber, droppedCount, kept: filtered.length },
+          'Filtered out hedging/unquoted findings'
+        );
+      }
+
+      const renderInput = { ...parsed.data, findings: filtered };
+      comment = renderReviewMarkdown(renderInput, prNumber, headSha, meta);
+      assessment = computeVerdict(filtered);
+      findingsCount = filtered.length;
+
+      if (comment === null) {
+        getLogger().info(
+          { pr: prNumber },
+          'AI review approved with no findings — skipping post'
+        );
+        storeReview({
+          repo: `${owner}/${repo}`,
+          prNumber,
+          headSha: headSha.substring(0, 7),
+          timestamp: new Date().toISOString(),
+          status: 'open',
+          assessment,
+          findings: 0
+        });
+        return { success: true, skipped: true, assessment };
+      }
+    } else {
+      // Legacy freeform path — preserved for users who set system_prompt
+      // explicitly. No structural validation; old footer/format applied.
+      comment = formatReviewComment(aiResponse, prNumber, headSha, meta);
+    }
 
     // Mark previous bot reviews as outdated
     await supersedePreviousReviews(octokit, owner, repo, prNumber);
@@ -405,16 +464,17 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
       { owner, repo, issue_number: prNumber, body: comment }
     );
 
-    // Store the review record
     storeReview({
       repo: `${owner}/${repo}`,
       prNumber,
       headSha: headSha.substring(0, 7),
       timestamp: new Date().toISOString(),
-      status: 'open'
+      status: 'open',
+      assessment,
+      findings: findingsCount
     });
 
-    return { success: true, comment };
+    return { success: true, comment, assessment, findings: findingsCount };
   } catch (error) {
     getLogger().error(`❌ Error reviewing PR #${prNumber}:`, error.message);
     return { success: false, error: error.message };
