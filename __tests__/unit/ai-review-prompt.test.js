@@ -195,8 +195,27 @@ describe('computeVerdict (deterministic, ignores model)', () => {
     expect(computeVerdict(null)).toBe('approve');
   });
 
-  it('returns comment when findings exist', () => {
+  it('returns comment when only model findings exist', () => {
     expect(computeVerdict([{ file: 'a', line: 1, quoted_line: 'x', claim: 'y' }])).toBe('comment');
+  });
+
+  it('returns comment when oracle findings are warning/info only', () => {
+    expect(computeVerdict([
+      { source: 'oracle:rivet-validate', severity: 'warning', artifact_id: 'X', claim: 'y' }
+    ])).toBe('comment');
+  });
+
+  it('promotes to request_changes when ANY oracle finding has severity error', () => {
+    expect(computeVerdict([
+      { source: 'oracle:rivet-validate', severity: 'warning', artifact_id: 'X', claim: 'a' },
+      { source: 'oracle:rivet-validate', severity: 'error', artifact_id: 'Y', claim: 'b' }
+    ])).toBe('request_changes');
+  });
+
+  it('does NOT promote to request_changes for model findings (no source) at "error" — only oracle has evidence-grade errors', () => {
+    expect(computeVerdict([
+      { file: 'a', line: 1, quoted_line: 'x', claim: 'y', severity: 'error' }
+    ])).toBe('comment');
   });
 });
 
@@ -243,6 +262,56 @@ describe('renderReviewMarkdown', () => {
     );
     expect(out).toContain('💬 Comment');
     expect(out).not.toContain('✅ Approve');
+  });
+
+  it('renders oracle findings with severity badge and artifact_id (not file:line)', () => {
+    const out = renderReviewMarkdown(
+      {
+        verdict: 'comment',
+        summary: 'Run includes rivet validate.',
+        findings: [
+          {
+            source: 'oracle:rivet-validate',
+            severity: 'error',
+            artifact_id: 'REQ-001',
+            claim: 'REQ-001: missing required field x'
+          },
+          {
+            source: 'oracle:rivet-impact',
+            severity: 'warning',
+            artifact_id: 'OLD-1',
+            claim: 'Artifact removed: OLD-1.'
+          }
+        ]
+      },
+      99, 'def5678', meta
+    );
+    expect(out).toContain('🔴 `REQ-001`');
+    expect(out).toContain('rivet-validate');
+    expect(out).toContain('🟡 `OLD-1`');
+    expect(out).toContain('rivet-impact');
+    expect(out).toContain('🔴 Request changes');  // because severity:error oracle finding
+  });
+
+  it('renders mixed oracle + model findings in two visual styles', () => {
+    const out = renderReviewMarkdown(
+      {
+        verdict: 'comment',
+        summary: 'Mixed.',
+        findings: [
+          {
+            source: 'oracle:rivet-validate',
+            severity: 'warning',
+            artifact_id: 'REQ-100',
+            claim: 'REQ-100: lifecycle gap'
+          },
+          { file: 'a.js', line: 5, quoted_line: '+x', claim: 'no test for x at a.js:5' }
+        ]
+      },
+      99, 'def5678', meta
+    );
+    expect(out).toContain('🟡 `REQ-100`');
+    expect(out).toContain('`a.js:5`');
   });
 
   it('still posts when caller opts out of skip-approve-empty', () => {

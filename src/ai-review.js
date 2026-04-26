@@ -10,6 +10,8 @@ import {
   computeVerdict,
   renderReviewMarkdown
 } from './ai-review-prompt.js';
+import { runRivetOracle } from './rivet-oracle.js';
+import { hasRivetYaml, withTempRepoCheckout } from './rivet-fetch.js';
 
 const _reviewTimestamps = new Map();
 
@@ -371,6 +373,43 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
       { owner, repo, pull_number: prNumber }
     );
 
+    // Mechanical oracle: only runs for repos that ship rivet.yaml AND have
+    // the binary configured. Failures are non-fatal — the model path still
+    // runs.
+    let oracleFindings = [];
+    let oracleSummary = null;
+    const rivetCfg = config.rivet_oracle;
+    if (rivetCfg?.enabled && rivetCfg?.binary_path) {
+      const headSha = prData.data.head?.sha;
+      const baseSha = prData.data.base?.sha;
+      try {
+        if (headSha && (await hasRivetYaml(octokit, owner, repo, headSha))) {
+          oracleSummary = await withTempRepoCheckout(
+            octokit,
+            owner,
+            repo,
+            headSha,
+            (repoPath) => runRivetOracle(rivetCfg.binary_path, repoPath, {
+              baseRef: baseSha,
+              timeout: rivetCfg.timeout_ms || 60000
+            })
+          );
+          if (oracleSummary?.findings) {
+            oracleFindings = oracleSummary.findings;
+          }
+          getLogger().info(
+            { pr: prNumber, oracleFindings: oracleFindings.length },
+            'Rivet oracle complete'
+          );
+        }
+      } catch (err) {
+        getLogger().warn(
+          { pr: prNumber, err: err.message },
+          'Rivet oracle failed — continuing with model-only review'
+        );
+      }
+    }
+
     // Strict-JSON contract by default; legacy freeform if user explicitly
     // overrides system_prompt in config.
     const systemPrompt = aiConfig.system_prompt || STRICT_SYSTEM_PROMPT;
@@ -412,27 +451,49 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
 
     if (useStrictMode) {
       const parsed = tryParseReview(aiResponse);
-      if (!parsed.ok) {
+      let modelFindings = [];
+      let modelSummary = null;
+
+      if (parsed.ok) {
+        modelFindings = filterFindings(parsed.data.findings, diffText);
+        modelSummary = parsed.data.summary;
+        const droppedCount = parsed.data.findings.length - modelFindings.length;
+        if (droppedCount > 0) {
+          getLogger().info(
+            { pr: prNumber, droppedCount, kept: modelFindings.length },
+            'Filtered out hedging/unquoted findings from model output'
+          );
+        }
+      } else {
         getLogger().warn(
           { pr: prNumber, error: parsed.error, sample: aiResponse.slice(0, 200) },
-          'AI review JSON parse failed — skipping post (silence is better than slop)'
+          'AI review JSON parse failed'
+        );
+      }
+
+      // Oracle findings come first — they're mechanically validated, not
+      // subject to the slop filter, and most readable when grouped.
+      const allFindings = [...oracleFindings, ...modelFindings];
+
+      // If model failed AND oracle had nothing → skip post entirely.
+      if (!parsed.ok && oracleFindings.length === 0) {
+        getLogger().info(
+          { pr: prNumber },
+          'AI review skipped: model parse failed and no oracle findings'
         );
         return { success: false, error: `parse: ${parsed.error}`, skipped: true };
       }
 
-      const filtered = filterFindings(parsed.data.findings, diffText);
-      const droppedCount = parsed.data.findings.length - filtered.length;
-      if (droppedCount > 0) {
-        getLogger().info(
-          { pr: prNumber, droppedCount, kept: filtered.length },
-          'Filtered out hedging/unquoted findings'
-        );
-      }
+      // Compose summary: prefer the model's, fall back to oracle-derived.
+      const summary = modelSummary ||
+        (oracleFindings.length > 0
+          ? `${oracleFindings.length} mechanical finding(s) from rivet oracle.`
+          : 'No findings.');
 
-      const renderInput = { ...parsed.data, findings: filtered };
+      const renderInput = { summary, findings: allFindings };
       comment = renderReviewMarkdown(renderInput, prNumber, headSha, meta);
-      assessment = computeVerdict(filtered);
-      findingsCount = filtered.length;
+      assessment = computeVerdict(allFindings);
+      findingsCount = allFindings.length;
 
       if (comment === null) {
         getLogger().info(

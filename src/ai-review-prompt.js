@@ -155,9 +155,19 @@ export function filterFindings(findings, diffText) {
 /**
  * Compute the verdict deterministically from validated findings.
  * The model's `verdict` is advisory; this function decides.
+ *
+ * Promotion rules:
+ *   - any oracle finding with severity 'error' → request_changes
+ *     (these are evidence-grade: broken cross-refs, schema violations,
+ *     missing required fields — the oracle has already said no)
+ *   - otherwise any finding → comment
+ *   - no findings → approve
  */
 export function computeVerdict(findings) {
   if (!Array.isArray(findings) || findings.length === 0) return 'approve';
+  if (findings.some((f) => f && f.severity === 'error' && typeof f.source === 'string' && f.source.startsWith('oracle:'))) {
+    return 'request_changes';
+  }
   return 'comment';
 }
 
@@ -198,11 +208,23 @@ export function renderReviewMarkdown(parsed, prNumber, headSha, meta, opts = {})
     lines.push(`**Findings (${findings.length}):**`);
     lines.push('');
     findings.forEach((f, i) => {
-      lines.push(`${i + 1}. \`${f.file}:${f.line}\``);
-      lines.push('   ```');
-      lines.push(`   ${f.quoted_line}`);
-      lines.push('   ```');
-      lines.push(`   ${f.claim}`);
+      if (typeof f.source === 'string' && f.source.startsWith('oracle:')) {
+        // Oracle finding: artifact-anchored, mechanically validated.
+        const sevBadge =
+          f.severity === 'error' ? '🔴'
+          : f.severity === 'warning' ? '🟡'
+          : 'ℹ️';
+        const oracleName = f.source.replace('oracle:', '');
+        lines.push(`${i + 1}. ${sevBadge} \`${f.artifact_id || '<unknown>'}\` _(${oracleName})_`);
+        lines.push(`   ${f.claim}`);
+      } else {
+        // Model finding: file:line-anchored, post-validated.
+        lines.push(`${i + 1}. \`${f.file}:${f.line}\``);
+        lines.push('   ```');
+        lines.push(`   ${f.quoted_line}`);
+        lines.push('   ```');
+        lines.push(`   ${f.claim}`);
+      }
       lines.push('');
     });
   }
