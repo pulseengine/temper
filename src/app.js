@@ -462,7 +462,7 @@ function registerApp(app, options = {}) {
           const yaml = (await import('js-yaml')).default;
           let body = `## Generated Dependabot Configuration for ${owner}/${repo}\n\n`;
           body += `${result.report}\n\n`;
-          body += '```yaml\n' + yaml.dump(result.config) + '```\n\n';
+          body += '```yaml\n' + yaml.dump(result.config, { noRefs: true }) + '```\n\n';
           body += 'Applying configuration...';
 
           await context.octokit.issues.createComment({

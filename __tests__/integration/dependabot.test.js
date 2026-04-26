@@ -80,7 +80,7 @@ describe('dependabot', () => {
         'owner',
         'repo',
         '.github/dependabot.yml',
-        yaml.dump(depConfig),
+        yaml.dump(depConfig, { noRefs: true }),
         'Add/Update Dependabot configuration'
       );
       expect(createConfigurationPR).not.toHaveBeenCalled();
@@ -96,10 +96,33 @@ describe('dependabot', () => {
         'owner',
         'repo',
         '.github/dependabot.yml',
-        yaml.dump(depConfig),
+        yaml.dump(depConfig, { noRefs: true }),
         'Add/Update Dependabot configuration'
       );
       expect(createConfigurationPR).not.toHaveBeenCalled();
+    });
+
+    it('emits dependabot.yml without YAML anchors even when labels are shared across updates', async () => {
+      // Regression: js-yaml's default dump deduplicates repeated structures with
+      // anchors (&ref_0 / *ref_0). GitHub's dependabot.yml parser rejects
+      // anchors. The fix is yaml.dump(cfg, { noRefs: true }).
+      const sharedLabels = ['dependencies'];
+      const sharedConfig = {
+        version: 2,
+        updates: [
+          { 'package-ecosystem': 'npm', directory: '/', schedule: { interval: 'weekly' }, labels: sharedLabels },
+          { 'package-ecosystem': 'docker', directory: '/', schedule: { interval: 'weekly' }, labels: sharedLabels }
+        ]
+      };
+      _setConfigForTesting({});
+
+      await applyDependabotConfig(octokit, 'owner', 'repo', sharedConfig);
+
+      const dumpedContent = upsertRepoFile.mock.calls[0][4];
+      expect(dumpedContent).not.toMatch(/&ref_/);
+      expect(dumpedContent).not.toMatch(/\*ref_/);
+      // Both updates should still carry the labels inline
+      expect(dumpedContent.match(/labels:/g) || []).toHaveLength(2);
     });
 
     it('applies config via PR when use_pull_requests is true', async () => {
@@ -114,7 +137,7 @@ describe('dependabot', () => {
         'owner',
         'repo',
         '.github/dependabot.yml',
-        yaml.dump(depConfig),
+        yaml.dump(depConfig, { noRefs: true }),
         'Update Dependabot configuration'
       );
       expect(upsertRepoFile).not.toHaveBeenCalled();
