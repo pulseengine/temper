@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels: &ref_0
+      - dependencies
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    labels: *ref_0
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    labels: *ref_0
+  - package-ecosystem: cargo
+    directory: /tools/self-update
+    schedule:
+      interval: weekly
+    labels: *ref_0
