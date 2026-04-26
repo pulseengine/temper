@@ -171,6 +171,24 @@ export function validateConfig(config) {
     }
   }
 
+  if (config.rivet_oracle !== undefined) {
+    const ro = config.rivet_oracle;
+    if (typeof ro !== 'object' || ro === null) {
+      errors.push('rivet_oracle must be an object');
+    } else {
+      if (ro.enabled !== undefined && typeof ro.enabled !== 'boolean') {
+        errors.push('rivet_oracle.enabled must be a boolean');
+      }
+      if (ro.binary_path !== undefined && typeof ro.binary_path !== 'string') {
+        errors.push('rivet_oracle.binary_path must be a string');
+      }
+      if (ro.timeout_ms !== undefined &&
+          (typeof ro.timeout_ms !== 'number' || ro.timeout_ms < 1000)) {
+        errors.push('rivet_oracle.timeout_ms must be a number >= 1000');
+      }
+    }
+  }
+
   if (config.ai_review?.enabled) {
     if (config.ai_review.endpoint !== undefined && typeof config.ai_review.endpoint !== 'string') {
       errors.push('ai_review.endpoint must be a string');

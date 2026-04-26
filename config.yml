@@ -106,6 +106,16 @@ ai_review:
   timeout: 300000
   allow_remote_endpoint: false
 
+# Mechanical oracle: when the target repo ships rivet.yaml and the rivet
+# binary is installed, run `rivet validate` and `rivet impact --since=<base>`
+# against a fresh tarball of the PR head. Findings from the oracle are
+# mechanically validated and bypass the model entirely. Errors from the
+# oracle promote the verdict to request_changes.
+rivet_oracle:
+  enabled: true
+  binary_path: "data/rivet/rivet"
+  timeout_ms: 60000
+
 scheduler:
   interval_minutes: 5
   max_tasks_per_tick: 5
