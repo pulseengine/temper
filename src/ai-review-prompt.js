@@ -50,6 +50,65 @@ Example with a finding:
 Example with no findings:
 {"verdict":"approve","summary":"Pure docs change in README.","findings":[]}`;
 
+/**
+ * JSON Schema describing the strict review payload. Used as a wire-format
+ * contract: passed to Ollama via OpenAI-compat `response_format` so the
+ * decoder is grammar-constrained at generation time. The model literally
+ * cannot emit a token sequence that violates the schema.
+ *
+ * Belt-and-suspenders relative to the prompt rules above: the prompt
+ * teaches the *intent* (banned hedging, quote-or-die etc.) while the schema
+ * enforces the *shape*. Today's wrong-shape failures (model emitting
+ * `{"commit_message":"..."}` instead of the review object) become
+ * impossible.
+ */
+export const REVIEW_JSON_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    verdict: {
+      type: 'string',
+      enum: ['approve', 'comment', 'request_changes']
+    },
+    summary: {
+      type: 'string',
+      maxLength: 400
+    },
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          file: { type: 'string', minLength: 1 },
+          line: { type: 'integer', minimum: 1 },
+          quoted_line: { type: 'string', minLength: 1 },
+          claim: { type: 'string', minLength: 5, maxLength: 400 }
+        },
+        required: ['file', 'line', 'quoted_line', 'claim']
+      }
+    }
+  },
+  required: ['verdict', 'summary', 'findings']
+};
+
+/**
+ * Build the OpenAI-compat `response_format` payload for grammar-constrained
+ * JSON output. Ollama (≥0.5) honours this on /v1/chat/completions; older
+ * builds may fall back to plain JSON mode or ignore it entirely (in which
+ * case the parser still catches non-conforming output).
+ */
+export function buildResponseFormat() {
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name: 'PullRequestReview',
+      strict: true,
+      schema: REVIEW_JSON_SCHEMA
+    }
+  };
+}
+
 const HEDGE_OR_SLOP_PATTERNS = [
   /\bmight\b/i,
   /\bcould\b/i,
