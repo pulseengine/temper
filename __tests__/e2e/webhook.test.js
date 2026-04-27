@@ -319,10 +319,14 @@ describe('E2E webhook simulation', () => {
 
     // The webhook signature is valid so Probot accepts it. The handler will
     // attempt GitHub API calls (e.g. checking org membership) which fail
-    // without a real connection, so Probot may return 500 from the handler
-    // error. 200/202 (accepted) and 500 (handler error) all confirm the
-    // signature was validated and the event was dispatched to the handler.
-    expect([200, 202, 500]).toContain(res.status);
+    // without a real installation. Probot returns one of:
+    //   200/202: signature validated, handler completed (handler may have
+    //            silently returned without making API calls)
+    //   401:     handler proceeded and tried to acquire an installation
+    //            token but credentials are fake
+    //   500:     unhandled exception inside the handler
+    // All four confirm the signature was validated and the event dispatched.
+    expect([200, 202, 401, 500]).toContain(res.status);
   }, 15000);
 
   // -----------------------------------------------------------------------

@@ -45,6 +45,27 @@ function getEnqueueTask() {
     : null;
 }
 
+/**
+ * Octokit's `.issues.X` namespace is unreliable in Probot v14 — frequently
+ * undefined on `pull_request.opened` AND `issue_comment.created` events
+ * (see git history of `src/ai-review.js` and PR #22 for the hours of
+ * production silence this caused). Always go through `.request(route, args)`
+ * — that primitive is consistently available regardless of event context.
+ *
+ * These helpers exist so call sites stay short and the routes are declared
+ * once, not 28 times.
+ */
+const issueOps = {
+  createComment: (octokit, args) =>
+    octokit.request('POST /repos/{owner}/{repo}/issues/{issue_number}/comments', args),
+  updateComment: (octokit, args) =>
+    octokit.request('PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}', args),
+  deleteComment: (octokit, args) =>
+    octokit.request('DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}', args),
+  createIssue: (octokit, args) =>
+    octokit.request('POST /repos/{owner}/{repo}/issues', args)
+};
+
 function applySecurityHeaders(res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -165,7 +186,7 @@ function registerApp(app, options = {}) {
 
       if (repository.has_issues) {
         try {
-          await context.octokit.issues.create({
+          await issueOps.createIssue(context.octokit,{
             owner,
             repo: repoName,
             title: 'Repository Configuration',
@@ -220,7 +241,7 @@ function registerApp(app, options = {}) {
     const repo = repository.name;
 
     if (!validation.valid) {
-      await context.octokit.issues.createComment({
+      await issueOps.createComment(context.octokit,{
         owner,
         repo,
         issue_number: issue.number,
@@ -233,7 +254,7 @@ function registerApp(app, options = {}) {
     const enqueueTask = getEnqueueTask();
     if (!enqueueTask) {
       getLogger().warn('Task store not initialized — cannot enqueue provision-repo task');
-      await context.octokit.issues.createComment({
+      await issueOps.createComment(context.octokit,{
         owner,
         repo,
         issue_number: issue.number,
@@ -254,7 +275,7 @@ function registerApp(app, options = {}) {
       }
     );
 
-    await context.octokit.issues.createComment({
+    await issueOps.createComment(context.octokit,{
       owner,
       repo,
       issue_number: issue.number,
@@ -313,7 +334,7 @@ function registerApp(app, options = {}) {
         senderLogin
       );
       if (!isOrgMember) {
-        await context.octokit.issues.createComment({
+        await issueOps.createComment(context.octokit,{
           owner,
           repo,
           issue_number: issueNumber,
@@ -326,7 +347,7 @@ function registerApp(app, options = {}) {
 
     const requireAllowedUser = async () => {
       if (!isAllowedUser) {
-        await context.octokit.issues.createComment({
+        await issueOps.createComment(context.octokit,{
           owner,
           repo,
           issue_number: issueNumber,
@@ -351,7 +372,7 @@ function registerApp(app, options = {}) {
         enqueueTask: getEnqueueTask()
       });
 
-      await context.octokit.issues.createComment({
+      await issueOps.createComment(context.octokit,{
         owner,
         repo,
         issue_number: issueNumber,
@@ -371,7 +392,7 @@ function registerApp(app, options = {}) {
       const targetOrg = config?.organization || owner;
       const syncResult = await synchronizeAllRepositories(context.octokit, targetOrg);
 
-      await context.octokit.issues.createComment({
+      await issueOps.createComment(context.octokit,{
         owner,
         repo,
         issue_number: issueNumber,
@@ -389,7 +410,7 @@ function registerApp(app, options = {}) {
       }
 
       const configReport = await generateConfigurationReport(context.octokit, owner, repo);
-      await context.octokit.issues.createComment({
+      await issueOps.createComment(context.octokit,{
         owner,
         repo,
         issue_number: issueNumber,
@@ -405,7 +426,7 @@ function registerApp(app, options = {}) {
       }
 
       const dependabotReport = await checkDependabotConfiguration(context.octokit, owner, repo);
-      await context.octokit.issues.createComment({
+      await issueOps.createComment(context.octokit,{
         owner,
         repo,
         issue_number: issueNumber,
@@ -429,14 +450,14 @@ function registerApp(app, options = {}) {
           dependabotCheck.labelIssues
         );
 
-        await context.octokit.issues.createComment({
+        await issueOps.createComment(context.octokit,{
           owner,
           repo,
           issue_number: issueNumber,
           body: `✅ Fixed labels on ${fixResult.fixedIssues} Dependabot PRs!`
         });
       } else {
-        await context.octokit.issues.createComment({
+        await issueOps.createComment(context.octokit,{
           owner,
           repo,
           issue_number: issueNumber,
@@ -460,7 +481,7 @@ function registerApp(app, options = {}) {
         const result = await generateDependabotConfig(context.octokit, owner, repo, defaultBranch);
 
         if (!result.config) {
-          await context.octokit.issues.createComment({
+          await issueOps.createComment(context.octokit,{
             owner, repo, issue_number: issueNumber,
             body: `No package ecosystems detected in ${owner}/${repo}. Nothing to generate.`
           });
@@ -471,20 +492,20 @@ function registerApp(app, options = {}) {
           body += '```yaml\n' + yaml.dump(result.config, { noRefs: true }) + '```\n\n';
           body += 'Applying configuration...';
 
-          await context.octokit.issues.createComment({
+          await issueOps.createComment(context.octokit,{
             owner, repo, issue_number: issueNumber,
             body
           });
 
           await applyDependabotConfig(context.octokit, owner, repo, result.config);
 
-          await context.octokit.issues.createComment({
+          await issueOps.createComment(context.octokit,{
             owner, repo, issue_number: issueNumber,
             body: '✅ Dependabot configuration applied!'
           });
         }
       } catch (error) {
-        await context.octokit.issues.createComment({
+        await issueOps.createComment(context.octokit,{
           owner, repo, issue_number: issueNumber,
           body: `❌ Error generating Dependabot config: ${error.message}`
         });
@@ -501,7 +522,7 @@ function registerApp(app, options = {}) {
       const org = config?.organization || owner;
       const analysisReport = await generateOrganizationAnalysisReport(context.octokit, org);
 
-      const reportIssue = await context.octokit.issues.create({
+      const reportIssue = await issueOps.createIssue(context.octokit,{
         owner,
         repo,
         title: `Organization Analysis Report - ${new Date().toISOString().split('T')[0]}`,
@@ -509,7 +530,7 @@ function registerApp(app, options = {}) {
         labels: ['analysis', 'report', 'automation']
       });
 
-      await context.octokit.issues.createComment({
+      await issueOps.createComment(context.octokit,{
         owner,
         repo,
         issue_number: issueNumber,
@@ -531,7 +552,7 @@ function registerApp(app, options = {}) {
         issueNumber
       );
       if (strategyCheck.error) {
-        await context.octokit.issues.createComment({
+        await issueOps.createComment(context.octokit,{
           owner,
           repo,
           issue_number: issueNumber,
@@ -560,7 +581,7 @@ function registerApp(app, options = {}) {
         response += `💡 **Recommendation:** Current merge strategy is appropriate.`;
       }
 
-      await context.octokit.issues.createComment({
+      await issueOps.createComment(context.octokit,{
         owner,
         repo,
         issue_number: issueNumber,
@@ -577,7 +598,7 @@ function registerApp(app, options = {}) {
 
       const allowedAdmins = config.signed_commit_strategy?.admin_users || [];
       if (allowedAdmins.length > 0 && !allowedAdmins.includes(sender.login)) {
-        await context.octokit.issues.createComment({
+        await issueOps.createComment(context.octokit,{
           owner,
           repo,
           issue_number: issueNumber,
@@ -595,7 +616,7 @@ function registerApp(app, options = {}) {
       );
       if (result.success) {
         if (result.action === 'temporarily_allowed_merge_commits') {
-          await context.octokit.issues.createComment({
+          await issueOps.createComment(context.octokit,{
             owner,
             repo,
             issue_number: issueNumber,
@@ -605,7 +626,7 @@ function registerApp(app, options = {}) {
               `⚠️  Remember: Merge settings will restore to rebase-only after 1 hour.`
           });
         } else {
-          await context.octokit.issues.createComment({
+          await issueOps.createComment(context.octokit,{
             owner,
             repo,
             issue_number: issueNumber,
@@ -613,7 +634,7 @@ function registerApp(app, options = {}) {
           });
         }
       } else {
-        await context.octokit.issues.createComment({
+        await issueOps.createComment(context.octokit,{
           owner,
           repo,
           issue_number: issueNumber,
@@ -631,7 +652,7 @@ function registerApp(app, options = {}) {
 
       // Verify the comment is on a PR (not a plain issue)
       if (!context.payload.issue.pull_request) {
-        await context.octokit.issues.createComment({
+        await issueOps.createComment(context.octokit,{
           owner,
           repo,
           issue_number: issueNumber,
@@ -641,7 +662,7 @@ function registerApp(app, options = {}) {
       }
 
       // Post a "working on it" indicator
-      const workingComment = await context.octokit.issues.createComment({
+      const workingComment = await issueOps.createComment(context.octokit,{
         owner,
         repo,
         issue_number: issueNumber,
@@ -651,7 +672,7 @@ function registerApp(app, options = {}) {
       const result = await reviewPullRequest(context.octokit, owner, repo, issueNumber);
 
       if (!result.success) {
-        await context.octokit.issues.updateComment({
+        await issueOps.updateComment(context.octokit,{
           owner,
           repo,
           comment_id: workingComment.data.id,
@@ -659,7 +680,7 @@ function registerApp(app, options = {}) {
         });
       } else {
         // Delete the "working" comment since the review was posted separately
-        await context.octokit.issues.deleteComment({
+        await issueOps.deleteComment(context.octokit,{
           owner,
           repo,
           comment_id: workingComment.data.id
