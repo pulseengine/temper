@@ -11,7 +11,12 @@ import {
   renderReviewMarkdown,
   buildResponseFormat
 } from './ai-review-prompt.js';
-import { runRivetOracle } from './rivet-oracle.js';
+import {
+  runRivetOracle,
+  runRivetValidate,
+  subtractFindings,
+  groupOracleFindings
+} from './rivet-oracle.js';
 import { hasRivetYaml, withTempRepoCheckout } from './rivet-fetch.js';
 
 const _reviewTimestamps = new Map();
@@ -270,6 +275,11 @@ async function callLocalAI(endpoint, model, systemPrompt, userPrompt, options = 
   }
 }
 
+// Stable HTML marker for supersedePreviousReviews. Markdown renders it as
+// nothing visible but a substring search finds it reliably regardless of
+// header text changes. The legacy 'AI Code Review' string also matches old
+// comments still in the wild from before the rename.
+const REVIEW_MARKER = '<!-- temper-automated-review -->';
 const AI_REVIEW_SIGNATURE = 'AI Code Review';
 
 function formatReviewComment(aiResponse, prNumber, headSha, meta) {
@@ -323,7 +333,7 @@ async function supersedePreviousReviews(octokit, owner, repo, prNumber) {
     for (const comment of comments) {
       if (
         comment.body &&
-        comment.body.includes(AI_REVIEW_SIGNATURE) &&
+        (comment.body.includes(REVIEW_MARKER) || comment.body.includes(AI_REVIEW_SIGNATURE)) &&
         !comment.body.startsWith('>')
       ) {
         await octokit.request(
@@ -415,12 +425,50 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
               timeout: rivetCfg.timeout_ms || 60000
             })
           );
-          if (oracleSummary?.findings) {
-            oracleFindings = oracleSummary.findings;
+          let headOracleFindings = oracleSummary?.findings || [];
+
+          // Delta filter: subtract findings already present at the PR base.
+          // Without this, the review surfaces the entire repo backlog every
+          // time (see spar#175 — 91 pre-existing warnings drowning the diff).
+          let baseValidate = null;
+          if (baseSha && baseSha !== headSha) {
+            try {
+              baseValidate = await withTempRepoCheckout(
+                octokit,
+                owner,
+                repo,
+                baseSha,
+                (repoPath) => runRivetValidate(resolvedBinary, repoPath, {
+                  timeout: rivetCfg.timeout_ms || 60000
+                })
+              );
+            } catch (err) {
+              getLogger().warn(
+                { pr: prNumber, err: err.message },
+                'base-ref validate failed — falling back to head-only oracle findings'
+              );
+            }
           }
+          const droppedCount = headOracleFindings.length;
+          headOracleFindings = subtractFindings(
+            headOracleFindings,
+            baseValidate?.findings || []
+          );
+          const baseDelta = droppedCount - headOracleFindings.length;
+
+          // Group identical messages so 50 "Every requirement should be
+          // satisfied by ..." diagnostics collapse into one finding listing
+          // the affected artifact ids.
+          oracleFindings = groupOracleFindings(headOracleFindings);
+
           getLogger().info(
-            { pr: prNumber, oracleFindings: oracleFindings.length },
-            'Rivet oracle complete'
+            {
+              pr: prNumber,
+              oracleFindings: oracleFindings.length,
+              droppedAsPreExisting: baseDelta,
+              afterGrouping: oracleFindings.length
+            },
+            'Rivet oracle complete (delta + grouped)'
           );
         }
       } catch (err) {

@@ -67,6 +67,10 @@ function diagnosticToFinding(diag) {
     source: 'oracle:rivet-validate',
     severity: diag.severity,
     artifact_id: diag.artifact_id,
+    // `message` is stored separately so we can group findings by message text.
+    // `claim` is the rendered form used by the legacy code path that doesn't
+    // group (kept for back-compat — tests assert on it).
+    message: diag.message,
     claim: `${diag.artifact_id}: ${diag.message}`
   };
 }
@@ -79,11 +83,13 @@ function gapToFinding(gap) {
   if (!gap || typeof gap !== 'object') return null;
   const id = gap.artifact_id || gap.id;
   if (!id) return null;
+  const reason = gap.reason || gap.message || 'lifecycle coverage gap: no downstream artifacts';
   return {
     source: 'oracle:rivet-validate',
     severity: 'warning',
     artifact_id: id,
-    claim: `${id} (${gap.type || 'artifact'}) — ${gap.reason || gap.message || 'lifecycle coverage gap: no downstream artifacts'}`
+    message: reason,
+    claim: `${id} (${gap.type || 'artifact'}) — ${reason}`
   };
 }
 
@@ -93,10 +99,12 @@ function gapToFinding(gap) {
 function brokenCrossRefToFinding(ref) {
   const from = ref?.from || ref?.source || 'unknown';
   const to = ref?.to || ref?.target || 'unknown';
+  const message = `broken cross-reference → ${to}${ref?.reason ? ` (${ref.reason})` : ''}`;
   return {
     source: 'oracle:rivet-validate',
     severity: 'error',
     artifact_id: from,
+    message,
     claim: `Broken cross-reference: ${from} → ${to}${ref?.reason ? ` (${ref.reason})` : ''}`
   };
 }
@@ -232,6 +240,93 @@ export async function runRivetImpact(binary, repoPath, baseRef, opts = {}) {
       transitive: (data.transitively_affected || []).length
     }
   };
+}
+
+/**
+ * Stable identity key for a finding. Used by `subtractFindings` so the
+ * "is this finding new?" question is decidable without false-positive churn.
+ *
+ * The key intentionally excludes claim text (which is rendered) and severity
+ * upgrades (a warning at base that becomes an error at head is treated as
+ * "the same finding", since it's the same artifact + same message).
+ */
+export function findingKey(f) {
+  if (!f) return '';
+  return `${f.source || ''}|${f.artifact_id || ''}|${f.message || f.claim || ''}`;
+}
+
+/**
+ * Set difference: keep only findings present at HEAD but not at BASE.
+ * The whole point of PR review is "what did this PR change", not "what's
+ * the static state of the project". Pre-existing diagnostics get filtered.
+ */
+export function subtractFindings(headFindings, baseFindings) {
+  if (!Array.isArray(baseFindings) || baseFindings.length === 0) return headFindings;
+  const baseKeys = new Set(baseFindings.map(findingKey));
+  return headFindings.filter((f) => !baseKeys.has(findingKey(f)));
+}
+
+/**
+ * Collapse oracle findings that share the same source + severity + message
+ * into a single finding listing all affected artifact_ids. Today's spar#175
+ * review had 91 findings with 6 unique messages — this turns that into 6
+ * grouped findings with id lists.
+ *
+ * Non-oracle findings (model output) are passed through untouched.
+ */
+export function groupOracleFindings(findings, opts = {}) {
+  const { maxIdsShown = 10 } = opts;
+  if (!Array.isArray(findings) || findings.length === 0) return [];
+
+  const groups = new Map();
+  const out = [];
+
+  for (const f of findings) {
+    if (!f.source || !f.source.startsWith('oracle:')) {
+      out.push(f);
+      continue;
+    }
+    if (!f.message) {
+      out.push(f);
+      continue;
+    }
+    const key = `${f.source}|${f.severity}|${f.message}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        source: f.source,
+        severity: f.severity,
+        message: f.message,
+        artifact_ids: []
+      });
+    }
+    groups.get(key).artifact_ids.push(f.artifact_id);
+  }
+
+  for (const g of groups.values()) {
+    if (g.artifact_ids.length === 1) {
+      out.push({
+        source: g.source,
+        severity: g.severity,
+        artifact_id: g.artifact_ids[0],
+        message: g.message,
+        claim: `${g.artifact_ids[0]}: ${g.message}`
+      });
+    } else {
+      const shown = g.artifact_ids.slice(0, maxIdsShown).join(', ');
+      const more = g.artifact_ids.length > maxIdsShown
+        ? ` (+${g.artifact_ids.length - maxIdsShown} more)`
+        : '';
+      out.push({
+        source: g.source,
+        severity: g.severity,
+        artifact_id: `${g.artifact_ids.length} artifacts`,
+        artifact_ids: g.artifact_ids,
+        message: g.message,
+        claim: `${g.message} — affecting: ${shown}${more}`
+      });
+    }
+  }
+  return out;
 }
 
 /**
