@@ -8,7 +8,8 @@ import {
   tryParseReview,
   filterFindings,
   computeVerdict,
-  renderReviewMarkdown
+  renderReviewMarkdown,
+  buildResponseFormat
 } from './ai-review-prompt.js';
 import { runRivetOracle } from './rivet-oracle.js';
 import { hasRivetYaml, withTempRepoCheckout } from './rivet-fetch.js';
@@ -223,25 +224,38 @@ function buildReviewPrompt(prData, diff, files, maxDiffSize) {
 }
 
 async function callLocalAI(endpoint, model, systemPrompt, userPrompt, options = {}) {
-  const { maxTokens = 2000, temperature = 0.3, timeout = 300000 } = options;
+  const {
+    maxTokens = 2000,
+    temperature = 0.3,
+    timeout = 300000,
+    responseFormat = undefined
+  } = options;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
+
+  const payload = {
+    model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ],
+    max_tokens: maxTokens,
+    temperature,
+    stream: false
+  };
+  if (responseFormat) {
+    // OpenAI-compat: forces grammar-constrained output. Ollama honours
+    // this on /v1/chat/completions in recent builds. Older endpoints that
+    // ignore it fall through to the strict-prompt + parser path.
+    payload.response_format = responseFormat;
+  }
 
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        max_tokens: maxTokens,
-        temperature,
-        stream: false
-      }),
+      body: JSON.stringify(payload),
       signal: controller.signal
     });
 
@@ -438,7 +452,10 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
       {
         maxTokens: aiConfig.max_tokens || 2000,
         temperature: aiConfig.temperature || 0.3,
-        timeout: aiConfig.timeout || 120000
+        timeout: aiConfig.timeout || 120000,
+        // Grammar-constrained output in strict mode only — legacy freeform
+        // path expects prose, would get rejected by JSON-schema decoding.
+        responseFormat: useStrictMode ? buildResponseFormat() : undefined
       }
     );
 

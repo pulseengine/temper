@@ -629,6 +629,25 @@ describe('ai-review', () => {
       const callArgs = global.fetch.mock.calls[0];
       expect(callArgs[1].signal).toBeInstanceOf(AbortSignal);
     });
+
+    it('passes responseFormat through to the wire payload as response_format', async () => {
+      mockFetchSuccess('{"verdict":"approve","summary":"x","findings":[]}');
+      const fmt = { type: 'json_schema', json_schema: { name: 'X', strict: true, schema: { type: 'object' } } };
+
+      await callLocalAI(mockEndpoint, mockModel, mockSystemPrompt, mockUserPrompt, {
+        responseFormat: fmt
+      });
+
+      const body = JSON.parse(global.fetch.mock.calls[0][1].body);
+      expect(body.response_format).toEqual(fmt);
+    });
+
+    it('omits response_format when not requested (legacy compat)', async () => {
+      mockFetchSuccess('plain prose');
+      await callLocalAI(mockEndpoint, mockModel, mockSystemPrompt, mockUserPrompt);
+      const body = JSON.parse(global.fetch.mock.calls[0][1].body);
+      expect(body.response_format).toBeUndefined();
+    });
   });
 
   // =========================================================================

@@ -137,17 +137,41 @@ function setupApp(options = {}) {
 }
 
 function createMockOctokit() {
+  // Production code now goes through octokit.request() for all issue ops via
+  // the issueOps helper (was octokit.issues.X — that namespace turned out to
+  // be undefined at runtime for both pull_request.opened and
+  // issue_comment.created in Probot v14). Existing assertions still target
+  // .issues.X jest.fn()s; route the request mock into them by route so
+  // assertions keep working unchanged.
+  const issuesCreate = jest.fn().mockResolvedValue({ data: { number: 42 } });
+  const issuesCreateComment = jest.fn().mockResolvedValue({ data: { id: 100 } });
+  const issuesUpdateComment = jest.fn().mockResolvedValue({});
+  const issuesDeleteComment = jest.fn().mockResolvedValue({});
+
+  const routeDispatch = {
+    'POST /repos/{owner}/{repo}/issues': issuesCreate,
+    'POST /repos/{owner}/{repo}/issues/{issue_number}/comments': issuesCreateComment,
+    'PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}': issuesUpdateComment,
+    'DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}': issuesDeleteComment
+  };
+
+  const request = jest.fn((route, params) => {
+    const dispatch = routeDispatch[route];
+    if (dispatch) return dispatch(params);
+    return Promise.resolve({ status: 200, data: {} });
+  });
+
   return {
     issues: {
-      create: jest.fn().mockResolvedValue({ data: { number: 42 } }),
-      createComment: jest.fn().mockResolvedValue({ data: { id: 100 } }),
-      updateComment: jest.fn().mockResolvedValue({}),
-      deleteComment: jest.fn().mockResolvedValue({})
+      create: issuesCreate,
+      createComment: issuesCreateComment,
+      updateComment: issuesUpdateComment,
+      deleteComment: issuesDeleteComment
     },
     repos: {
       getBranch: jest.fn().mockResolvedValue({ data: { name: 'main' } })
     },
-    request: jest.fn().mockResolvedValue({ status: 200, data: {} })
+    request
   };
 }
 
@@ -1105,7 +1129,11 @@ describe('app', () => {
 
         const { handlers } = setupApp();
         const context = createIssueCommentContext('/generate-dependabot');
-        context.octokit.request.mockResolvedValue({ data: { default_branch: 'main' } });
+        // mockImplementationOnce so the dispatcher in createMockOctokit still
+        // routes subsequent createComment calls into the namespaced jest.fn.
+        context.octokit.request.mockImplementationOnce(() =>
+          Promise.resolve({ data: { default_branch: 'main' } })
+        );
         await handlers['issue_comment.created'](context);
 
         expect(generateDependabotConfig).toHaveBeenCalledWith(context.octokit, 'myorg', 'myrepo', 'main');
@@ -1123,7 +1151,11 @@ describe('app', () => {
 
         const { handlers } = setupApp();
         const context = createIssueCommentContext('/generate-dependabot');
-        context.octokit.request.mockResolvedValue({ data: { default_branch: 'main' } });
+        // mockImplementationOnce so the dispatcher in createMockOctokit still
+        // routes subsequent createComment calls into the namespaced jest.fn.
+        context.octokit.request.mockImplementationOnce(() =>
+          Promise.resolve({ data: { default_branch: 'main' } })
+        );
         await handlers['issue_comment.created'](context);
 
         expect(applyDependabotConfig).not.toHaveBeenCalled();
@@ -1136,7 +1168,11 @@ describe('app', () => {
 
         const { handlers } = setupApp();
         const context = createIssueCommentContext('/generate-dependabot');
-        context.octokit.request.mockResolvedValue({ data: { default_branch: 'main' } });
+        // mockImplementationOnce so the dispatcher in createMockOctokit still
+        // routes subsequent createComment calls into the namespaced jest.fn.
+        context.octokit.request.mockImplementationOnce(() =>
+          Promise.resolve({ data: { default_branch: 'main' } })
+        );
         await handlers['issue_comment.created'](context);
 
         const body = context.octokit.issues.createComment.mock.calls[0][0].body;

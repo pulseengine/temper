@@ -1,5 +1,7 @@
 import {
   STRICT_SYSTEM_PROMPT,
+  REVIEW_JSON_SCHEMA,
+  buildResponseFormat,
   isSlop,
   tryParseReview,
   filterFindings,
@@ -13,6 +15,40 @@ describe('STRICT_SYSTEM_PROMPT', () => {
     expect(STRICT_SYSTEM_PROMPT).toMatch(/"verdict"\s*:\s*"approve"/);
     expect(STRICT_SYSTEM_PROMPT).toMatch(/quoted_line/);
     expect(STRICT_SYSTEM_PROMPT).toMatch(/NEVER refuse/);
+  });
+});
+
+describe('REVIEW_JSON_SCHEMA', () => {
+  it('declares the verdict enum exactly matching the parser', () => {
+    expect(REVIEW_JSON_SCHEMA.properties.verdict.enum).toEqual([
+      'approve', 'comment', 'request_changes'
+    ]);
+  });
+
+  it('marks verdict, summary, findings as required', () => {
+    expect(REVIEW_JSON_SCHEMA.required.sort()).toEqual(
+      ['findings', 'summary', 'verdict']
+    );
+  });
+
+  it('rejects extra properties (additionalProperties: false)', () => {
+    expect(REVIEW_JSON_SCHEMA.additionalProperties).toBe(false);
+    expect(REVIEW_JSON_SCHEMA.properties.findings.items.additionalProperties).toBe(false);
+  });
+
+  it('every finding field used by the parser is declared in the schema', () => {
+    const fields = Object.keys(REVIEW_JSON_SCHEMA.properties.findings.items.properties).sort();
+    expect(fields).toEqual(['claim', 'file', 'line', 'quoted_line']);
+  });
+});
+
+describe('buildResponseFormat', () => {
+  it('returns OpenAI-compat json_schema payload', () => {
+    const rf = buildResponseFormat();
+    expect(rf.type).toBe('json_schema');
+    expect(rf.json_schema.name).toBe('PullRequestReview');
+    expect(rf.json_schema.strict).toBe(true);
+    expect(rf.json_schema.schema).toBe(REVIEW_JSON_SCHEMA);
   });
 });
 
