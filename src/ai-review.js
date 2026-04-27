@@ -382,6 +382,13 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
     if (rivetCfg?.enabled && rivetCfg?.binary_path) {
       const headSha = prData.data.head?.sha;
       const baseSha = prData.data.base?.sha;
+      // Resolve binary path against the temper deploy root, NOT the tmpdir
+      // cwd that runRivetOracle uses. Without this, a relative binary_path
+      // like "data/rivet/rivet" gets looked up inside the freshly-extracted
+      // PR tarball — which obviously doesn't have the rivet binary in it.
+      const resolvedBinary = path.isAbsolute(rivetCfg.binary_path)
+        ? rivetCfg.binary_path
+        : path.resolve(__dirname, '..', rivetCfg.binary_path);
       try {
         if (headSha && (await hasRivetYaml(octokit, owner, repo, headSha))) {
           oracleSummary = await withTempRepoCheckout(
@@ -389,7 +396,7 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
             owner,
             repo,
             headSha,
-            (repoPath) => runRivetOracle(rivetCfg.binary_path, repoPath, {
+            (repoPath) => runRivetOracle(resolvedBinary, repoPath, {
               baseRef: baseSha,
               timeout: rivetCfg.timeout_ms || 60000
             })
