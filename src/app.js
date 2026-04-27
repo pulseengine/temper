@@ -276,7 +276,13 @@ function registerApp(app, options = {}) {
     const config = getConfig();
     const { comment, repository, sender } = context.payload;
 
-    if (!comment?.body || !context.octokit?.issues) {
+    // Only check that the body is present. We previously also gated on
+    // `context.octokit?.issues` being defined, but Probot v14 doesn't
+    // *always* expose the `.issues` namespace — and silently skipping every
+    // ChatOps command when it's missing is worse than letting individual
+    // calls fail loudly (which they don't, in practice — `octokit.request()`
+    // is always available and the existing call sites use it).
+    if (!comment?.body || !context.octokit) {
       return;
     }
 
