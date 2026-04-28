@@ -253,6 +253,79 @@ describe('app', () => {
   });
 
   // =========================================================================
+  // chatops_repo enforcement — slash commands only honoured in admin repo
+  // =========================================================================
+  describe('issue_comment.created chatops_repo gate', () => {
+    function ctx(repoFullName, body) {
+      const [o, r] = repoFullName.split('/');
+      const octokit = createMockOctokit();
+      return {
+        id: 'delivery-chatops',
+        log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+        octokit,
+        payload: {
+          comment: { body },
+          repository: { full_name: repoFullName, name: r, owner: { login: o } },
+          sender: { login: 'avrabe' },
+          issue: { number: 1 }
+        }
+      };
+    }
+
+    it('honours commands from the designated chatops repo', async () => {
+      _setConfigForTesting({
+        chatops_repo: { enabled: true, repo: 'pulseengine/temper-ops' },
+        allowed_command_users: ['avrabe']
+      });
+      const { handlers } = setupApp();
+      configureRepository.mockResolvedValue({ success: true });
+
+      await handlers['issue_comment.created'](ctx('pulseengine/temper-ops', '/configure-repo'));
+
+      expect(configureRepository).toHaveBeenCalled();
+    });
+
+    it('silently ignores slash commands from any other repo', async () => {
+      _setConfigForTesting({
+        chatops_repo: { enabled: true, repo: 'pulseengine/temper-ops' },
+        allowed_command_users: ['avrabe']
+      });
+      const { handlers } = setupApp();
+
+      const c = ctx('pulseengine/some-public-repo', '/configure-repo');
+      await handlers['issue_comment.created'](c);
+
+      expect(configureRepository).not.toHaveBeenCalled();
+      // Critically: no comment posted back. Silence in public repos.
+      expect(c.octokit.issues.createComment).not.toHaveBeenCalled();
+    });
+
+    it('does not gate non-command comments (only / triggers are gated)', async () => {
+      _setConfigForTesting({
+        chatops_repo: { enabled: true, repo: 'pulseengine/temper-ops' }
+      });
+      const { handlers } = setupApp();
+
+      const c = ctx('pulseengine/some-public-repo', 'just chatting, no command');
+      await handlers['issue_comment.created'](c);
+      // Plain comments from any repo are still silently dropped (no command
+      // matched), and no error is raised.
+      expect(c.octokit.issues.createComment).not.toHaveBeenCalled();
+    });
+
+    it('falls back to honouring all repos when chatops_repo is disabled (legacy default)', async () => {
+      _setConfigForTesting({
+        allowed_command_users: ['avrabe']
+      });
+      const { handlers } = setupApp();
+      configureRepository.mockResolvedValue({ success: true });
+
+      await handlers['issue_comment.created'](ctx('pulseengine/anywhere', '/configure-repo'));
+      expect(configureRepository).toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
   // issues.opened — controller repo / issue-driven provisioning
   // =========================================================================
   describe('issues.opened (controller-repo provisioning)', () => {

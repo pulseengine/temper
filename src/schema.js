@@ -171,6 +171,20 @@ export function validateConfig(config) {
     }
   }
 
+  if (config.chatops_repo !== undefined) {
+    const cr = config.chatops_repo;
+    if (typeof cr !== 'object' || cr === null) {
+      errors.push('chatops_repo must be an object');
+    } else {
+      if (cr.enabled !== undefined && typeof cr.enabled !== 'boolean') {
+        errors.push('chatops_repo.enabled must be a boolean');
+      }
+      if (cr.enabled && (typeof cr.repo !== 'string' || !cr.repo.includes('/'))) {
+        errors.push('chatops_repo.repo must be "owner/repo" when enabled');
+      }
+    }
+  }
+
   if (config.rivet_oracle !== undefined) {
     const ro = config.rivet_oracle;
     if (typeof ro !== 'object' || ro === null) {

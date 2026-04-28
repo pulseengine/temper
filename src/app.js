@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'url';
 import { createDashboardHandler, DEPLOY_SHA } from './dashboard.js';
-import { getConfig, getControllerRepoConfig } from './config.js';
+import { getConfig, getControllerRepoConfig, getChatopsRepoConfig } from './config.js';
 import { getLogger, setLogger } from './logger.js';
 import { configureRepository } from './repository.js';
 import {
@@ -310,6 +310,20 @@ function registerApp(app, options = {}) {
     const commandBody = comment.body.trim();
     const owner = repository.owner.login;
     const repo = repository.name;
+
+    // ChatOps surface restriction: when enabled, slash commands are only
+    // honoured in the designated admin repo. Comments from any other repo
+    // are silently ignored — no log, no reply, no bot footprint in public
+    // repos. The actual repo configuration changes still happen in their
+    // target repos; this only restricts where the *triggers* can come from.
+    const chatopsCfg = getChatopsRepoConfig();
+    if (chatopsCfg?.enabled && chatopsCfg?.repo && commandBody.startsWith('/')) {
+      const fullName = `${owner}/${repo}`;
+      if (fullName !== chatopsCfg.repo) {
+        if (deliveryId) markProcessed(deliveryId);
+        return;
+      }
+    }
     const issueNumber = context.payload.issue.number;
     const senderLogin = sender.login;
 

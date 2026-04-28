@@ -63,6 +63,16 @@ controller_repo:
   # Reaction approvers must add to authorise provisioning.
   approval_reaction: "+1"
 
+# ChatOps surface restriction. When enabled, ALL slash commands
+# (/configure-repo, /sync-all-repos, /review-pr, etc.) are silently ignored
+# from any repo other than the designated `repo`. Combined with making
+# `repo` private, the entire command-and-control conversation stays out of
+# public view. Bot-initiated configuration PRs in public repos are still
+# public — this only hides the *triggers*.
+chatops_repo:
+  enabled: false
+  repo: pulseengine/temper-ops
+
 # Configuration changes (dependabot.yml, templates, CODEOWNERS) are applied via
 # pull request rather than direct push. Required because branch protection
 # (PR #19) blocks direct commits to default branches.
