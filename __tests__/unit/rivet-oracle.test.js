@@ -10,7 +10,10 @@ import {
   isRivetProject,
   runRivetValidate,
   runRivetImpact,
-  runRivetOracle
+  runRivetOracle,
+  subtractFindings,
+  groupOracleFindings,
+  findingKey
 } from '../../src/rivet-oracle.js';
 
 function makeRunnerOk(stdout) {
@@ -198,6 +201,108 @@ describe('runRivetImpact', () => {
       runner: makeRunnerOk(empty)
     });
     expect(result.findings).toHaveLength(0);
+  });
+});
+
+describe('findingKey', () => {
+  it('combines source, artifact_id, and message', () => {
+    const f = {
+      source: 'oracle:rivet-validate',
+      artifact_id: 'REQ-001',
+      message: 'missing field'
+    };
+    expect(findingKey(f)).toBe('oracle:rivet-validate|REQ-001|missing field');
+  });
+
+  it('falls back to claim when message is absent', () => {
+    const f = { source: 'oracle:rivet-validate', artifact_id: 'X', claim: 'X: foo' };
+    expect(findingKey(f)).toContain('X: foo');
+  });
+
+  it('returns empty string for nullish input', () => {
+    expect(findingKey(null)).toBe('');
+    expect(findingKey(undefined)).toBe('');
+  });
+});
+
+describe('subtractFindings', () => {
+  const base = [
+    { source: 'oracle:rivet-validate', artifact_id: 'REQ-001', message: 'no downstream', severity: 'warning' },
+    { source: 'oracle:rivet-validate', artifact_id: 'REQ-002', message: 'no downstream', severity: 'warning' }
+  ];
+
+  it('drops findings already present at base', () => {
+    const head = [...base, { source: 'oracle:rivet-validate', artifact_id: 'REQ-003', message: 'no downstream', severity: 'warning' }];
+    const delta = subtractFindings(head, base);
+    expect(delta).toHaveLength(1);
+    expect(delta[0].artifact_id).toBe('REQ-003');
+  });
+
+  it('keeps everything when base is empty', () => {
+    expect(subtractFindings(base, [])).toEqual(base);
+    expect(subtractFindings(base, undefined)).toEqual(base);
+  });
+
+  it('returns [] when head ⊆ base (no new findings = correct silence)', () => {
+    expect(subtractFindings(base, base)).toEqual([]);
+  });
+
+  it('treats same artifact + same message but different severity as the same finding', () => {
+    const head = [{ source: 'oracle:rivet-validate', artifact_id: 'REQ-001', message: 'no downstream', severity: 'error' }];
+    expect(subtractFindings(head, base)).toEqual([]);
+  });
+});
+
+describe('groupOracleFindings', () => {
+  it('collapses identical messages into one finding with artifact_ids list', () => {
+    const findings = [
+      { source: 'oracle:rivet-validate', severity: 'warning', artifact_id: 'REQ-001', message: 'no downstream' },
+      { source: 'oracle:rivet-validate', severity: 'warning', artifact_id: 'REQ-002', message: 'no downstream' },
+      { source: 'oracle:rivet-validate', severity: 'warning', artifact_id: 'REQ-003', message: 'no downstream' }
+    ];
+    const grouped = groupOracleFindings(findings);
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].artifact_ids).toEqual(['REQ-001', 'REQ-002', 'REQ-003']);
+    expect(grouped[0].claim).toContain('REQ-001');
+    expect(grouped[0].claim).toContain('REQ-002');
+    expect(grouped[0].artifact_id).toBe('3 artifacts');
+  });
+
+  it('keeps singletons in their original shape', () => {
+    const findings = [
+      { source: 'oracle:rivet-validate', severity: 'error', artifact_id: 'REQ-001', message: 'broken ref' }
+    ];
+    const grouped = groupOracleFindings(findings);
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].artifact_id).toBe('REQ-001');
+    expect(grouped[0].artifact_ids).toBeUndefined();
+  });
+
+  it('keeps different severities as separate groups even with same message', () => {
+    const findings = [
+      { source: 'oracle:rivet-validate', severity: 'warning', artifact_id: 'A', message: 'foo' },
+      { source: 'oracle:rivet-validate', severity: 'error', artifact_id: 'B', message: 'foo' }
+    ];
+    expect(groupOracleFindings(findings)).toHaveLength(2);
+  });
+
+  it('passes through model findings without grouping', () => {
+    const findings = [
+      { file: 'a.js', line: 1, quoted_line: '+x', claim: 'no test' },
+      { file: 'b.js', line: 1, quoted_line: '+y', claim: 'no test' }
+    ];
+    expect(groupOracleFindings(findings)).toHaveLength(2);
+  });
+
+  it('truncates the displayed id list at maxIdsShown', () => {
+    const ids = Array.from({ length: 25 }, (_, i) => `REQ-${String(i + 1).padStart(3, '0')}`);
+    const findings = ids.map((id) => ({
+      source: 'oracle:rivet-validate', severity: 'warning', artifact_id: id, message: 'shared'
+    }));
+    const grouped = groupOracleFindings(findings, { maxIdsShown: 5 });
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].artifact_ids).toHaveLength(25);
+    expect(grouped[0].claim).toMatch(/\(\+20 more\)/);
   });
 });
 

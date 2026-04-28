@@ -250,8 +250,16 @@ export function renderReviewMarkdown(parsed, prNumber, headSha, meta, opts = {})
     request_changes: '🔴 Request changes'
   }[verdict];
 
+  const oracleCount = findings.filter(
+    (f) => typeof f?.source === 'string' && f.source.startsWith('oracle:')
+  ).length;
+  const modelCount = findings.length - oracleCount;
+
   const lines = [];
-  lines.push(`## AI Code Review for PR #${prNumber}`);
+  // HTML marker first so supersedePreviousReviews can identify our comments
+  // even if the visible header changes.
+  lines.push('<!-- temper-automated-review -->');
+  lines.push(`## Automated review for PR #${prNumber}`);
   if (meta?.headRepo && meta?.baseBranch && meta?.headBranch && meta?.baseRepo) {
     lines.push(`${meta.headRepo}:\`${meta.headBranch}\` → ${meta.baseRepo}:\`${meta.baseBranch}\``);
   }
@@ -259,6 +267,10 @@ export function renderReviewMarkdown(parsed, prNumber, headSha, meta, opts = {})
   lines.push(`**Verdict:** ${verdictBadge}`);
   lines.push('');
   lines.push(`**Summary:** ${parsed.summary || '(none)'}`);
+  lines.push('');
+  lines.push(
+    `_Findings: ${oracleCount} mechanical (rivet) · ${modelCount} from local AI model._`
+  );
   lines.push('');
 
   if (findings.length === 0) {
@@ -268,13 +280,18 @@ export function renderReviewMarkdown(parsed, prNumber, headSha, meta, opts = {})
     lines.push('');
     findings.forEach((f, i) => {
       if (typeof f.source === 'string' && f.source.startsWith('oracle:')) {
-        // Oracle finding: artifact-anchored, mechanically validated.
+        // Oracle finding: artifact-anchored, mechanically validated. When
+        // findings are grouped, `artifact_ids` is a multi-element array;
+        // when single, it falls back to `artifact_id`.
         const sevBadge =
           f.severity === 'error' ? '🔴'
           : f.severity === 'warning' ? '🟡'
           : 'ℹ️';
         const oracleName = f.source.replace('oracle:', '');
-        lines.push(`${i + 1}. ${sevBadge} \`${f.artifact_id || '<unknown>'}\` _(${oracleName})_`);
+        const label = Array.isArray(f.artifact_ids) && f.artifact_ids.length > 1
+          ? `${f.artifact_ids.length} artifacts`
+          : f.artifact_id || '<unknown>';
+        lines.push(`${i + 1}. ${sevBadge} \`${label}\` _(${oracleName})_`);
         lines.push(`   ${f.claim}`);
       } else {
         // Model finding: file:line-anchored, post-validated.

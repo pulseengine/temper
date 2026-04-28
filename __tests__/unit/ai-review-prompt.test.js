@@ -278,7 +278,7 @@ describe('renderReviewMarkdown', () => {
       },
       42, 'abc1234', meta
     );
-    expect(out).toContain('AI Code Review for PR #42');
+    expect(out).toContain('Automated review for PR #42');
     expect(out).toContain('💬 Comment');
     expect(out).toContain('Adds X.');
     expect(out).toContain('`a.js:5`');
@@ -298,6 +298,56 @@ describe('renderReviewMarkdown', () => {
     );
     expect(out).toContain('💬 Comment');
     expect(out).not.toContain('✅ Approve');
+  });
+
+  it('renders the new "Automated review" header with the HTML supersede marker', () => {
+    const out = renderReviewMarkdown(
+      {
+        verdict: 'comment',
+        summary: 'x',
+        findings: [{ file: 'a.js', line: 1, quoted_line: '+x', claim: 'no test for x at a.js:1' }]
+      },
+      99, 'def5678', meta
+    );
+    expect(out).toContain('<!-- temper-automated-review -->');
+    expect(out).toContain('## Automated review for PR #99');
+    expect(out).not.toContain('## AI Code Review');
+  });
+
+  it('shows finding-source breakdown footer (mechanical vs AI)', () => {
+    const out = renderReviewMarkdown(
+      {
+        verdict: 'comment',
+        summary: 'mixed.',
+        findings: [
+          { source: 'oracle:rivet-validate', severity: 'warning', artifact_id: 'REQ-001', claim: 'REQ-001: foo' },
+          { file: 'a.js', line: 1, quoted_line: '+x', claim: 'no test for x at a.js:1' }
+        ]
+      },
+      99, 'def5678', meta
+    );
+    expect(out).toMatch(/_Findings: 1 mechanical \(rivet\) · 1 from local AI model\._/);
+  });
+
+  it('renders grouped oracle finding using artifact_ids array', () => {
+    const out = renderReviewMarkdown(
+      {
+        verdict: 'comment',
+        summary: 'group.',
+        findings: [
+          {
+            source: 'oracle:rivet-validate',
+            severity: 'warning',
+            artifact_id: '3 artifacts',
+            artifact_ids: ['REQ-1', 'REQ-2', 'REQ-3'],
+            claim: 'no downstream — affecting: REQ-1, REQ-2, REQ-3'
+          }
+        ]
+      },
+      99, 'def5678', meta
+    );
+    expect(out).toContain('🟡 `3 artifacts`');
+    expect(out).toContain('affecting: REQ-1, REQ-2, REQ-3');
   });
 
   it('renders oracle findings with severity badge and artifact_id (not file:line)', () => {
