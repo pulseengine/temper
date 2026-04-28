@@ -1,0 +1,25 @@
+name: Review pull request
+description: Trigger the AI code review on a specific pull request.
+title: "Review: <repo>#<pr>"
+labels: ["chatops:review-pr"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Triggers `/review-pr` against the named PR. The bot fetches the diff, runs `rivet validate`/`rivet impact` if the repo is rivet-instrumented, calls the local AI model with the strict-JSON contract, and posts the review *on the target PR* (not here).
+
+        This issue gets a confirmation comment with the link.
+  - type: input
+    id: repository
+    attributes:
+      label: Repository
+      placeholder: pulseengine/rivet
+    validations:
+      required: true
+  - type: input
+    id: pr_number
+    attributes:
+      label: PR number
+      placeholder: "213"
+    validations:
+      required: true

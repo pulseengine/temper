@@ -412,6 +412,146 @@ describe('app', () => {
   });
 
   // =========================================================================
+  // issues.opened — chatops_repo issue forms
+  // =========================================================================
+  describe('chatops issue forms (issues.opened in chatops_repo)', () => {
+    function ctx(label, body = '', overrides = {}) {
+      const octokit = createMockOctokit();
+      return {
+        id: 'delivery-chatops-form',
+        log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+        octokit,
+        payload: {
+          issue: {
+            number: 5,
+            body,
+            labels: label ? [{ name: label }] : [],
+            ...(overrides.issue || {})
+          },
+          repository: {
+            full_name: 'pulseengine/temper-ops',
+            name: 'temper-ops',
+            owner: { login: 'pulseengine' }
+          },
+          sender: { login: 'avrabe', ...(overrides.sender || {}) }
+        }
+      };
+    }
+
+    beforeEach(() => {
+      _setConfigForTesting({
+        organization: 'pulseengine',
+        chatops_repo: { enabled: true, repo: 'pulseengine/temper-ops' },
+        allowed_command_users: ['avrabe']
+      });
+    });
+
+    it('chatops:sync-all-repos triggers org-wide sync, replies, closes issue', async () => {
+      synchronizeAllRepositories.mockResolvedValue({ success: true, repositoriesProcessed: 13 });
+      const { handlers } = setupApp();
+      const c = ctx('chatops:sync-all-repos');
+
+      await handlers['issues.opened'](c);
+
+      expect(synchronizeAllRepositories).toHaveBeenCalledWith(c.octokit, 'pulseengine');
+      // Two comments: starting + result
+      expect(c.octokit.issues.createComment).toHaveBeenCalledTimes(2);
+      // Closed via PATCH route
+      expect(c.octokit.request).toHaveBeenCalledWith(
+        'PATCH /repos/{owner}/{repo}/issues/{issue_number}',
+        expect.objectContaining({ state: 'closed' })
+      );
+    });
+
+    it('chatops:configure-repo parses Repository field, calls configureRepository', async () => {
+      configureRepository.mockResolvedValue({ success: true });
+      const { handlers } = setupApp();
+      const body = '### Repository\n\npulseengine/spar';
+      const c = ctx('chatops:configure-repo', body);
+
+      await handlers['issues.opened'](c);
+
+      // 1st request = GET repo (resolves repoData), 2nd = close issue PATCH
+      expect(c.octokit.request).toHaveBeenCalledWith(
+        'GET /repos/{owner}/{repo}',
+        expect.objectContaining({ owner: 'pulseengine', repo: 'spar' })
+      );
+      expect(configureRepository).toHaveBeenCalled();
+    });
+
+    it('chatops:configure-repo rejects when Repository field is missing', async () => {
+      const { handlers } = setupApp();
+      const c = ctx('chatops:configure-repo', '### Some other field\n\nx');
+
+      await handlers['issues.opened'](c);
+
+      expect(configureRepository).not.toHaveBeenCalled();
+      const body = c.octokit.issues.createComment.mock.calls[0][0].body;
+      expect(body).toMatch(/Missing field/i);
+    });
+
+    it('chatops:analyze-org generates report as a separate issue', async () => {
+      generateOrganizationAnalysisReport.mockResolvedValue('# Analysis');
+      const { handlers } = setupApp();
+      const c = ctx('chatops:analyze-org');
+
+      await handlers['issues.opened'](c);
+
+      expect(generateOrganizationAnalysisReport).toHaveBeenCalled();
+      // Created a new analysis report issue (not just a comment)
+      expect(c.octokit.issues.create).toHaveBeenCalledWith(
+        expect.objectContaining({ title: expect.stringContaining('Organization Analysis Report') })
+      );
+    });
+
+    it('chatops:review-pr requires Repository AND PR number', async () => {
+      reviewPullRequest.mockResolvedValue({ success: true });
+      const { handlers } = setupApp();
+      const body = '### Repository\n\npulseengine/rivet\n\n### PR number\n\n213';
+      const c = ctx('chatops:review-pr', body);
+
+      await handlers['issues.opened'](c);
+
+      expect(reviewPullRequest).toHaveBeenCalledWith(c.octokit, 'pulseengine', 'rivet', 213);
+    });
+
+    it('rejects ChatOps from a non-allowed user', async () => {
+      _setConfigForTesting({
+        organization: 'pulseengine',
+        chatops_repo: { enabled: true, repo: 'pulseengine/temper-ops' },
+        allowed_command_users: ['someone-else']
+      });
+      const { handlers } = setupApp();
+      const c = ctx('chatops:sync-all-repos');
+
+      await handlers['issues.opened'](c);
+
+      expect(synchronizeAllRepositories).not.toHaveBeenCalled();
+      const body = c.octokit.issues.createComment.mock.calls[0][0].body;
+      expect(body).toMatch(/not authorised/i);
+    });
+
+    it('falls through to controller_repo provisioning when no chatops label', async () => {
+      _setConfigForTesting({
+        organization: 'pulseengine',
+        chatops_repo: { enabled: true, repo: 'pulseengine/temper-ops' },
+        controller_repo: { enabled: true, repo: 'pulseengine/temper-ops', label: 'repo-request' }
+      });
+      const { handlers } = setupApp();
+      const c = ctx('repo-request', '### Repository name\n\nnew-svc\n\n### Visibility\n\nprivate');
+
+      await handlers['issues.opened'](c);
+
+      // Provisioning path was reached. In the test env getEnqueueTask returns
+      // null (no SQLite store), so the bot posts the offline-fallback message;
+      // in production it would be "Request accepted...". Either confirms the
+      // controller_repo handler ran (i.e., we fell through past chatops_repo).
+      const body = c.octokit.issues.createComment.mock.calls[0][0].body;
+      expect(body).toMatch(/Request accepted|task store offline/i);
+    });
+  });
+
+  // =========================================================================
   // mapLegacyEnvVars
   // =========================================================================
   describe('mapLegacyEnvVars', () => {

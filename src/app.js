@@ -66,6 +66,121 @@ const issueOps = {
     octokit.request('POST /repos/{owner}/{repo}/issues', args)
 };
 
+/**
+ * Dispatch a chatops:<command> issue form to the equivalent action.
+ * Called only when the issue lives in the configured `chatops_repo.repo`
+ * and carries a label of the form `chatops:<command>`.
+ *
+ * Replies to the source issue and (on success) closes it. The issue
+ * therefore *is* the audit trail: form fields + bot replies + close
+ * reason, all in one place.
+ */
+async function handleChatopsIssue(context, label, sender, issue, repository) {
+  const config = getConfig();
+  const owner = repository.owner.login;
+  const repo = repository.name;
+  const issueNumber = issue.number;
+  const targetOrg = config?.organization || owner;
+
+  const allowedUsers = config?.allowed_command_users || [];
+  if (allowedUsers.length > 0 && !allowedUsers.includes(sender?.login)) {
+    await issueOps.createComment(context.octokit, {
+      owner, repo, issue_number: issueNumber,
+      body: `❌ You are not authorised to trigger ChatOps. Allowed: ${allowedUsers.join(', ')}.`
+    });
+    return;
+  }
+
+  const commentBack = (body) =>
+    issueOps.createComment(context.octokit, { owner, repo, issue_number: issueNumber, body });
+
+  const closeIssue = () =>
+    context.octokit.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', {
+      owner, repo, issue_number: issueNumber, state: 'closed', state_reason: 'completed'
+    });
+
+  const command = label.replace(/^chatops:/, '');
+
+  switch (command) {
+    case 'sync-all-repos': {
+      await commentBack('🔄 Starting org-wide sync — this can take a few minutes.');
+      const result = await synchronizeAllRepositories(context.octokit, targetOrg);
+      await commentBack(result.success
+        ? `✅ Synchronized ${result.repositoriesProcessed} repositories.`
+        : `❌ Sync failed: ${result.error}`);
+      if (result.success) await closeIssue();
+      return;
+    }
+
+    case 'configure-repo': {
+      const fields = parseIssueFormBody(issue.body || '');
+      const repoSpec = fields.repository || fields.repo || fields['repository (owner/repo or just repo name in this org)'];
+      if (!repoSpec) {
+        await commentBack('❌ Missing field "Repository". Please re-open the issue with a value.');
+        return;
+      }
+      const [specOwner, specRepo] = repoSpec.includes('/')
+        ? repoSpec.split('/')
+        : [targetOrg, repoSpec];
+      const repoData = await context.octokit.request('GET /repos/{owner}/{repo}', {
+        owner: specOwner, repo: specRepo
+      }).catch((err) => ({ error: err }));
+      if (repoData.error) {
+        await commentBack(`❌ Could not access ${specOwner}/${specRepo}: ${repoData.error.message}`);
+        return;
+      }
+      await commentBack(`🔄 Configuring ${specOwner}/${specRepo}…`);
+      const result = await configureRepository(context.octokit, repoData.data, undefined, {
+        enqueueTask: getEnqueueTask()
+      });
+      await commentBack(result.success
+        ? `✅ Configured ${specOwner}/${specRepo}.`
+        : `❌ Failed: ${result.error}`);
+      if (result.success) await closeIssue();
+      return;
+    }
+
+    case 'analyze-org': {
+      await commentBack('🔄 Generating org analysis report…');
+      const reportBody = await generateOrganizationAnalysisReport(context.octokit, targetOrg);
+      const reportIssue = await issueOps.createIssue(context.octokit, {
+        owner, repo,
+        title: `Organization Analysis Report - ${new Date().toISOString().split('T')[0]}`,
+        body: reportBody,
+        labels: ['analysis', 'report', 'automation']
+      });
+      await commentBack(`✅ Report posted as issue #${reportIssue.data.number}`);
+      await closeIssue();
+      return;
+    }
+
+    case 'review-pr': {
+      const fields = parseIssueFormBody(issue.body || '');
+      const repoSpec = fields.repository || fields.repo;
+      const prRaw = fields['pr number'] || fields.pr;
+      const prNum = parseInt(prRaw, 10);
+      if (!repoSpec || !prNum) {
+        await commentBack('❌ Need both "Repository" and "PR number".');
+        return;
+      }
+      const [specOwner, specRepo] = repoSpec.includes('/')
+        ? repoSpec.split('/')
+        : [targetOrg, repoSpec];
+      await commentBack(`🔄 Triggering AI review on ${specOwner}/${specRepo}#${prNum}…`);
+      const result = await reviewPullRequest(context.octokit, specOwner, specRepo, prNum);
+      await commentBack(result.success
+        ? `✅ Review posted on https://github.com/${specOwner}/${specRepo}/pull/${prNum}.`
+        : `❌ Review failed: ${result.error}`);
+      if (result.success) await closeIssue();
+      return;
+    }
+
+    default: {
+      await commentBack(`❌ Unknown ChatOps label: \`${label}\`.`);
+    }
+  }
+}
+
 function applySecurityHeaders(res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -214,14 +329,30 @@ function registerApp(app, options = {}) {
     const deliveryId = context.id;
     if (deliveryId && isProcessed(deliveryId)) return;
 
+    const { issue, repository, sender } = context.payload;
+    const fullName = repository.full_name;
+
+    // ChatOps issue forms in the admin repo: a `chatops:<command>` label on
+    // a newly-opened issue triggers the corresponding ChatOps action,
+    // bot replies on the issue, optionally closes it.
+    const chatopsCfg = getChatopsRepoConfig();
+    if (chatopsCfg?.enabled && fullName === chatopsCfg.repo) {
+      const chatopsLabel = (issue.labels || [])
+        .map((l) => l?.name)
+        .find((n) => typeof n === 'string' && n.startsWith('chatops:'));
+      if (chatopsLabel) {
+        await handleChatopsIssue(context, chatopsLabel, sender, issue, repository);
+        if (deliveryId) markProcessed(deliveryId);
+        return;
+      }
+    }
+
     const ctrl = getControllerRepoConfig();
     if (!ctrl?.enabled) {
       if (deliveryId) markProcessed(deliveryId);
       return;
     }
 
-    const { issue, repository } = context.payload;
-    const fullName = repository.full_name;
     if (fullName !== ctrl.repo) {
       if (deliveryId) markProcessed(deliveryId);
       return;

@@ -1,0 +1,17 @@
+name: Configure single repo
+description: Re-apply the standard org configuration to one specific repository.
+title: "Configure: <repo-name>"
+labels: ["chatops:configure-repo"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Triggers `/configure-repo` against the named repository. Useful when one repo has drifted from the standard but you don't want to sweep the whole org.
+  - type: input
+    id: repository
+    attributes:
+      label: Repository
+      description: "`owner/repo`, or just `repo` if it's in this org."
+      placeholder: pulseengine/spar
+    validations:
+      required: true
