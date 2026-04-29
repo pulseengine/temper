@@ -1,0 +1,13 @@
+name: Org analysis report
+description: Generate an organization-wide configuration analysis report.
+title: "Analyze: org"
+labels: ["chatops:analyze-org"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Triggers `/analyze-org`. The bot walks every non-fork, non-archived repo and builds a report covering merge settings, branch protection / rulesets, dependabot status, and label coverage.
+
+        The report is posted as a **new issue** in this repo (`temper-ops`). This issue gets a link to it once the analysis is done.
+
+        **No fields required — just submit.**

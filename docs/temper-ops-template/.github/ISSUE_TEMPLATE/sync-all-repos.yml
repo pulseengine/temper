@@ -1,0 +1,26 @@
+name: Sync all repos
+description: Re-run org-wide configuration sync (rulesets, labels, dependabot, templates) across every repo in the org.
+title: "Sync: all repos"
+labels: ["chatops:sync-all-repos"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Triggers `/sync-all-repos`. Temper will walk every non-archived repo in the organization and apply the standard configuration:
+
+        - **Rulesets** for the default branch (modern replacement for legacy branch protection)
+        - **Merge settings** (rebase-only by default)
+        - **Issue labels** synchronized to the org standard set
+        - **Templates and CODEOWNERS** committed to `.github/`
+        - **Dependabot configuration** generated from detected ecosystems
+
+        Bot's progress will be posted as comments on this issue. The issue is closed automatically when the sync finishes.
+
+        **No fields required — just submit.**
+  - type: checkboxes
+    id: ack
+    attributes:
+      label: Confirm
+      options:
+        - label: I understand this will open multiple bot PRs across the organisation.
+          required: true
