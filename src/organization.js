@@ -1,4 +1,4 @@
-import { getTargetIssueLabels } from './config.js';
+import { getTargetIssueLabels, isControlSurfaceRepo } from './config.js';
 import { getLogger } from './logger.js';
 import { configureRepository } from './repository.js';
 import { checkExistingDependabotConfig } from './dependabot.js';
@@ -34,6 +34,11 @@ async function synchronizeAllRepositories(octokit, org) {
     for (const repo of repos) {
       if (repo.archived) {
         getLogger().info(`Skipping archived repository: ${repo.full_name}`);
+        continue;
+      }
+
+      if (isControlSurfaceRepo(repo.full_name)) {
+        getLogger().info(`Skipping control-surface repository: ${repo.full_name}`);
         continue;
       }
 

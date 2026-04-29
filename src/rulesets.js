@@ -53,12 +53,20 @@ export function translateBranchProtectionToRuleset(bpConfig = {}, name = TEMPER_
   }
 
   const checks = bpConfig.required_status_checks;
-  if (checks && checks !== null) {
+  // The Rulesets API rejects `required_status_checks` rules with empty
+  // `required_status_checks` arrays ("Expected at least 1 elements, got 0").
+  // Legacy branch-protection accepts `contexts: []`; rulesets do not.
+  // When the user has no specific named checks, omit the rule entirely —
+  // emitting a half-valid rule causes the entire ruleset POST to 422 and
+  // we silently fall back to legacy. Better to ship the ruleset without
+  // this rule than to ship no ruleset at all.
+  const hasContexts = checks && Array.isArray(checks.contexts) && checks.contexts.length > 0;
+  if (checks && checks !== null && hasContexts) {
     rules.push({
       type: 'required_status_checks',
       parameters: {
         strict_required_status_checks_policy: checks.strict ?? false,
-        required_status_checks: (checks.contexts || []).map((c) =>
+        required_status_checks: checks.contexts.map((c) =>
           typeof c === 'string' ? { context: c } : c
         )
       }

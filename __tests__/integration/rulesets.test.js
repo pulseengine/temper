@@ -57,6 +57,20 @@ describe('translateBranchProtectionToRuleset', () => {
     expect(pr.parameters.required_review_thread_resolution).toBe(true);
   });
 
+  it('omits required_status_checks rule entirely when contexts is empty (Rulesets API rejects empty)', () => {
+    const r = translateBranchProtectionToRuleset({
+      required_status_checks: { strict: true, contexts: [] }
+    });
+    expect(r.rules.find((x) => x.type === 'required_status_checks')).toBeUndefined();
+  });
+
+  it('omits required_status_checks rule when contexts is missing', () => {
+    const r = translateBranchProtectionToRuleset({
+      required_status_checks: { strict: true }
+    });
+    expect(r.rules.find((x) => x.type === 'required_status_checks')).toBeUndefined();
+  });
+
   it('emits required_status_checks with strict policy and contexts', () => {
     const r = translateBranchProtectionToRuleset({
       required_status_checks: { strict: true, contexts: ['ci/build', 'ci/test'] }

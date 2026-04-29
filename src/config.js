@@ -164,6 +164,24 @@ export function getChatopsRepoConfig() {
   return config?.chatops_repo || { enabled: false };
 }
 
+/**
+ * Returns true when `<owner>/<repo>` is a control-surface repo owned by
+ * Temper itself (the chatops admin repo or the issue-form controller).
+ * These repos are *not* org code; they're meta. They should be skipped by
+ * `configureRepository` and `synchronizeAllRepositories` to avoid:
+ *   - branch-protection 403s (private repos on free plans)
+ *   - dependabot/template noise on a repo with no code
+ *   - the bot configuring itself into a corner
+ */
+export function isControlSurfaceRepo(fullName) {
+  if (typeof fullName !== 'string') return false;
+  const chatops = config?.chatops_repo;
+  const ctrl = config?.controller_repo;
+  if (chatops?.enabled && chatops?.repo === fullName) return true;
+  if (ctrl?.enabled && ctrl?.repo === fullName) return true;
+  return false;
+}
+
 export function getRequiredSignaturesFlag(protectionConfig = {}) {
   if (typeof protectionConfig.require_signed_commits === 'boolean') {
     return protectionConfig.require_signed_commits;
