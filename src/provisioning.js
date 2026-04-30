@@ -69,7 +69,39 @@ export function parseIssueFormBody(body) {
 }
 
 const VALID_VISIBILITIES = new Set(['public', 'private', 'internal']);
-const REPO_NAME_RE = /^[a-zA-Z0-9._-]+$/;
+// GitHub's actual repository-name rules: 1-100 chars from [a-zA-Z0-9._-],
+// must not start with '.' or '-', must not end with '.git', and the bare
+// names '.' and '..' are reserved. The previous loose `^[a-zA-Z0-9._-]+$`
+// regex passed all of these to the API and surfaced as a generic 422.
+const REPO_NAME_CHARSET_RE = /^[a-zA-Z0-9._-]+$/;
+const REPO_NAME_MAX_LEN = 100;
+
+/**
+ * Validate a candidate repository name against GitHub's actual rules.
+ * Returns null when the name is acceptable, or a user-friendly error string
+ * explaining the specific reason for rejection.
+ */
+function repoNameError(name) {
+  if (typeof name !== 'string' || name.trim() === '') {
+    return 'Repository name cannot be empty.';
+  }
+  if (name.length > REPO_NAME_MAX_LEN) {
+    return `Repository name "${name}" is too long (max ${REPO_NAME_MAX_LEN} characters).`;
+  }
+  if (!REPO_NAME_CHARSET_RE.test(name)) {
+    return `Invalid repository name "${name}". Use only letters, numbers, dots, hyphens, underscores.`;
+  }
+  if (name === '.' || name === '..') {
+    return `Repository name "${name}" is reserved.`;
+  }
+  if (name.startsWith('.') || name.startsWith('-')) {
+    return `Invalid repository name "${name}". Names cannot start with '.' or '-'.`;
+  }
+  if (name.endsWith('.git')) {
+    return `Invalid repository name "${name}". Names cannot end with '.git'.`;
+  }
+  return null;
+}
 
 /**
  * Validate the parsed issue-form fields. Returns either {valid: true, params}
@@ -77,13 +109,12 @@ const REPO_NAME_RE = /^[a-zA-Z0-9._-]+$/;
  * message that will be posted back on the issue.
  */
 export function validateProvisionRequest(fields) {
-  const name = fields['repository name'] || fields.name;
-  if (!name) return { valid: false, error: 'Missing field "Repository name".' };
-  if (!REPO_NAME_RE.test(name)) {
-    return {
-      valid: false,
-      error: `Invalid repository name "${name}". Use only letters, numbers, dots, hyphens, underscores.`
-    };
+  const rawName = fields['repository name'] || fields.name;
+  if (!rawName) return { valid: false, error: 'Missing field "Repository name".' };
+  const name = typeof rawName === 'string' ? rawName.trim() : rawName;
+  const nameError = repoNameError(name);
+  if (nameError) {
+    return { valid: false, error: nameError };
   }
 
   const visibilityRaw = (fields.visibility || 'private').toLowerCase();

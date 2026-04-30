@@ -88,6 +88,58 @@ describe('validateProvisionRequest', () => {
     expect(r.valid).toBe(true);
     expect(r.params.visibility).toBe('internal');
   });
+
+  describe('repository name rules (GitHub parity)', () => {
+    it('rejects names starting with a dot', () => {
+      const r = validateProvisionRequest({ 'repository name': '.foo' });
+      expect(r.valid).toBe(false);
+      expect(r.error).toMatch(/cannot start with '\.' or '-'/);
+    });
+
+    it('rejects names starting with a dash', () => {
+      const r = validateProvisionRequest({ 'repository name': '-foo' });
+      expect(r.valid).toBe(false);
+      expect(r.error).toMatch(/cannot start with '\.' or '-'/);
+    });
+
+    it('rejects names ending in .git', () => {
+      const r = validateProvisionRequest({ 'repository name': 'foo.git' });
+      expect(r.valid).toBe(false);
+      expect(r.error).toMatch(/cannot end with '\.git'/);
+    });
+
+    it('rejects the reserved bare name "."', () => {
+      const r = validateProvisionRequest({ 'repository name': '.' });
+      expect(r.valid).toBe(false);
+      expect(r.error).toMatch(/reserved|cannot start/);
+    });
+
+    it('rejects the reserved bare name ".."', () => {
+      const r = validateProvisionRequest({ 'repository name': '..' });
+      expect(r.valid).toBe(false);
+      expect(r.error).toMatch(/reserved|cannot start/);
+    });
+
+    it('rejects empty / whitespace-only names', () => {
+      expect(validateProvisionRequest({ 'repository name': '' }).valid).toBe(false);
+      const r = validateProvisionRequest({ 'repository name': '   ' });
+      expect(r.valid).toBe(false);
+      expect(r.error).toMatch(/cannot be empty|Missing field/);
+    });
+
+    it('rejects names longer than 100 characters', () => {
+      const longName = 'a'.repeat(101);
+      const r = validateProvisionRequest({ 'repository name': longName });
+      expect(r.valid).toBe(false);
+      expect(r.error).toMatch(/too long/);
+    });
+
+    it('accepts a well-formed name with allowed punctuation', () => {
+      const r = validateProvisionRequest({ 'repository name': 'valid-name_1.0' });
+      expect(r.valid).toBe(true);
+      expect(r.params.name).toBe('valid-name_1.0');
+    });
+  });
 });
 
 describe('provisionRepo', () => {
