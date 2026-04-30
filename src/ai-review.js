@@ -379,23 +379,30 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
   }
 
   try {
-    const prData = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
-      owner,
-      repo,
-      pull_number: prNumber
-    });
-
-    const diffResponse = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
-      owner,
-      repo,
-      pull_number: prNumber,
-      mediaType: { format: 'diff' }
-    });
-
-    const filesResponse = await octokit.request(
-      'GET /repos/{owner}/{repo}/pulls/{pull_number}/files',
-      { owner, repo, pull_number: prNumber }
-    );
+    // Three independent reads — fan them out instead of waiting serially.
+    // ~600-1500 ms before any work was wall-time waste; Promise.all halves
+    // it on the typical Probot path. octokit.request invocations are still
+    // dispatched in source order (JS is single-threaded), so the existing
+    // mockResolvedValueOnce-style test rigs and downstream consumers
+    // (rivet oracle path, buildReviewPrompt, recordReview) keep their
+    // prData / diffResponse / filesResponse contract.
+    const [prData, diffResponse, filesResponse] = await Promise.all([
+      octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
+        owner,
+        repo,
+        pull_number: prNumber
+      }),
+      octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
+        owner,
+        repo,
+        pull_number: prNumber,
+        mediaType: { format: 'diff' }
+      }),
+      octokit.request(
+        'GET /repos/{owner}/{repo}/pulls/{pull_number}/files',
+        { owner, repo, pull_number: prNumber }
+      )
+    ]);
 
     // Mechanical oracle: only runs for repos that ship rivet.yaml AND have
     // the binary configured. Failures are non-fatal — the model path still
