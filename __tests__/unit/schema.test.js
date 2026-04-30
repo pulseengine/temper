@@ -1,4 +1,41 @@
 import { validateConfig } from '../../src/schema.js';
+import { _setConfigForTesting, isControlSurfaceRepo } from '../../src/config.js';
+
+describe('isControlSurfaceRepo', () => {
+  beforeEach(() => { _setConfigForTesting({}); });
+  afterEach(() => { _setConfigForTesting({}); });
+
+  it('returns false when no chatops_repo / controller_repo configured', () => {
+    expect(isControlSurfaceRepo('pulseengine/temper')).toBe(false);
+  });
+
+  it('matches chatops_repo.repo when enabled', () => {
+    _setConfigForTesting({
+      chatops_repo: { enabled: true, repo: 'pulseengine/temper-ops' }
+    });
+    expect(isControlSurfaceRepo('pulseengine/temper-ops')).toBe(true);
+    expect(isControlSurfaceRepo('pulseengine/temper')).toBe(false);
+  });
+
+  it('does NOT match when chatops_repo is configured but disabled', () => {
+    _setConfigForTesting({
+      chatops_repo: { enabled: false, repo: 'pulseengine/temper-ops' }
+    });
+    expect(isControlSurfaceRepo('pulseengine/temper-ops')).toBe(false);
+  });
+
+  it('matches controller_repo.repo when enabled', () => {
+    _setConfigForTesting({
+      controller_repo: { enabled: true, repo: 'pulseengine/repo-requests' }
+    });
+    expect(isControlSurfaceRepo('pulseengine/repo-requests')).toBe(true);
+  });
+
+  it('handles non-string input safely', () => {
+    expect(isControlSurfaceRepo(undefined)).toBe(false);
+    expect(isControlSurfaceRepo(null)).toBe(false);
+  });
+});
 
 describe('validateConfig', () => {
   it('accepts valid config', () => {

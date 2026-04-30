@@ -6,7 +6,8 @@ import {
   getBranchProtectionConfig,
   mergePullRequestRules,
   getTargetIssueLabels,
-  getRulesetConfig
+  getRulesetConfig,
+  isControlSurfaceRepo
 } from './config.js';
 import { applyBranchProtection } from './branch-protection.js';
 import { applyRulesetFromBranchProtection } from './rulesets.js';
@@ -79,7 +80,16 @@ async function configureRepository(
   const repoInfo = normalizeRepoInput(repoOrOwner, maybeRepo);
   const owner = repoInfo.owner.login;
   const repo = repoInfo.name;
+  const fullName = `${owner}/${repo}`;
   const defaultBranch = getDefaultBranch(repoInfo);
+
+  if (isControlSurfaceRepo(fullName)) {
+    getLogger().info(
+      { repo: fullName },
+      'Skipping configuration: control-surface repo (chatops_repo / controller_repo)'
+    );
+    return { success: true, skipped: 'control-surface' };
+  }
 
   try {
     getLogger().info(`Configuring repository: ${owner}/${repo} (skipBranchScopedWork=${skipBranchScopedWork})`);
