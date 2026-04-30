@@ -27,9 +27,33 @@ async function ensureLabelsExist(octokit, owner, repo, labelNames) {
   }
 }
 
-async function synchronizeIssueLabels(octokit, owner, repo, targetLabels) {
+const VALID_SYNC_MODES = new Set(['merge', 'replace']);
+
+/**
+ * Synchronize a repo's issue labels with `targetLabels`.
+ *
+ * @param {object} octokit
+ * @param {string} owner
+ * @param {string} repo
+ * @param {Array<{name: string, color: string, description?: string}>} targetLabels
+ * @param {object} [options]
+ * @param {'merge'|'replace'} [options.mode='merge'] - synchronization mode:
+ *   - `'merge'` (default): only create / update labels listed in `targetLabels`.
+ *     Labels not in the target list are left untouched. Non-destructive.
+ *   - `'replace'`: in addition to create/update, deletes any label that is not
+ *     in the target list. Destructive — the historical (pre-Bug #1) behaviour,
+ *     preserved as opt-in.
+ */
+async function synchronizeIssueLabels(octokit, owner, repo, targetLabels, options = {}) {
+  const mode = options.mode || 'merge';
+  if (!VALID_SYNC_MODES.has(mode)) {
+    throw new Error(
+      `synchronizeIssueLabels: invalid mode "${mode}" (expected "merge" or "replace")`
+    );
+  }
+
   try {
-    getLogger().info(`Synchronizing labels for ${owner}/${repo}`);
+    getLogger().info(`Synchronizing labels for ${owner}/${repo} (mode=${mode})`);
 
     const currentLabels = await octokit.paginate('GET /repos/{owner}/{repo}/labels', {
       owner,
@@ -66,14 +90,16 @@ async function synchronizeIssueLabels(octokit, owner, repo, targetLabels) {
       }
     }
 
-    for (const currentLabel of currentLabels) {
-      if (!targetLabels.some((tl) => tl.name === currentLabel.name)) {
-        await octokit.request('DELETE /repos/{owner}/{repo}/labels/{name}', {
-          owner,
-          repo,
-          name: currentLabel.name
-        });
-        getLogger().info(`Removed label: ${currentLabel.name}`);
+    if (mode === 'replace') {
+      for (const currentLabel of currentLabels) {
+        if (!targetLabels.some((tl) => tl.name === currentLabel.name)) {
+          await octokit.request('DELETE /repos/{owner}/{repo}/labels/{name}', {
+            owner,
+            repo,
+            name: currentLabel.name
+          });
+          getLogger().info(`Removed label: ${currentLabel.name}`);
+        }
       }
     }
 

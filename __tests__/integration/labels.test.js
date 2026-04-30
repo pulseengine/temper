@@ -35,16 +35,35 @@ describe('synchronizeIssueLabels', () => {
     );
   });
 
-  it('removes labels not in target', async () => {
+  it('removes labels not in target when mode is replace', async () => {
     octokit.paginate.mockResolvedValue([{ name: 'old-label', color: 'fff', description: '' }]);
     const target = [];
 
-    await synchronizeIssueLabels(octokit, 'owner', 'repo', target);
+    await synchronizeIssueLabels(octokit, 'owner', 'repo', target, { mode: 'replace' });
 
     expect(octokit.request).toHaveBeenCalledWith(
       'DELETE /repos/{owner}/{repo}/labels/{name}',
       expect.objectContaining({ name: 'old-label' })
     );
+  });
+
+  it('does NOT remove labels in default merge mode (Bug #1 fix)', async () => {
+    octokit.paginate.mockResolvedValue([{ name: 'priority/p0', color: 'fff', description: 'user-created' }]);
+    const target = [];
+
+    await synchronizeIssueLabels(octokit, 'owner', 'repo', target);
+
+    expect(octokit.request).not.toHaveBeenCalledWith(
+      'DELETE /repos/{owner}/{repo}/labels/{name}',
+      expect.anything()
+    );
+  });
+
+  it('rejects an invalid mode value', async () => {
+    octokit.paginate.mockResolvedValue([]);
+    await expect(
+      synchronizeIssueLabels(octokit, 'owner', 'repo', [], { mode: 'destroy' })
+    ).rejects.toThrow(/invalid mode/i);
   });
 
   it('skips update when label matches', async () => {
@@ -71,7 +90,7 @@ describe('synchronizeIssueLabels', () => {
     );
   });
 
-  it('handles create, update, and delete in one pass', async () => {
+  it('handles create, update, and delete in one pass (replace mode)', async () => {
     octokit.paginate.mockResolvedValue([
       { name: 'keep', color: 'aaa', description: 'Keep' },
       { name: 'update-me', color: 'old', description: 'Old desc' },
@@ -83,7 +102,7 @@ describe('synchronizeIssueLabels', () => {
       { name: 'create-me', color: 'ccc', description: 'Created' }
     ];
 
-    await synchronizeIssueLabels(octokit, 'owner', 'repo', target);
+    await synchronizeIssueLabels(octokit, 'owner', 'repo', target, { mode: 'replace' });
 
     // Should not update 'keep' (unchanged)
     expect(octokit.request).not.toHaveBeenCalledWith(
