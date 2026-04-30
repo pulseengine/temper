@@ -229,6 +229,83 @@ describe('dependabot', () => {
       expect(result.matchesTarget).toBe(false);
     });
 
+    // Bug #27 (wave-1 QA finding): the previous JSON.stringify-based equality
+    // check was order-sensitive, so identical configs in different key order
+    // were reported as drift and triggered unnecessary writes (or PRs when
+    // `change_strategy.use_pull_requests: true`). Object-key order must not
+    // matter; array element order must still matter (dependabot.yml
+    // `updates` / `labels` / `allow` / `ignore` lists are intentionally
+    // ordered).
+    it('treats identical configs with different key order as matching (Bug #27)', async () => {
+      _setConfigForTesting({
+        dependabot: {
+          version: 2,
+          updates: [
+            { 'package-ecosystem': 'npm', directory: '/', schedule: { interval: 'weekly' }, labels: ['dependencies'] }
+          ]
+        }
+      });
+      const reorderedCurrent = {
+        updates: [
+          { labels: ['dependencies'], schedule: { interval: 'weekly' }, directory: '/', 'package-ecosystem': 'npm' }
+        ],
+        version: 2
+      };
+      octokit.request.mockResolvedValue({ data: { content: encodeConfig(reorderedCurrent) } });
+      octokit.paginate.mockResolvedValue([]);
+
+      const result = await checkExistingDependabotConfig(octokit, 'o', 'r');
+
+      expect(result.exists).toBe(true);
+      expect(result.matchesTarget).toBe(true);
+    });
+
+    it('treats genuinely different configs as not matching', async () => {
+      _setConfigForTesting({
+        dependabot: {
+          version: 2,
+          updates: [
+            { 'package-ecosystem': 'npm', directory: '/', schedule: { interval: 'weekly' }, labels: ['dependencies'] }
+          ]
+        }
+      });
+      const differentValues = {
+        version: 2,
+        updates: [
+          { 'package-ecosystem': 'npm', directory: '/', schedule: { interval: 'daily' }, labels: ['dependencies'] }
+        ]
+      };
+      octokit.request.mockResolvedValue({ data: { content: encodeConfig(differentValues) } });
+      octokit.paginate.mockResolvedValue([]);
+
+      const result = await checkExistingDependabotConfig(octokit, 'o', 'r');
+
+      expect(result.matchesTarget).toBe(false);
+    });
+
+    it('treats arrays with different element order as not matching (intentional)', async () => {
+      _setConfigForTesting({
+        dependabot: {
+          version: 2,
+          updates: [
+            { 'package-ecosystem': 'npm', directory: '/', schedule: { interval: 'weekly' }, labels: ['a', 'b'] }
+          ]
+        }
+      });
+      const reorderedArray = {
+        version: 2,
+        updates: [
+          { 'package-ecosystem': 'npm', directory: '/', schedule: { interval: 'weekly' }, labels: ['b', 'a'] }
+        ]
+      };
+      octokit.request.mockResolvedValue({ data: { content: encodeConfig(reorderedArray) } });
+      octokit.paginate.mockResolvedValue([]);
+
+      const result = await checkExistingDependabotConfig(octokit, 'o', 'r');
+
+      expect(result.matchesTarget).toBe(false);
+    });
+
     it('detects PRs with missing labels', async () => {
       const configYaml = yaml.dump({ version: 2, updates: [{ labels: ['dependencies'] }] });
       const b64 = Buffer.from(configYaml).toString('base64');
