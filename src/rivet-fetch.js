@@ -37,27 +37,134 @@ export async function hasRivetYaml(octokit, owner, repo, ref) {
   }
 }
 
+/** Cap stderr capture from `tar` to avoid OOM on pathological output. */
+const TAR_STDERR_CAP_BYTES = 64 * 1024;
+
 /**
  * Pipe a Buffer (the tarball bytes) through `tar -xz` into destDir. Strips
  * the leading "{owner}-{repo}-{sha}/" component so the resulting tree mirrors
  * the repo root.
+ *
+ * Hardening (Bug #15, wave-1 Security auditor):
+ *   - `--no-same-owner`: ignore archive uid/gid (we run single-user anyway).
+ *   - `-P` is *not* passed: tar must strip leading `/` and reject `..`
+ *     components. (Default behaviour on GNU tar and bsdtar; explicit because
+ *     a hostile patch could otherwise re-enable absolute paths.)
+ *   - Post-extract walk: every symlink whose resolved target escapes
+ *     `destDir` is removed, and the extraction is rejected. A subsequent
+ *     `runRivetOracle` therefore cannot read `rivet.yaml` (or anything else)
+ *     from outside the sandbox.
+ *   - Stderr buffer is capped at 64 KiB so a malicious tarball cannot
+ *     trigger unbounded memory growth in this process.
+ *   - `tar.stdout` is drained — it's piped but the parent never reads from
+ *     it; without a consumer the pipe buffer can fill and stall `tar`.
  */
 export function extractTarballBuffer(buffer, destDir, opts = {}) {
-  const { spawnFn = spawn } = opts;
+  const { spawnFn = spawn, postExtractCheck = assertNoEscapingSymlinks } = opts;
   return new Promise((resolve, reject) => {
-    const tar = spawnFn('tar', ['-xz', '--strip-components=1', '-C', destDir], {
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
+    const tar = spawnFn(
+      'tar',
+      ['-xz', '--strip-components=1', '--no-same-owner', '-C', destDir],
+      { stdio: ['pipe', 'pipe', 'pipe'] }
+    );
     let stderr = '';
-    tar.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    let stderrTruncated = false;
+    tar.stderr.on('data', (chunk) => {
+      if (stderr.length >= TAR_STDERR_CAP_BYTES) {
+        stderrTruncated = true;
+        return;
+      }
+      const remaining = TAR_STDERR_CAP_BYTES - stderr.length;
+      const piece = chunk.toString();
+      if (piece.length > remaining) {
+        stderr += piece.slice(0, remaining);
+        stderrTruncated = true;
+      } else {
+        stderr += piece;
+      }
+    });
+    // Drain stdout so the pipe buffer never fills and stalls `tar`.
+    if (tar.stdout && typeof tar.stdout.resume === 'function') {
+      tar.stdout.resume();
+    } else if (tar.stdout && typeof tar.stdout.on === 'function') {
+      tar.stdout.on('data', () => {});
+    }
     tar.on('error', reject);
     tar.on('exit', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`tar exited ${code}: ${stderr.trim()}`));
+      if (code !== 0) {
+        const suffix = stderrTruncated ? ' [stderr truncated]' : '';
+        reject(new Error(`tar exited ${code}: ${stderr.trim()}${suffix}`));
+        return;
+      }
+      // Walk the extracted tree and reject any symlink that escapes destDir.
+      Promise.resolve()
+        .then(() => postExtractCheck(destDir))
+        .then(resolve, reject);
     });
     tar.stdin.on('error', reject);
     tar.stdin.end(buffer);
   });
+}
+
+/**
+ * Recursively walk `destDir`. Any symlink whose resolved target lies outside
+ * `destDir` is unlinked and the walk is rejected with a descriptive error.
+ * Intentionally conservative: we resolve the link target relative to the
+ * directory containing the link (mimicking how a later reader would resolve
+ * it) and compare against the absolute, resolved `destDir`.
+ *
+ * Exported for tests; not re-exported as part of the module surface.
+ */
+export async function assertNoEscapingSymlinks(destDir) {
+  const root = path.resolve(destDir);
+  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
+  await walkAndCheck(root, root, rootWithSep);
+}
+
+async function walkAndCheck(current, root, rootWithSep) {
+  let entries;
+  try {
+    entries = await fs.promises.readdir(current, { withFileTypes: true });
+  } catch (err) {
+    // If the directory disappeared mid-walk, treat as benign; if we can't
+    // read it for other reasons, surface the failure.
+    if (err.code === 'ENOENT') return;
+    throw err;
+  }
+  for (const entry of entries) {
+    const full = path.join(current, entry.name);
+    if (entry.isSymbolicLink()) {
+      let target;
+      try {
+        target = await fs.promises.readlink(full);
+      } catch {
+        // Unreadable link — remove defensively rather than trust it.
+        try { fs.unlinkSync(full); } catch { /* best-effort */ }
+        throw new Error(
+          `tarball symlink unreadable and removed: ${path.relative(root, full)}`
+        );
+      }
+      const resolved = path.resolve(path.dirname(full), target);
+      const resolvedWithSep = resolved.endsWith(path.sep)
+        ? resolved
+        : resolved + path.sep;
+      const escapes =
+        resolved !== root &&
+        !resolvedWithSep.startsWith(rootWithSep);
+      if (escapes) {
+        try { fs.unlinkSync(full); } catch { /* best-effort */ }
+        throw new Error(
+          `tarball contains symlink escaping destDir: ` +
+          `${path.relative(root, full)} -> ${target}`
+        );
+      }
+      // Don't follow symlinks during the walk — even safe ones.
+      continue;
+    }
+    if (entry.isDirectory()) {
+      await walkAndCheck(full, root, rootWithSep);
+    }
+  }
 }
 
 /**
