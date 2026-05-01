@@ -111,7 +111,13 @@ async function configureRepository(
     const targetLabels = getTargetIssueLabels();
     if (targetLabels.length > 0) {
       // Labels don't need a default branch — safe even on empty repos.
-      await synchronizeIssueLabels(octokit, owner, repo, targetLabels);
+      // Default sync mode is 'merge' (non-destructive). Set
+      // `issue_labels_sync_mode: replace` in config.yml to opt back into the
+      // pre-Bug-#1 behaviour that deletes labels not in the target list.
+      const labelSyncMode = config?.issue_labels_sync_mode || 'merge';
+      await synchronizeIssueLabels(octokit, owner, repo, targetLabels, {
+        mode: labelSyncMode
+      });
     }
 
     if (skipBranchScopedWork) {

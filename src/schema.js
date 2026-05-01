@@ -49,6 +49,13 @@ export function validateConfig(config) {
     }
   }
 
+  if (config.issue_labels_sync_mode !== undefined) {
+    const validModes = ['merge', 'replace'];
+    if (!validModes.includes(config.issue_labels_sync_mode)) {
+      errors.push('issue_labels_sync_mode must be one of: merge, replace');
+    }
+  }
+
   if (config.dependabot !== undefined) {
     if (typeof config.dependabot.version !== 'number') {
       errors.push('dependabot.version must be a number');

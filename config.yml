@@ -131,6 +131,17 @@ scheduler:
   max_tasks_per_tick: 5
   rate_limit_threshold: 100
 
+# How `synchronizeIssueLabels` reconciles a repo's labels with `issue_labels`:
+#   - `merge` (default, non-destructive): create or update labels listed below,
+#     but never delete labels that are not in this list. Safe for repos where
+#     users have created their own custom labels (per-issue tags, milestones,
+#     etc.).
+#   - `replace` (destructive, opt-in): also delete any label that is not in
+#     this list. This was the behaviour prior to fixing Bug #1
+#     (`docs/agent-fleet/bugs.md`); set this only if you explicitly want every
+#     repo's labels reduced to exactly `issue_labels`.
+issue_labels_sync_mode: merge
+
 issue_labels:
   - name: "bug"
     color: "d73a4a"
