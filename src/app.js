@@ -1133,6 +1133,42 @@ function initScheduler(app) {
   return { store: _taskStore, scheduler: _scheduler };
 }
 
+/**
+ * Fail fast at startup when WEBHOOK_SECRET is unset, empty, or equals the
+ * literal string "development".
+ *
+ * Without this, Probot defaults the webhook secret to "development" when the
+ * env var is missing — silently accepting forged webhooks signed with that
+ * trivially-known string. The wave-1 security auditor flagged this as the
+ * single highest-impact trust-boundary fail-open in the bot. (Bug #2 in
+ * docs/agent-fleet/bugs.md.)
+ *
+ * Exported so it can be unit-tested without booting Probot. Throws Error so
+ * the caller's existing try/catch in index.js produces the standard
+ * "Error starting Probot:" message.
+ *
+ * Call this AFTER mapLegacyEnvVars so legacy GITHUB_WEBHOOK_SECRET → WEBHOOK_SECRET
+ * mapping is honoured before validation.
+ */
+function assertWebhookSecret(env = process.env) {
+  const secret = env.WEBHOOK_SECRET;
+  if (!secret || secret.trim() === '') {
+    throw new Error(
+      'WEBHOOK_SECRET environment variable is required. ' +
+      'Without it Probot defaults to the literal string "development", ' +
+      'silently accepting forged webhooks. Set it in .env or via your ' +
+      'process supervisor.'
+    );
+  }
+  if (secret === 'development') {
+    throw new Error(
+      'WEBHOOK_SECRET cannot equal the literal string "development" — ' +
+      'that is Probot\'s fail-open default. Set a real secret (e.g. ' +
+      '`openssl rand -hex 32`).'
+    );
+  }
+}
+
 function mapLegacyEnvVars() {
   if (process.env.GITHUB_APP_ID && !process.env.APP_ID) {
     process.env.APP_ID = process.env.GITHUB_APP_ID;
@@ -1151,6 +1187,7 @@ function mapLegacyEnvVars() {
 export {
   registerApp,
   mapLegacyEnvVars,
+  assertWebhookSecret,
   createCustomRoutesHandler,
   applySecurityHeaders,
   initScheduler,

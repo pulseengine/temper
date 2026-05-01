@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'url';
 import { run } from 'probot';
-import { registerApp, mapLegacyEnvVars } from './src/app.js';
+import { registerApp, mapLegacyEnvVars, assertWebhookSecret } from './src/app.js';
 import { configureRepository } from './src/repository.js';
 import { applyBranchProtection } from './src/branch-protection.js';
 import { applyTemplates, applyCodeowners } from './src/templates.js';
@@ -29,6 +29,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   (async () => {
     try {
       mapLegacyEnvVars();
+      // Trust-boundary check: refuse to boot with a missing or
+      // "development" webhook secret. See Bug #2 in
+      // docs/agent-fleet/bugs.md (wave-1 Security auditor).
+      assertWebhookSecret();
       console.log('Starting Temper...');
       console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`Port: ${process.env.PORT || 3000}`);
