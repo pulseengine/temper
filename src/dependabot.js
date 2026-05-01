@@ -5,6 +5,30 @@ import { upsertRepoFile, createConfigurationPR } from './github-api.js';
 import { detectEcosystems } from './ecosystem-detector.js';
 import { callLocalAI } from './ai-review.js';
 
+/**
+ * Recursively sort object keys so two structurally identical configs serialize
+ * to identical JSON regardless of key insertion order. Arrays preserve element
+ * order (intentional — dependabot.yml `updates`, `labels`, `allow`/`ignore`
+ * lists are order-sensitive). Primitives pass through.
+ *
+ * @param {*} value
+ * @returns {*}
+ */
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const k of Object.keys(value).sort()) out[k] = canonicalize(value[k]);
+    return out;
+  }
+  return value;
+}
+
+/** Key-order-independent deep equal for plain JSON-like configs. */
+function configsEqual(a, b) {
+  return JSON.stringify(canonicalize(a)) === JSON.stringify(canonicalize(b));
+}
+
 function extractLabelsFromConfig(dependabotConfig) {
   if (!dependabotConfig?.updates) return [];
   const labels = new Set();
@@ -105,7 +129,7 @@ async function checkExistingDependabotConfig(octokit, owner, repo) {
       return {
         exists: true,
         currentConfig,
-        matchesTarget: JSON.stringify(currentConfig) === JSON.stringify(targetConfig),
+        matchesTarget: configsEqual(currentConfig, targetConfig),
         labelIssues,
         dependabotPRCount: dependabotPRs.length
       };
@@ -184,7 +208,7 @@ async function checkDependabotConfiguration(octokit, owner, repo) {
         report += yaml.dump(targetConfig) + '\n';
         report += '```\n\n';
 
-        if (JSON.stringify(currentConfig) === JSON.stringify(targetConfig)) {
+        if (configsEqual(currentConfig, targetConfig)) {
           report += '✅ Dependabot configuration matches target!\n';
         } else {
           report +=
