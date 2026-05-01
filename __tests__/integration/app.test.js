@@ -644,10 +644,87 @@ describe('app', () => {
 
     it('works without getRouter option', () => {
       const { app } = setupApp({ skipRouter: true });
-      // 6 events: repository.created, issues.opened, issue_comment.created,
-      //          pull_request.opened, pull_request.closed, push
-      expect(app.on).toHaveBeenCalledTimes(6);
+      // 8 events: repository.created, issues.opened, issue_comment.created,
+      //          pull_request.opened, pull_request.reopened,
+      //          pull_request.synchronize, pull_request.closed, push
+      expect(app.on).toHaveBeenCalledTimes(8);
       expect(app.onError).toHaveBeenCalledTimes(1);
+    });
+
+    it('subscribes to pull_request.opened, .reopened, .synchronize, .closed', () => {
+      const { app } = setupApp();
+      expect(app.on).toHaveBeenCalledWith('pull_request.opened', expect.any(Function));
+      expect(app.on).toHaveBeenCalledWith('pull_request.reopened', expect.any(Function));
+      expect(app.on).toHaveBeenCalledWith('pull_request.synchronize', expect.any(Function));
+      expect(app.on).toHaveBeenCalledWith('pull_request.closed', expect.any(Function));
+    });
+
+    it('pull_request.synchronize re-runs reviewPullRequest when ai_review enabled', async () => {
+      _setConfigForTesting({ ai_review: { enabled: true } });
+      reviewPullRequest.mockResolvedValue({ success: true });
+      const { handlers } = setupApp();
+
+      const octokit = createMockOctokit();
+      const context = {
+        id: 'delivery-sync-1',
+        log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+        octokit,
+        payload: {
+          pull_request: { number: 99, node_id: 'PR_99', user: { login: 'human-author' } },
+          repository: {
+            name: 'rivet',
+            owner: { login: 'pulseengine' },
+            default_branch: 'main'
+          }
+        }
+      };
+
+      await handlers['pull_request.synchronize'](context);
+
+      expect(reviewPullRequest).toHaveBeenCalledWith(octokit, 'pulseengine', 'rivet', 99);
+    });
+
+    it('pull_request.synchronize skips review for bot-authored PRs', async () => {
+      _setConfigForTesting({ ai_review: { enabled: true } });
+      reviewPullRequest.mockClear();
+      const { handlers } = setupApp();
+
+      const context = {
+        id: 'delivery-sync-2',
+        log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+        octokit: createMockOctokit(),
+        payload: {
+          pull_request: { number: 100, node_id: 'PR_100', user: { login: 'dependabot[bot]' } },
+          repository: { name: 'rivet', owner: { login: 'pulseengine' }, default_branch: 'main' }
+        }
+      };
+
+      await handlers['pull_request.synchronize'](context);
+
+      expect(reviewPullRequest).not.toHaveBeenCalled();
+    });
+
+    it('pull_request.reopened runs the same opened path (review + dependabot check)', async () => {
+      _setConfigForTesting({ ai_review: { enabled: true } });
+      reviewPullRequest.mockClear();
+      reviewPullRequest.mockResolvedValue({ success: true });
+      const { handlers } = setupApp();
+
+      const octokit = createMockOctokit();
+      const context = {
+        id: 'delivery-reopen-1',
+        log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+        octokit,
+        payload: {
+          pull_request: { number: 50, node_id: 'PR_50', user: { login: 'human' } },
+          repository: { name: 'rivet', owner: { login: 'pulseengine' }, default_branch: 'main' },
+          sender: { login: 'human' }
+        }
+      };
+
+      await handlers['pull_request.reopened'](context);
+
+      expect(reviewPullRequest).toHaveBeenCalledWith(octokit, 'pulseengine', 'rivet', 50);
     });
 
     it('health endpoint returns correct response', () => {
