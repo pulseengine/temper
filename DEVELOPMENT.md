@@ -227,10 +227,8 @@ Bazel targets:
 | `lint` | `eslint src/ index.js functions.js __tests__/` | Lint source and tests |
 | `build` | `bazel build //...` | Bazel build |
 | `bazel:test` | `bazel test //...` | Bazel test |
-| `deploy:heroku` | `git push heroku main` | Deploy to Heroku |
-| `deploy:docker` | `docker build && docker push` | Build and push Docker image |
-| `deploy:server` | `pm2 restart/start` | Deploy with PM2 |
-| `deploy:netcup` | `npm install --production` | Prepare for Netcup hosting |
+| `docker:build` | `docker build -t temper .` | Build the multi-stage Alpine image |
+| `setup` | `node scripts/setup.js` | Interactive bootstrap wizard (org, user, email) |
 
 ## Architecture
 

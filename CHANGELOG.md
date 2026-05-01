@@ -97,36 +97,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## Migration Guide
+## Migration Notes
 
-### From 0.x to 1.0
+The project currently ships **probot ^14.2.4** and **@octokit/rest ^22.0.1**
+(see `package.json`). Earlier versions of this CHANGELOG carried a stale
+"install probot@^12, @octokit/rest@^19" instruction that no longer matches
+reality and has been removed.
 
-1. **Update package.json**
-   ```bash
-   npm install probot@^12.0.0 @octokit/rest@^19.0.0
-   ```
-
-2. **Update configuration**
-   ```yaml
-   # Update config.yml to match new format
-   ```
-
-3. **Review changes**
-   - New merge settings format
-   - Improved error handling
-   - Better logging
-
-### From 1.x to 2.0 (Future)
-
-1. **Update dependencies**
-   ```bash
-   npm install probot@^13.0.0 @octokit/rest@^20.0.0
-   ```
-
-2. **Review breaking changes**
-   - New configuration format
-   - Updated API endpoints
-   - New authentication method
+When a migration is actually needed for a future release, a `### From X.x
+to Y.0` block describing the concrete steps will be added here at the time
+of that release.
 
 ## Deprecation Policy
 
