@@ -109,32 +109,66 @@ export function buildResponseFormat() {
   };
 }
 
+// Slop patterns target *phrase shapes* of low-information review noise, not
+// individual words. The earlier list killed legitimate findings like "this
+// could panic on null deref at line 42" because of bare `\bcould\b`. Wave-1
+// LLM agent flagged this regression class as Bug #12 in
+// `docs/agent-fleet/bugs.md`. Each pattern below is anchored to a context
+// that distinguishes filler ("we could improve X") from a concrete claim
+// ("a null deref could happen here").
 const HEDGE_OR_SLOP_PATTERNS = [
-  /\bmight\b/i,
-  /\bcould\b/i,
-  /\bmay\b/i,
-  /\bpossibly\b/i,
-  /\bperhaps\b/i,
-  /\bgenerally\b/i,
-  /\btypically\b/i,
-  /\bconsider\s+/i,
-  /\bshould\s+/i,
-  /developer should/i,
-  /ensure proper error handling/i,
-  /consider edge cases/i,
-  /implement secure practices/i,
-  /(more|additional)\s+context/i,
-  /(unable|insufficient)\s+(to|context)/i,
-  /improve (robustness|validation)/i,
-  /enhance (the )?(schema|validation)/i,
-  /review and refactor/i,
-  /in (most )?cases/i,
-  /in general/i
+  // Self-deprecation / non-claims
+  /\b(?:perhaps|possibly)\s+(?:we|you|the developer|consider)/i,
+  /\bit\s+(?:might|may|could)\s+be\s+(?:wise|good|better|worth)/i,
+  /\bit\s+would\s+be\s+(?:wise|good|better|worth)/i,
+  /\b(?:we|you)\s+should\s+(?:consider|think about|review|look into)/i,
+  /\bconsider\s+\w+ing\b/i,  // "consider validating", "consider adding tests" — gerund-form filler
+  /\b(?:typically|generally|usually)\s+,?\s+(?:we|you|one|it)/i,
+  /\bin\s+general\b/i,
+  /\bin\s+(?:some|most|all|certain)\s+cases\b/i,
+  /\bworth\s+(?:noting|considering|reviewing)/i,
+  /\bsuggests?\s+that\b/i,
+
+  // Classic filler advice
+  /developer\s+should/i,
+  /ensure\s+proper\s+error\s+handling/i,
+  /consider\s+edge\s+cases/i,
+  /implement\s+secure\s+practices/i,
+  /(?:more|additional)\s+context/i,
+  /(?:unable|insufficient)\s+(?:to|context)/i,
+  /improve\s+(?:robustness|validation|maintainability|readability)/i,
+  /enhance\s+(?:the\s+)?(?:schema|validation|robustness)/i,
+  /review\s+and\s+refactor/i,
+  /needs?\s+(?:more|additional|further)\s+testing/i,
+  /add\s+(?:proper|appropriate)\s+(?:error\s+handling|validation|tests?)\b/i,
+
+  // Pure hedge openers (claim starts with hedging without a target)
+  /^\s*(?:it\s+seems|it\s+appears|arguably|likely|probably)\b/i
 ];
 
 export function isSlop(text) {
   if (typeof text !== 'string') return true;
   return HEDGE_OR_SLOP_PATTERNS.some((re) => re.test(text));
+}
+
+/**
+ * Normalise a string for verbatim diff lookup. Strips trailing whitespace
+ * per line, normalises CRLF→LF, collapses runs of internal whitespace
+ * within a line. Models tend to paraphrase whitespace; the semantic
+ * content matters, not the spacing.
+ *
+ * Used by `filterFindings` for the quote-or-die check: the model's
+ * `quoted_line` and the candidate diff segment are both normalised before
+ * `String.includes`.
+ */
+export function normaliseForQuote(s) {
+  if (typeof s !== 'string') return '';
+  return s
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/, '').replace(/\s+/g, ' ').trim())
+    .filter((line) => line.length > 0)
+    .join('\n');
 }
 
 const ALLOWED_VERDICTS = new Set(['approve', 'comment', 'request_changes']);
@@ -201,11 +235,17 @@ export function tryParseReview(rawText) {
  */
 export function filterFindings(findings, diffText) {
   if (!Array.isArray(findings)) return [];
+  // Normalise once per call. The model frequently paraphrases whitespace
+  // (CRLF↔LF, tab→spaces, trailing spaces stripped); without normalising
+  // we drop legitimate findings on a `String.includes` mismatch.
+  const haystack = (typeof diffText === 'string' && diffText.length > 0)
+    ? normaliseForQuote(diffText)
+    : '';
   return findings.filter((f) => {
     if (isSlop(f.claim)) return false;
-    if (typeof diffText === 'string' && diffText.length > 0) {
-      const needle = f.quoted_line.trim();
-      if (needle && !diffText.includes(needle)) return false;
+    if (haystack) {
+      const needle = normaliseForQuote(f.quoted_line);
+      if (needle && !haystack.includes(needle)) return false;
     }
     return true;
   });

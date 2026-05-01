@@ -56,7 +56,6 @@ describe('isSlop', () => {
   it.each([
     'consider edge cases here',
     'developer should validate input',
-    'this might lead to issues',
     'could possibly fail in some cases',
     'ensure proper error handling',
     'in general, this is fine',
@@ -64,6 +63,8 @@ describe('isSlop', () => {
     'unable to determine without seeing other files',
     'you should consider refactoring',
     'enhance validation around the boundary',
+    'it would be wise to add a fallback',
+    'worth noting that this branch is untested',
   ])('flags hedging/slop: %s', (s) => {
     expect(isSlop(s)).toBe(true);
   });
@@ -73,6 +74,15 @@ describe('isSlop', () => {
     'config.yml:165 sets pr_labels including "dependencies" but the PR adds no actual dep update.',
     'src/foo.js:42 dereferences userId before validating req.body is an object.',
     'The mutex is acquired but never released on the early-return path at line 88.',
+    // Concrete claims that contain the words "could"/"might"/"should"/"may"
+    // are no longer rejected wholesale — wave-1 LLM agent found that bare-word
+    // matching dropped legitimate findings. The new rules look for hedging
+    // *phrases* (e.g., "we should consider", "it might be wise"), not the
+    // bare words.
+    'this could panic on null deref at line 42',
+    'function should not be called from async context — it blocks',
+    'the loop may overflow when n exceeds Number.MAX_SAFE_INTEGER',
+    'parseInt without radix might return NaN for hex strings',
   ])('passes a concrete claim: %s', (s) => {
     expect(isSlop(s)).toBe(false);
   });
