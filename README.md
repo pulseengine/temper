@@ -138,10 +138,9 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for the full development guide.
 
 ## Deployment
 
-- **Docker** — `npm run deploy:docker` builds and pushes a multi-stage Alpine image
-- **Heroku** — `npm run deploy:heroku` pushes to Heroku via git
-- **PM2** — `npm run deploy:server` starts or restarts the app under PM2
-- **Netcup** — `npm run deploy:netcup` installs production dependencies for shared hosting
+- **Docker** — `npm run docker:build` builds the multi-stage Alpine image; push and run via your registry/orchestrator of choice.
+- **PM2** — production runs under PM2 (`pm2 start npm --name temper -- start`); self-update is wired so a push to `main` redeploys via the binary in `tools/self-update/`.
+- **Netcup VPS** — current production target. Single host, 3.8 GB RAM, no swap; see `verify-netcup-deployment.sh` for the post-install checks.
 
 ## License
 

@@ -48,7 +48,7 @@ Subscribe to these events:
 1. Click "Generate a private key" button
 2. A `.pem` file will download automatically
 3. **Save this file securely** - it cannot be retrieved again!
-4. Store the key in your `.env` file as `GITHUB_PRIVATE_KEY`
+4. Store the key in your `.env` file as `PRIVATE_KEY`
 
 ### Step 5: Install the App
 
@@ -68,9 +68,9 @@ cp .env.example .env
 Edit the `.env` file with your actual credentials:
 
 ```
-GITHUB_APP_ID=123456          # From GitHub App settings
-GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----..."  # Contents of .pem file
-GITHUB_WEBHOOK_SECRET=your_webhook_secret_here  # From webhook setup
+APP_ID=123456          # From GitHub App settings
+PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----..."  # Contents of .pem file
+WEBHOOK_SECRET=your_webhook_secret_here  # From webhook setup
 PORT=3000
 ORGANIZATION=pulseengine
 ```
@@ -89,9 +89,9 @@ npm start
 ```bash
 docker build -t temper .
 docker run -p 3000:3000 \
-  -e GITHUB_APP_ID=your_app_id \
-  -e GITHUB_PRIVATE_KEY="$(cat private-key.pem)" \
-  -e GITHUB_WEBHOOK_SECRET=your_webhook_secret \
+  -e APP_ID=your_app_id \
+  -e PRIVATE_KEY="$(cat private-key.pem)" \
+  -e WEBHOOK_SECRET=your_webhook_secret \
   temper
 ```
 

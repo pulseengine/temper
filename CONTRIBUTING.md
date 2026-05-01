@@ -125,7 +125,7 @@ gh repo delete pulseengine/test-repo --confirm
 
 ### Running Tests
 
-`npm test` runs 453 tests. See DEVELOPMENT.md for test structure details.
+`npm test` runs the full Jest suite (unit + integration + smoke + e2e). See DEVELOPMENT.md for test structure details.
 
 ## Documentation
 
