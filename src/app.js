@@ -329,91 +329,91 @@ function registerApp(app, options = {}) {
     const deliveryId = context.id;
     if (deliveryId && isProcessed(deliveryId)) return;
 
-    const { issue, repository, sender } = context.payload;
-    const fullName = repository.full_name;
+    // Bug #6: every code path that *touches* an issue in the chatops/
+    // controller repo must mark the delivery processed — including auth-
+    // failure replies and exceptions. Otherwise Probot's webhook retry
+    // (~5 attempts over 8 hours on 5xx/timeout) fires the side-effecting
+    // path again. Symptom: duplicate "❌ unauthorised" comments, duplicate
+    // analysis-report issues, duplicate provisioning enqueues.
+    try {
+      const { issue, repository, sender } = context.payload;
+      const fullName = repository.full_name;
 
-    // ChatOps issue forms in the admin repo: a `chatops:<command>` label on
-    // a newly-opened issue triggers the corresponding ChatOps action,
-    // bot replies on the issue, optionally closes it.
-    const chatopsCfg = getChatopsRepoConfig();
-    if (chatopsCfg?.enabled && fullName === chatopsCfg.repo) {
-      const chatopsLabel = (issue.labels || [])
-        .map((l) => l?.name)
-        .find((n) => typeof n === 'string' && n.startsWith('chatops:'));
-      if (chatopsLabel) {
-        await handleChatopsIssue(context, chatopsLabel, sender, issue, repository);
-        if (deliveryId) markProcessed(deliveryId);
+      // ChatOps issue forms in the admin repo: a `chatops:<command>` label on
+      // a newly-opened issue triggers the corresponding ChatOps action,
+      // bot replies on the issue, optionally closes it.
+      const chatopsCfg = getChatopsRepoConfig();
+      if (chatopsCfg?.enabled && fullName === chatopsCfg.repo) {
+        const chatopsLabel = (issue.labels || [])
+          .map((l) => l?.name)
+          .find((n) => typeof n === 'string' && n.startsWith('chatops:'));
+        if (chatopsLabel) {
+          await handleChatopsIssue(context, chatopsLabel, sender, issue, repository);
+          return;
+        }
+      }
+
+      const ctrl = getControllerRepoConfig();
+      if (!ctrl?.enabled) return;
+      if (fullName !== ctrl.repo) return;
+
+      const expectedLabel = ctrl.label || 'repo-request';
+      const hasLabel = (issue.labels || []).some((l) => l.name === expectedLabel);
+      if (!hasLabel) return;
+
+      const fields = parseIssueFormBody(issue.body || '');
+      const validation = validateProvisionRequest(fields);
+
+      const owner = repository.owner.login;
+      const repo = repository.name;
+
+      if (!validation.valid) {
+        await issueOps.createComment(context.octokit,{
+          owner,
+          repo,
+          issue_number: issue.number,
+          body: `❌ Provisioning request rejected: ${validation.error}`
+        });
         return;
       }
-    }
 
-    const ctrl = getControllerRepoConfig();
-    if (!ctrl?.enabled) {
-      if (deliveryId) markProcessed(deliveryId);
-      return;
-    }
-
-    if (fullName !== ctrl.repo) {
-      if (deliveryId) markProcessed(deliveryId);
-      return;
-    }
-
-    const expectedLabel = ctrl.label || 'repo-request';
-    const hasLabel = (issue.labels || []).some((l) => l.name === expectedLabel);
-    if (!hasLabel) {
-      if (deliveryId) markProcessed(deliveryId);
-      return;
-    }
-
-    const fields = parseIssueFormBody(issue.body || '');
-    const validation = validateProvisionRequest(fields);
-
-    const owner = repository.owner.login;
-    const repo = repository.name;
-
-    if (!validation.valid) {
-      await issueOps.createComment(context.octokit,{
-        owner,
-        repo,
-        issue_number: issue.number,
-        body: `❌ Provisioning request rejected: ${validation.error}`
-      });
-      if (deliveryId) markProcessed(deliveryId);
-      return;
-    }
-
-    const enqueueTask = getEnqueueTask();
-    if (!enqueueTask) {
-      getLogger().warn('Task store not initialized — cannot enqueue provision-repo task');
-      await issueOps.createComment(context.octokit,{
-        owner,
-        repo,
-        issue_number: issue.number,
-        body: '⚠️  Provisioning is not currently available (task store offline). Please retry later.'
-      });
-      if (deliveryId) markProcessed(deliveryId);
-      return;
-    }
-
-    enqueueTask(
-      'provision-repo',
-      `provision-repo:${owner}/${repo}#${issue.number}`,
-      {
-        sourceOwner: owner,
-        sourceRepo: repo,
-        sourceIssue: issue.number,
-        params: validation.params
+      const enqueueTask = getEnqueueTask();
+      if (!enqueueTask) {
+        getLogger().warn('Task store not initialized — cannot enqueue provision-repo task');
+        await issueOps.createComment(context.octokit,{
+          owner,
+          repo,
+          issue_number: issue.number,
+          body: '⚠️  Provisioning is not currently available (task store offline). Please retry later.'
+        });
+        return;
       }
-    );
 
-    await issueOps.createComment(context.octokit,{
-      owner,
-      repo,
-      issue_number: issue.number,
-      body: `✅ Request accepted. Provisioning \`${validation.params.name}\` (${validation.params.visibility}) — you'll get a confirmation comment when the repo is ready.`
-    });
+      enqueueTask(
+        'provision-repo',
+        `provision-repo:${owner}/${repo}#${issue.number}`,
+        {
+          sourceOwner: owner,
+          sourceRepo: repo,
+          sourceIssue: issue.number,
+          params: validation.params
+        }
+      );
 
-    if (deliveryId) markProcessed(deliveryId);
+      await issueOps.createComment(context.octokit,{
+        owner,
+        repo,
+        issue_number: issue.number,
+        body: `✅ Request accepted. Provisioning \`${validation.params.name}\` (${validation.params.visibility}) — you'll get a confirmation comment when the repo is ready.`
+      });
+    } catch (err) {
+      // Mark processed in finally even on error: the alternative is Probot
+      // retrying after we've already created issues / posted comments,
+      // which is exactly the duplicate-side-effect bug we're fixing.
+      getLogger().error({ err, deliveryId }, 'issues.opened handler threw');
+    } finally {
+      if (deliveryId) markProcessed(deliveryId);
+    }
   });
 
   app.on('issue_comment.created', async (context) => {
@@ -509,6 +509,7 @@ function registerApp(app, options = {}) {
 
     if (cmd === '/configure-repo') {
       if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
+        if (deliveryId) markProcessed(deliveryId);
         return;
       }
 
@@ -531,6 +532,7 @@ function registerApp(app, options = {}) {
 
     if (cmd === '/sync-all-repos') {
       if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
+        if (deliveryId) markProcessed(deliveryId);
         return;
       }
 
@@ -551,6 +553,7 @@ function registerApp(app, options = {}) {
 
     if (cmd === '/check-config') {
       if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
+        if (deliveryId) markProcessed(deliveryId);
         return;
       }
 
@@ -567,6 +570,7 @@ function registerApp(app, options = {}) {
 
     if (cmd === '/check-dependabot') {
       if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
+        if (deliveryId) markProcessed(deliveryId);
         return;
       }
 
@@ -583,6 +587,7 @@ function registerApp(app, options = {}) {
 
     if (cmd === '/fix-dependabot-labels') {
       if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
+        if (deliveryId) markProcessed(deliveryId);
         return;
       }
 
@@ -615,6 +620,7 @@ function registerApp(app, options = {}) {
 
     if (cmd === '/generate-dependabot') {
       if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
+        if (deliveryId) markProcessed(deliveryId);
         return;
       }
 
@@ -661,6 +667,7 @@ function registerApp(app, options = {}) {
 
     if (cmd === '/analyze-org') {
       if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
+        if (deliveryId) markProcessed(deliveryId);
         return;
       }
 
@@ -687,6 +694,7 @@ function registerApp(app, options = {}) {
 
     if (cmd === '/check-merge-strategy') {
       if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
+        if (deliveryId) markProcessed(deliveryId);
         return;
       }
 
@@ -738,6 +746,7 @@ function registerApp(app, options = {}) {
 
     if (cmd === '/allow-merge-commit') {
       if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
+        if (deliveryId) markProcessed(deliveryId);
         return;
       }
 
@@ -749,6 +758,7 @@ function registerApp(app, options = {}) {
           issue_number: issueNumber,
           body: '❌ You are not authorized to run this command.'
         });
+        if (deliveryId) markProcessed(deliveryId);
         return;
       }
 
@@ -792,6 +802,7 @@ function registerApp(app, options = {}) {
 
     if (cmd === '/review-pr') {
       if (!(await requireOrgMember()) || !(await requireAllowedUser())) {
+        if (deliveryId) markProcessed(deliveryId);
         return;
       }
 
@@ -803,6 +814,7 @@ function registerApp(app, options = {}) {
           issue_number: issueNumber,
           body: '❌ `/review-pr` can only be used on pull requests, not issues.'
         });
+        if (deliveryId) markProcessed(deliveryId);
         return;
       }
 
