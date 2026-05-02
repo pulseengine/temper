@@ -1,3 +1,6 @@
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
 import { initKVStore } from '../../src/persistent-kv.js';
 
 describe('persistent-kv', () => {
@@ -67,5 +70,60 @@ describe('persistent-kv', () => {
     expect(b.get('k')).toBe('vb');
     a.close();
     b.close();
+  });
+
+  // Bug #5: two file-backed stores against the same dbPath must share one
+  // underlying connection so concurrent writes don't trip SQLITE_BUSY.
+  describe('shared file-backed connection (Bug #5)', () => {
+    let tmpDir;
+    let dbPath;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'temper-kv-test-'));
+      dbPath = path.join(tmpDir, 'shared.db');
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('shares one underlying Database across two stores on the same path', () => {
+      const a = initKVStore(dbPath, 'dedup');
+      const b = initKVStore(dbPath, 'rate_limits');
+      // ._db is the underlying better-sqlite3 Database; identity check is the
+      // tightest assertion that a single connection backs both stores.
+      expect(a._db).toBe(b._db);
+      a.close();
+      b.close();
+    });
+
+    it('keeps the connection alive while at least one store still uses it', () => {
+      const a = initKVStore(dbPath, 'dedup');
+      const b = initKVStore(dbPath, 'rate_limits');
+      a.set('hello', 'world');
+      a.close();
+      // a is closed but b still holds the connection — writes must succeed.
+      expect(() => b.set('still', 'ok')).not.toThrow();
+      expect(b.get('still')).toBe('ok');
+      b.close();
+    });
+
+    it('closes the connection when the last store releases it', () => {
+      const a = initKVStore(dbPath, 'dedup');
+      const dbRef = a._db;
+      a.close();
+      // The Database is closed; using a closed handle throws.
+      expect(() => dbRef.prepare('SELECT 1').get()).toThrow();
+    });
+
+    it('reopens cleanly after all stores have closed', () => {
+      const a = initKVStore(dbPath, 'dedup');
+      a.set('x', '1');
+      a.close();
+
+      const reopened = initKVStore(dbPath, 'dedup');
+      expect(reopened.get('x')).toBe('1');
+      reopened.close();
+    });
   });
 });
