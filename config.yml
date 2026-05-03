@@ -30,7 +30,17 @@ branch_protection:
   default:
     required_status_checks:
       strict: true
-      contexts: []
+      # Universal floor: every pulseengine Rust repo has these three
+      # jobs in its CI workflow. Per-repo can extend (e.g. spar adds
+      # Test, Cargo Deny, Mutation Testing, etc. via repo-level
+      # branch protection — those settings stack with this floor).
+      # Bumping this list to require something that not every repo
+      # ships will leave those repos unable to merge, so keep it
+      # minimal and additive.
+      contexts:
+        - Format
+        - Clippy
+        - Test
     enforce_admins: true
     required_pull_request_reviews:
       required_approving_review_count: 0
