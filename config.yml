@@ -30,7 +30,15 @@ branch_protection:
   default:
     required_status_checks:
       strict: true
-      contexts: []
+      # Org-wide floor: every active pulseengine Rust repo runs Format,
+      # Clippy, and Test under those exact job names. Repos with richer
+      # smithy patterns (spar, gale, sigil — Cargo Deny, Mutation Testing,
+      # etc.) keep those extras at the repo level via direct API; Temper
+      # treats this list as the additive minimum, not an exclusive set.
+      contexts:
+        - Format
+        - Clippy
+        - Test
     enforce_admins: true
     required_pull_request_reviews:
       required_approving_review_count: 0
