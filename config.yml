@@ -35,6 +35,10 @@ branch_protection:
       # smithy patterns (spar, gale, sigil — Cargo Deny, Mutation Testing,
       # etc.) keep those extras at the repo level via direct API; Temper
       # treats this list as the additive minimum, not an exclusive set.
+      # WARNING: adding a context here that not every repo's CI ships
+      # will leave those repos unable to merge. Keep this list to the
+      # universal jobs only; per-repo extensions belong in repo-level
+      # branch protection.
       contexts:
         - Format
         - Clippy
