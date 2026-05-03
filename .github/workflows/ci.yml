@@ -76,6 +76,8 @@ jobs:
           name: sbom
           path: sbom.spdx.json
 
+  # Attest build provenance for main-branch artifacts (consumed by
+  # downstream verifiers).
   provenance:
     runs-on: ubuntu-latest
     needs: [test, lint]
