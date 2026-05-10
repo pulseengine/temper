@@ -30,6 +30,24 @@ branch_protection:
   default:
     required_status_checks:
       strict: true
+      # Empty intentionally — see the smithy-migration audit on
+      # 2026-05-10. Several pulseengine repos (rules_lean,
+      # pulseengine.eu, .github, rules_rocq_rust, wasm-component-
+      # examples, moonbit_checksum_updater, …) don't define jobs
+      # called Format / Clippy / Test under those exact names. Adding
+      # them as required contexts here would leave those repos
+      # permanently un-mergeable.
+      #
+      # The protections below (signed commits, no force pushes, no
+      # deletions, enforce_admins, strict-up-to-date) still apply
+      # org-wide and are the bulk of the value. Per-repo can ADD
+      # specific gating checks via direct API (smithy already does
+      # this on spar's main branch, requiring the full 13-context
+      # smithy migration set).
+      #
+      # If we ever want a real org floor, the right vehicle is
+      # ensuring every repo first ships a stub workflow that emits
+      # the contexts (e.g. via a starter workflow in pulseengine/.github).
       contexts: []
     enforce_admins: true
     required_pull_request_reviews:
