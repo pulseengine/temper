@@ -387,10 +387,40 @@ describe('ai-review', () => {
       expect(result).toContain('advisory only');
     });
 
-    it('sanitizes the AI response', () => {
+    it('sanitizes workflow commands in the AI response', () => {
       const result = formatReviewComment('Good code\n::set-output name=x::hack', 10);
       expect(result).toContain('[sanitized command]');
       expect(result).not.toContain('::set-output');
+    });
+
+    // Bug #29 — widen sanitiser
+    it('escapes HTML angle brackets so injected <img> / <script> render as text', () => {
+      const result = formatReviewComment(
+        '<img src="x" onerror="alert(1)"><script>evil()</script>',
+        11
+      );
+      expect(result).not.toMatch(/<img/i);
+      expect(result).not.toMatch(/<script/i);
+      expect(result).toContain('&lt;img');
+      expect(result).toContain('&lt;script');
+    });
+
+    it('de-fangs @mentions so they render but do not notify', () => {
+      const result = formatReviewComment(
+        'cc @octocat please review, also @pulseengine/maintainers',
+        12
+      );
+      // The @ remains visible to humans but the username is preceded by a
+      // zero-width space (\u200B), preventing GitHub from creating a mention.
+      expect(result).toContain('@\u200Boctocat');
+      expect(result).toContain('@\u200Bpulseengine/maintainers');
+      expect(result).not.toMatch(/(?<!\u200B)@octocat/);
+    });
+
+    it('preserves email-like text that is not a GitHub mention', () => {
+      // `foo@example.com` is not a GitHub username pattern; let it through.
+      const result = formatReviewComment('Contact foo@example.com', 13);
+      expect(result).toContain('foo');
     });
 
     it('includes local AI model attribution', () => {
