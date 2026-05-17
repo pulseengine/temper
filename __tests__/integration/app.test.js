@@ -409,6 +409,29 @@ describe('app', () => {
       const body = context.octokit.issues.createComment.mock.calls[0][0].body;
       expect(body).toMatch(/task store offline/i);
     });
+
+    // Bug #6: even when an octokit call inside the handler throws, the
+    // delivery must be marked processed. Otherwise Probot retries the
+    // webhook and re-enqueues / re-comments / re-creates state.
+    it('marks delivery processed even when an octokit call throws', async () => {
+      _setConfigForTesting({
+        controller_repo: { enabled: true, repo: 'pulseengine/repo-requests', label: 'repo-request' }
+      });
+      const { handlers } = setupApp();
+      const context = createIssueOpenedContext();
+      // Force createComment to fail mid-handler.
+      context.octokit.request.mockImplementation((route) => {
+        if (route === 'POST /repos/{owner}/{repo}/issues/{issue_number}/comments') {
+          return Promise.reject(new Error('GitHub 503'));
+        }
+        return Promise.resolve({ status: 200, data: {} });
+      });
+
+      // The handler swallows the error (logged) and marks processed.
+      await handlers['issues.opened'](context);
+
+      expect(markProcessed).toHaveBeenCalledWith('delivery-issues-1');
+    });
   });
 
   // =========================================================================
@@ -1189,6 +1212,28 @@ describe('app', () => {
         expect(synchronizeAllRepositories).not.toHaveBeenCalled();
       });
 
+      // Bug #6: auth-failure paths must mark the delivery processed,
+      // otherwise Probot's webhook retry posts the same "❌ unauthorised"
+      // comment over and over.
+      it('marks processed when rejected for non-membership', async () => {
+        checkOrganizationMembership.mockResolvedValue(false);
+        const { handlers } = setupApp();
+        const context = createIssueCommentContext('/sync-all-repos');
+        await handlers['issue_comment.created'](context);
+
+        expect(markProcessed).toHaveBeenCalledWith('delivery-2');
+      });
+
+      it('marks processed when rejected for not being an allowed user', async () => {
+        _setConfigForTesting({ allowed_command_users: ['someone-else'] });
+        const { handlers } = setupApp();
+        const context = createIssueCommentContext('/sync-all-repos');
+        await handlers['issue_comment.created'](context);
+
+        expect(synchronizeAllRepositories).not.toHaveBeenCalled();
+        expect(markProcessed).toHaveBeenCalledWith('delivery-2');
+      });
+
       it('does not mark processed when deliveryId is absent', async () => {
         const { handlers } = setupApp();
         const context = createIssueCommentContext('/sync-all-repos', { id: undefined });
@@ -1693,6 +1738,9 @@ describe('app', () => {
         const body = context.octokit.issues.createComment.mock.calls[0][0].body;
         expect(body).toContain('can only be used on pull requests');
         expect(reviewPullRequest).not.toHaveBeenCalled();
+        // Bug #6: not-a-PR rejection still posts a comment, so it must
+        // mark the delivery to prevent retried duplicate replies.
+        expect(markProcessed).toHaveBeenCalledWith('delivery-2');
       });
 
       it('posts working comment, reviews PR, and deletes working comment on success', async () => {
