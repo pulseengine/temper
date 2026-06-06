@@ -351,10 +351,17 @@ describe('app', () => {
             owner: { login: 'pulseengine' },
             ...(overrides.repository || {})
           },
+          sender: { login: 'avrabe', ...(overrides.sender || {}) },
           ...(overrides.payload || {})
         }
       };
     }
+
+    beforeEach(() => {
+      // Bug #4 added an org-membership gate before provisioning.
+      // Tests below assume the sender IS a member (true).
+      checkOrganizationMembership.mockResolvedValue(true);
+    });
 
     it('ignores issues when controller_repo is disabled', async () => {
       _setConfigForTesting({});
@@ -408,6 +415,35 @@ describe('app', () => {
       await handlers['issues.opened'](context);
       const body = context.octokit.issues.createComment.mock.calls[0][0].body;
       expect(body).toMatch(/task store offline/i);
+    });
+
+    // Bug #4 — auth gate before provisioning
+    it('rejects sender not in allowed_command_users with a comment', async () => {
+      _setConfigForTesting({
+        allowed_command_users: ['avrabe'],
+        controller_repo: { enabled: true, repo: 'pulseengine/repo-requests', label: 'repo-request' }
+      });
+      const { handlers } = setupApp();
+      const context = createIssueOpenedContext({
+        sender: { login: 'random-stranger' }
+      });
+      await handlers['issues.opened'](context);
+      const body = context.octokit.issues.createComment.mock.calls[0][0].body;
+      expect(body).toMatch(/not authorised/i);
+      // Critically: did NOT proceed to enqueue / post "Request accepted"
+      expect(body).not.toMatch(/Request accepted/i);
+    });
+
+    it('rejects sender who fails the org-membership check', async () => {
+      _setConfigForTesting({
+        controller_repo: { enabled: true, repo: 'pulseengine/repo-requests', label: 'repo-request' }
+      });
+      checkOrganizationMembership.mockResolvedValue(false);
+      const { handlers } = setupApp();
+      const context = createIssueOpenedContext();
+      await handlers['issues.opened'](context);
+      const body = context.octokit.issues.createComment.mock.calls[0][0].body;
+      expect(body).toMatch(/must be a member/i);
     });
   });
 

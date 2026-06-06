@@ -365,11 +365,39 @@ function registerApp(app, options = {}) {
       return;
     }
 
-    const fields = parseIssueFormBody(issue.body || '');
-    const validation = validateProvisionRequest(fields);
-
     const owner = repository.owner.login;
     const repo = repository.name;
+    const senderLogin = sender?.login;
+
+    // Auth gate: provisioning a real org repo is a high-trust action.
+    // Comment-driven ChatOps already requires `allowed_command_users` AND
+    // org membership; the issue-form path (Cut A provisioning) had no such
+    // gate before this commit (Bug #4 in `docs/agent-fleet/bugs.md`).
+    // Anyone able to file a labelled issue could trigger repo creation.
+    const config = getConfig();
+    const allowedUsers = config?.allowed_command_users || [];
+    if (allowedUsers.length > 0 && !allowedUsers.includes(senderLogin)) {
+      await issueOps.createComment(context.octokit, {
+        owner, repo, issue_number: issue.number,
+        body: `❌ You are not authorised to provision repos. Allowed users: ${allowedUsers.join(', ')}.`
+      });
+      if (deliveryId) markProcessed(deliveryId);
+      return;
+    }
+    // Defence in depth: also require org membership in the controller repo's
+    // owner org. checkOrganizationMembership returns false on 404 / network
+    // errors — if it can't confirm membership, refuse.
+    if (!(await checkOrganizationMembership(context.octokit, owner, senderLogin))) {
+      await issueOps.createComment(context.octokit, {
+        owner, repo, issue_number: issue.number,
+        body: '❌ You must be a member of the organisation to provision repos.'
+      });
+      if (deliveryId) markProcessed(deliveryId);
+      return;
+    }
+
+    const fields = parseIssueFormBody(issue.body || '');
+    const validation = validateProvisionRequest(fields);
 
     if (!validation.valid) {
       await issueOps.createComment(context.octokit,{
