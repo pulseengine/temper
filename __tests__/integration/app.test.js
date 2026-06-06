@@ -148,11 +148,18 @@ function createMockOctokit() {
   const issuesUpdateComment = jest.fn().mockResolvedValue({});
   const issuesDeleteComment = jest.fn().mockResolvedValue({});
 
+  // Production now uses `.request()` for `repos.getBranch` too (PR fixing
+  // Bug #16 — `app.js:268` was on `context.octokit.repos.getBranch` which
+  // shares the PR-#22 failure mode). Route GET branches into a namespaced
+  // mock so existing `octokit.repos.getBranch.mockX` test calls still work.
+  const reposGetBranch = jest.fn().mockResolvedValue({ data: { name: 'main' } });
+
   const routeDispatch = {
     'POST /repos/{owner}/{repo}/issues': issuesCreate,
     'POST /repos/{owner}/{repo}/issues/{issue_number}/comments': issuesCreateComment,
     'PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}': issuesUpdateComment,
-    'DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}': issuesDeleteComment
+    'DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}': issuesDeleteComment,
+    'GET /repos/{owner}/{repo}/branches/{branch}': reposGetBranch
   };
 
   const request = jest.fn((route, params) => {
@@ -169,7 +176,7 @@ function createMockOctokit() {
       deleteComment: issuesDeleteComment
     },
     repos: {
-      getBranch: jest.fn().mockResolvedValue({ data: { name: 'main' } })
+      getBranch: reposGetBranch
     },
     request
   };

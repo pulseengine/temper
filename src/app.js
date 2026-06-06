@@ -265,11 +265,13 @@ function registerApp(app, options = {}) {
 
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          await context.octokit.repos.getBranch({
-            owner,
-            repo: repoName,
-            branch: defaultBranch
-          });
+          // Use .request() form rather than .repos.getBranch — Probot v14's
+          // `context.octokit.repos` namespace is unreliable on this event
+          // type (same root cause as PRs #22 / #29 / #30 for `.issues.X`).
+          await context.octokit.request(
+            'GET /repos/{owner}/{repo}/branches/{branch}',
+            { owner, repo: repoName, branch: defaultBranch }
+          );
           branchReady = true;
           break;
         } catch (err) {
