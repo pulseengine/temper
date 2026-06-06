@@ -836,8 +836,10 @@ function registerApp(app, options = {}) {
     }
   });
 
-  // PR opened: auto-merge for bots, AI review, dependabot generation check
-  app.on('pull_request.opened', async (context) => {
+  // PR opened/reopened: auto-merge for bots, AI review, dependabot generation
+  // check. `.reopened` is symmetric with `.opened` — a closed PR being
+  // reopened should re-arm auto-merge and re-run the same checks.
+  async function handlePullRequestOpenedOrReopened(context, eventName) {
     if (context.log) setLogger(context.log);
     const config = getConfig();
     const pr = context.payload.pull_request;
@@ -856,7 +858,7 @@ function registerApp(app, options = {}) {
 
       if (isDependabot || isBotUser) {
         const mergeMethod = autoMerge.merge_method || "squash";
-        getLogger().info({ pr: pr.number, sender, mergeMethod }, "Enabling auto-merge");
+        getLogger().info({ pr: pr.number, sender, mergeMethod, event: eventName }, "Enabling auto-merge");
 
         try {
           const query = `mutation($prId: ID!, $mergeMethod: PullRequestMergeMethod!) {
@@ -892,12 +894,12 @@ function registerApp(app, options = {}) {
       try {
         const result = await reviewPullRequest(context.octokit, owner, repo, pr.number);
         if (result.success) {
-          getLogger().info({ pr: pr.number, repo: `${owner}/${repo}` }, 'Auto AI review posted');
+          getLogger().info({ pr: pr.number, repo: `${owner}/${repo}`, event: eventName }, 'Auto AI review posted');
         } else {
-          getLogger().warn({ pr: pr.number, error: result.error }, 'Auto AI review skipped');
+          getLogger().warn({ pr: pr.number, error: result.error, event: eventName }, 'Auto AI review skipped');
         }
       } catch (err) {
-        getLogger().warn({ pr: pr.number, err: err.message }, 'Auto AI review failed');
+        getLogger().warn({ pr: pr.number, err: err.message, event: eventName }, 'Auto AI review failed');
       }
     }
 
@@ -925,6 +927,43 @@ function registerApp(app, options = {}) {
           );
         }
       }
+    }
+  }
+
+  app.on('pull_request.opened', (context) => handlePullRequestOpenedOrReopened(context, 'opened'));
+  app.on('pull_request.reopened', (context) => handlePullRequestOpenedOrReopened(context, 'reopened'));
+
+  // Re-review on force-push / new commits. supersedePreviousReviews inside
+  // reviewPullRequest hides the previous bot comment so the PR shows only
+  // the latest review. We deliberately skip the auto-merge and dependabot
+  // checks — those decisions don't change when the diff is updated, only
+  // when the PR is created or revived.
+  app.on('pull_request.synchronize', async (context) => {
+    if (context.log) setLogger(context.log);
+    const config = getConfig();
+    const pr = context.payload.pull_request;
+    const { repository } = context.payload;
+    const owner = repository.owner.login;
+    const repo = repository.name;
+    const sender = pr.user?.login || "";
+
+    const isBotPR = sender === "dependabot[bot]" ||
+      sender.endsWith("[bot]") ||
+      (config?.auto_merge?.on_bot_users || []).some(
+        bot => sender === bot || sender === bot + "[bot]"
+      );
+
+    if (!config?.ai_review?.enabled || isBotPR) return;
+
+    try {
+      const result = await reviewPullRequest(context.octokit, owner, repo, pr.number);
+      if (result.success) {
+        getLogger().info({ pr: pr.number, repo: `${owner}/${repo}` }, 'Re-reviewed PR after synchronize');
+      } else {
+        getLogger().warn({ pr: pr.number, error: result.error }, 'Re-review skipped after synchronize');
+      }
+    } catch (err) {
+      getLogger().warn({ pr: pr.number, err: err.message }, 'Re-review failed after synchronize');
     }
   });
 
