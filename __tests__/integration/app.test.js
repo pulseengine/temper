@@ -695,6 +695,54 @@ describe('app', () => {
 
       expect(getLogger().error).toHaveBeenCalledWith({ err: error }, 'Probot error');
     });
+
+    // Bug #13: pull_request.opened must dedupe on deliveryId. Without
+    // this, Probot retries replay enablePullRequestAutoMerge, the AI
+    // review (only the AI side has its own 5-min throttle), and the
+    // dependabot enqueue.
+    it('pull_request.opened skips duplicate webhook deliveries', async () => {
+      isProcessed.mockReturnValue(true);
+      _setConfigForTesting({ ai_review: { enabled: true } });
+      reviewPullRequest.mockClear();
+      const { handlers } = setupApp();
+
+      const context = {
+        id: 'delivery-pr-opened-dup',
+        log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+        octokit: createMockOctokit(),
+        payload: {
+          pull_request: { number: 7, node_id: 'PR_7' },
+          repository: { name: 'rivet', owner: { login: 'pulseengine' }, default_branch: 'main' },
+          sender: { login: 'human' }
+        }
+      };
+
+      await handlers['pull_request.opened'](context);
+
+      expect(reviewPullRequest).not.toHaveBeenCalled();
+      expect(markProcessed).not.toHaveBeenCalled();
+    });
+
+    it('pull_request.opened marks delivery processed on completion', async () => {
+      _setConfigForTesting({ ai_review: { enabled: true } });
+      reviewPullRequest.mockResolvedValue({ success: true });
+      const { handlers } = setupApp();
+
+      const context = {
+        id: 'delivery-pr-opened-1',
+        log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+        octokit: createMockOctokit(),
+        payload: {
+          pull_request: { number: 8, node_id: 'PR_8' },
+          repository: { name: 'rivet', owner: { login: 'pulseengine' }, default_branch: 'main' },
+          sender: { login: 'human' }
+        }
+      };
+
+      await handlers['pull_request.opened'](context);
+
+      expect(markProcessed).toHaveBeenCalledWith('delivery-pr-opened-1');
+    });
   });
 
   // =========================================================================

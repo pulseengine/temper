@@ -839,6 +839,18 @@ function registerApp(app, options = {}) {
   // PR opened: auto-merge for bots, AI review, dependabot generation check
   app.on('pull_request.opened', async (context) => {
     if (context.log) setLogger(context.log);
+    // Bug #13: dedupe at handler entry. Without this guard, a Probot
+    // webhook redelivery (~5 retries on 5xx/timeout) re-runs auto-merge
+    // enable, the AI review, and the dependabot enqueue. The 5-min
+    // _reviewTimestamps throttle in reviewPullRequest only catches the
+    // AI review path; it doesn't protect enablePullRequestAutoMerge or
+    // the task-store enqueue.
+    const deliveryId = context.id;
+    if (deliveryId && isProcessed(deliveryId)) {
+      getLogger().info({ deliveryId }, 'Skipping duplicate pull_request.opened delivery');
+      return;
+    }
+
     const config = getConfig();
     const pr = context.payload.pull_request;
     const { repository } = context.payload;
@@ -926,6 +938,8 @@ function registerApp(app, options = {}) {
         }
       }
     }
+
+    if (deliveryId) markProcessed(deliveryId);
   });
 
   app.on('pull_request.closed', async (context) => {
