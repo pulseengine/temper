@@ -18,7 +18,7 @@ jobs:
       - run: npm ci
       - run: npm test -- --coverage
       - name: Security audit
-        run: npm audit --audit-level=moderate || true
+        run: npm audit --audit-level=moderate
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4
