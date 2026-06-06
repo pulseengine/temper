@@ -30,12 +30,18 @@ import { initTaskStore } from './task-store.js';
 import { createScheduler } from './scheduler.js';
 import { initKVStore } from './persistent-kv.js';
 import { provisionRepo, parseIssueFormBody, validateProvisionRequest } from './provisioning.js';
+import { evaluateHealth } from './health.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Module-level state for the task store and scheduler
 let _taskStore = null;
 let _scheduler = null;
+// Bug #8: /health uses _dedupStore.ping() as a SQLite liveness probe.
+// Same instance that backs setIdempotencyStore — exposed here so the
+// /health handlers can access it without reaching into idempotency.js.
+let _dedupStore = null;
+let _dataDir = null;
 
 function getTaskStore() { return _taskStore; }
 function getScheduler() { return _scheduler; }
@@ -194,11 +200,17 @@ function createCustomRoutesHandler() {
 
     if (req.method === 'GET' && pathname === '/health') {
       applySecurityHeaders(res);
+      const probe = evaluateHealth({
+        scheduler: _scheduler,
+        kv: _dedupStore,
+        dataDir: _dataDir
+      });
       const healthData = {
-        status: 'healthy',
+        status: probe.status,
         timestamp: new Date().toISOString(),
         version: DEPLOY_SHA || '1.0.0',
-        queue: defaultQueue.stats()
+        queue: defaultQueue.stats(),
+        checks: probe.checks
       };
       if (_taskStore) {
         healthData.tasks = _taskStore.getStats();
@@ -207,7 +219,8 @@ function createCustomRoutesHandler() {
         healthData.scheduler = { running: _scheduler.isRunning() };
       }
       const body = JSON.stringify(healthData);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
+      // Bug #8: 503 lets PM2 / external uptime monitors restart on hang.
+      res.writeHead(probe.ok ? 200 : 503, { 'Content-Type': 'application/json' });
       res.end(body);
       return true;
     }
@@ -982,11 +995,17 @@ function registerApp(app, options = {}) {
     applySecurityMiddleware(router);
 
     router.get('/health', (req, res) => {
+      const probe = evaluateHealth({
+        scheduler: _scheduler,
+        kv: _dedupStore,
+        dataDir: _dataDir
+      });
       const healthData = {
-        status: 'healthy',
+        status: probe.status,
         timestamp: new Date().toISOString(),
         version: DEPLOY_SHA || '1.0.0',
-        queue: defaultQueue.stats()
+        queue: defaultQueue.stats(),
+        checks: probe.checks
       };
       if (_taskStore) {
         healthData.tasks = _taskStore.getStats();
@@ -994,7 +1013,7 @@ function registerApp(app, options = {}) {
       if (_scheduler) {
         healthData.scheduler = { running: _scheduler.isRunning() };
       }
-      res.status(200).json(healthData);
+      res.status(probe.ok ? 200 : 503).json(healthData);
     });
 
     router.get('/webhook', (req, res) => {
@@ -1035,11 +1054,13 @@ function initPersistence() {
   try {
     const dataDir = getDataDir();
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    _dataDir = dataDir;
 
     const dedupStore = initKVStore(path.join(dataDir, 'dedup.db'), 'webhook_dedup', {
       ttlMs: 60 * 60 * 1000
     });
     setIdempotencyStore(dedupStore);
+    _dedupStore = dedupStore;
 
     const rateStore = initKVStore(path.join(dataDir, 'dedup.db'), 'ai_rate_limits', {
       ttlMs: 5 * 60 * 1000
