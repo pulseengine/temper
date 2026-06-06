@@ -19,6 +19,31 @@ async function checkOrganizationMembership(octokit, org, username) {
   }
 }
 
+/**
+ * Bounded-concurrency map. Runs `fn(item)` over `items` with at most
+ * `concurrency` calls in flight. Resolves to an array of results in the
+ * same order as `items`. No new dependency.
+ *
+ * Used by `synchronizeAllRepositories` to avoid the previous fully-serial
+ * loop (~30-60 s for 13 repos) without going fully parallel (which would
+ * blow the GitHub 5000/h rate budget on a 100-repo org).
+ */
+async function pLimitMap(items, concurrency, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    let i = cursor++;
+    while (i < items.length) {
+      results[i] = await fn(items[i], i);
+      i = cursor++;
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+const SYNC_CONCURRENCY = 3;
+
 async function synchronizeAllRepositories(octokit, org) {
   try {
     getLogger().info(`Starting synchronization for organization: ${org}`);
@@ -29,19 +54,21 @@ async function synchronizeAllRepositories(octokit, org) {
       per_page: 100
     });
 
-    getLogger().info(`Found ${repos.length} repositories to synchronize`);
+    getLogger().info(`Found ${repos.length} repositories to synchronize (concurrency=${SYNC_CONCURRENCY})`);
 
-    for (const repo of repos) {
+    const todo = repos.filter((repo) => {
       if (repo.archived) {
         getLogger().info(`Skipping archived repository: ${repo.full_name}`);
-        continue;
+        return false;
       }
-
       if (isControlSurfaceRepo(repo.full_name)) {
         getLogger().info(`Skipping control-surface repository: ${repo.full_name}`);
-        continue;
+        return false;
       }
+      return true;
+    });
 
+    await pLimitMap(todo, SYNC_CONCURRENCY, async (repo) => {
       getLogger().info(`Processing repository: ${repo.full_name}`);
       const configResult = await configureRepository(octokit, repo);
       if (!configResult.success) {
@@ -49,7 +76,7 @@ async function synchronizeAllRepositories(octokit, org) {
       } else {
         getLogger().info(`✅ Synchronized ${repo.full_name}`);
       }
-    }
+    });
 
     getLogger().info(`✅ Completed synchronization for organization: ${org}`);
     return { success: true, repositoriesProcessed: repos.length };
