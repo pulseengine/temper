@@ -40,10 +40,48 @@ function extractLabelsFromConfig(dependabotConfig) {
   return [...labels];
 }
 
+const DEPENDABOT_PATH = '.github/dependabot.yml';
+
+/**
+ * Does the repository already have a dependabot.yml? A 404 is the only answer
+ * that means no; any other failure is thrown, because it says nothing about
+ * whether the file exists.
+ */
+async function dependabotConfigExists(octokit, owner, repo) {
+  try {
+    await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
+      owner,
+      repo,
+      path: DEPENDABOT_PATH
+    });
+    return true;
+  } catch (error) {
+    if (error.status === 404) return false;
+    throw error;
+  }
+}
+
+/**
+ * Write a dependabot.yml — but only where the repository has none.
+ *
+ * An existing file is the repository's own and is never overwritten, by any
+ * caller. It encodes what temper cannot know: which updates to group, which
+ * paths PR CI never exercises, which majors to hold (maintainer decision,
+ * temper#71). This is decided here, once, rather than at each caller, so that
+ * no path — /configure-repo, /generate-dependabot, the scheduler — can differ.
+ *
+ * @returns {Promise<{applied: boolean, reason: string}>}
+ */
 async function applyDependabotConfig(octokit, owner, repo, dependabotConfig) {
   const config = getConfig();
 
   try {
+    if (await dependabotConfigExists(octokit, owner, repo)) {
+      const reason = `${owner}/${repo} already has ${DEPENDABOT_PATH}; it is the repository's own and temper does not overwrite it`;
+      getLogger().info(reason);
+      return { applied: false, reason };
+    }
+
     getLogger().info(`Applying Dependabot configuration to ${owner}/${repo}`);
 
     const usePR = config.change_strategy?.use_pull_requests || false;
@@ -73,6 +111,7 @@ async function applyDependabotConfig(octokit, owner, repo, dependabotConfig) {
     }
 
     getLogger().info(`✅ Applied Dependabot configuration to ${owner}/${repo}`);
+    return { applied: true, reason: `created ${DEPENDABOT_PATH}` };
   } catch (error) {
     getLogger().error(
       `❌ Error applying Dependabot configuration to ${owner}/${repo}:`,

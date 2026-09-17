@@ -253,6 +253,95 @@ describe('app', () => {
   });
 
   // =========================================================================
+  // pull_request.opened — Dependabot auto-merge is gated on semver (temper#71)
+  // =========================================================================
+  describe('pull_request.opened Dependabot auto-merge', () => {
+    function prOpenedContext({ sender, title, body = '' }) {
+      const octokit = createMockOctokit();
+      // The handler arms auto-merge through a GraphQL mutation; record it.
+      octokit.graphql = jest.fn().mockResolvedValue({});
+      return {
+        id: 'delivery-pr-1',
+        log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+        octokit,
+        payload: {
+          pull_request: { number: 157, node_id: 'PR_node', title, body },
+          repository: {
+            name: 'varve',
+            default_branch: 'main',
+            owner: { login: 'pulseengine' }
+          },
+          sender: { login: sender }
+        }
+      };
+    }
+
+    beforeEach(() => {
+      _setConfigForTesting({
+        auto_merge: { enabled: true, on_dependabot: true, on_bot_users: ['thrum'], merge_method: 'squash' }
+      });
+    });
+
+    it('arms auto-merge for a non-breaking Dependabot update', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({
+        sender: 'dependabot[bot]',
+        title: 'build(deps): bump flate2 from 1.1.9 to 1.1.10'
+      });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).toHaveBeenCalledTimes(1);
+      expect(ctx.octokit.graphql.mock.calls[0][0]).toContain('enablePullRequestAutoMerge');
+    });
+
+    it('does NOT arm auto-merge for a breaking Dependabot update, and says why', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({
+        sender: 'dependabot[bot]',
+        title: 'build(deps): bump sigstore/cosign-installer from 3.9.1 to 4.1.2'
+      });
+      await handlers['pull_request.opened'](ctx);
+
+      expect(ctx.octokit.graphql).not.toHaveBeenCalled();
+
+      // Asserted on the ROUTE, not on octokit.issues.createComment: under
+      // Probot v14 that namespace is undefined for pull_request.opened, so a
+      // call through it throws, is swallowed, and the explanation silently
+      // never posts. The route is what production actually uses.
+      const commentCalls = ctx.octokit.request.mock.calls.filter(
+        ([route]) => route === 'POST /repos/{owner}/{repo}/issues/{issue_number}/comments'
+      );
+      expect(commentCalls).toHaveLength(1);
+      expect(commentCalls[0][1].issue_number).toBe(157);
+      expect(commentCalls[0][1].body).toMatch(/did not enable auto-merge/);
+      expect(commentCalls[0][1].body).toContain('sigstore/cosign-installer');
+    });
+
+    it('does NOT arm a grouped PR that carries one breaking update', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({
+        sender: 'dependabot[bot]',
+        title: 'chore(deps): Bump the wasmtime group across 1 directory with 2 updates',
+        body: 'Updates `wasmtime` from 47.0.3 to 48.0.1\nUpdates `wasmtime-wasi` from 47.0.3 to 48.0.1'
+      });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).not.toHaveBeenCalled();
+    });
+
+    it('leaves configured bot users on their existing policy', async () => {
+      // The decision was about Dependabot majors. A configured bot is not
+      // Dependabot, and a title that happens to look like a major must not
+      // change how it is treated.
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({
+        sender: 'thrum',
+        title: 'bump something from 1.0.0 to 2.0.0'
+      });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // =========================================================================
   // chatops_repo enforcement — slash commands only honoured in admin repo
   // =========================================================================
   describe('issue_comment.created chatops_repo gate', () => {
@@ -1353,6 +1442,29 @@ describe('app', () => {
         expect(applyDependabotConfig).toHaveBeenCalled();
         // Two comments: the config preview + the success message
         expect(context.octokit.issues.createComment).toHaveBeenCalledTimes(2);
+      });
+
+      it('says so, rather than claiming success, when the repository already has its own config', async () => {
+        generateDependabotConfig.mockResolvedValue({
+          config: { version: 2, updates: [{ 'package-ecosystem': 'npm', directory: '/' }] },
+          ecosystems: [{ ecosystem: 'npm', directory: '/' }],
+          report: 'Detected 1 ecosystem(s): npm (/)'
+        });
+        applyDependabotConfig.mockResolvedValue({
+          applied: false,
+          reason: 'myorg/myrepo already has .github/dependabot.yml; it is the repository\'s own and temper does not overwrite it'
+        });
+
+        const { handlers } = setupApp();
+        const context = createIssueCommentContext('/generate-dependabot');
+        context.octokit.request.mockImplementationOnce(() =>
+          Promise.resolve({ data: { default_branch: 'main' } })
+        );
+        await handlers['issue_comment.created'](context);
+
+        const bodies = context.octokit.issues.createComment.mock.calls.map((c) => c[0].body);
+        expect(bodies.some((b) => b.includes('applied!'))).toBe(false);
+        expect(bodies[bodies.length - 1]).toContain('does not overwrite');
       });
 
       it('posts message when no ecosystems detected', async () => {

@@ -68,6 +68,61 @@ describe('dependabot', () => {
   describe('applyDependabotConfig', () => {
     const depConfig = { version: 2, updates: [{ labels: ['dependencies'] }] };
 
+    // The repository has no dependabot.yml yet: the only case temper writes one.
+    beforeEach(() => {
+      octokit.request.mockRejectedValue(Object.assign(new Error('Not Found'), { status: 404 }));
+    });
+
+    it('does NOT overwrite a dependabot.yml the repository already has', async () => {
+      // A repository's own file encodes what temper cannot know: which updates
+      // to group, which paths PR CI never exercises, which majors to hold.
+      // pulseengine/varve groups minor+patch; a generic config would undo it.
+      _setConfigForTesting({});
+      octokit.request.mockResolvedValue({ status: 200, data: { content: encodeConfig(depConfig) } });
+
+      const result = await applyDependabotConfig(octokit, 'owner', 'repo', depConfig);
+
+      expect(upsertRepoFile).not.toHaveBeenCalled();
+      expect(createConfigurationPR).not.toHaveBeenCalled();
+      expect(result.applied).toBe(false);
+      expect(result.reason).toMatch(/already has/);
+      expect(octokit.request).toHaveBeenCalledWith(
+        'GET /repos/{owner}/{repo}/contents/{path}',
+        expect.objectContaining({ owner: 'owner', repo: 'repo', path: '.github/dependabot.yml' })
+      );
+    });
+
+    it('does NOT overwrite an existing file via a PR either', async () => {
+      _setConfigForTesting({ change_strategy: { use_pull_requests: true } });
+      octokit.request.mockResolvedValue({ status: 200, data: {} });
+
+      const result = await applyDependabotConfig(octokit, 'owner', 'repo', depConfig);
+
+      expect(createConfigurationPR).not.toHaveBeenCalled();
+      expect(result.applied).toBe(false);
+    });
+
+    it('reports that it applied the config when the file was absent', async () => {
+      _setConfigForTesting({});
+
+      const result = await applyDependabotConfig(octokit, 'owner', 'repo', depConfig);
+
+      expect(upsertRepoFile).toHaveBeenCalled();
+      expect(result.applied).toBe(true);
+    });
+
+    it('does not assume the file is absent when the existence check fails for another reason', async () => {
+      // A 403 or 500 says nothing about whether the file exists. Treating it as
+      // absence would overwrite a repository's config on a transient error.
+      _setConfigForTesting({});
+      octokit.request.mockRejectedValue(Object.assign(new Error('Server Error'), { status: 500 }));
+
+      await expect(
+        applyDependabotConfig(octokit, 'owner', 'repo', depConfig)
+      ).rejects.toThrow('Server Error');
+      expect(upsertRepoFile).not.toHaveBeenCalled();
+    });
+
     it('applies config via direct commit when use_pull_requests is false', async () => {
       _setConfigForTesting({
         change_strategy: { use_pull_requests: false }

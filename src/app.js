@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { createDashboardHandler, DEPLOY_SHA } from './dashboard.js';
 import { getConfig, getControllerRepoConfig, getChatopsRepoConfig } from './config.js';
 import { getLogger, setLogger } from './logger.js';
+import { dependabotAutoMergeDecision } from './dependabot-update-type.js';
 import { configureRepository } from './repository.js';
 import {
   checkOrganizationMembership,
@@ -642,11 +643,13 @@ function registerApp(app, options = {}) {
             body
           });
 
-          await applyDependabotConfig(context.octokit, owner, repo, result.config);
+          const applied = await applyDependabotConfig(context.octokit, owner, repo, result.config);
 
           await issueOps.createComment(context.octokit,{
             owner, repo, issue_number: issueNumber,
-            body: '✅ Dependabot configuration applied!'
+            body: applied?.applied === false
+              ? `Not applied: ${applied.reason}. The configuration above is for reference only.`
+              : '✅ Dependabot configuration applied!'
           });
         }
       } catch (error) {
@@ -854,7 +857,36 @@ function registerApp(app, options = {}) {
         bot => sender === bot || sender === bot + "[bot]"
       );
 
-      if (isDependabot || isBotUser) {
+      // Dependabot PRs auto-merge only when every update is non-breaking
+      // (temper#71). A major — or a 0.x minor, which Cargo and npm treat as
+      // breaking — waits for a human. For a workflow action a green PR can be
+      // no evidence at all: an action used only by a tag-triggered release or a
+      // manually dispatched deposit goes green without ever executing.
+      // Configured bot users are not Dependabot and keep their existing policy.
+      let refusedDependabot = false;
+      if (isDependabot) {
+        const decision = dependabotAutoMergeDecision(pr.title, pr.body);
+        if (!decision.allow) {
+          refusedDependabot = true;
+          getLogger().info({ pr: pr.number, reason: decision.reason }, "Not enabling auto-merge");
+          try {
+            // issueOps, not octokit.rest.issues: that namespace is undefined
+            // for pull_request.opened under Probot v14, so a direct call throws,
+            // lands in the catch below, and the explanation is silently never
+            // posted while the refusal itself still works.
+            await issueOps.createComment(context.octokit, {
+              owner,
+              repo,
+              issue_number: pr.number,
+              body: `temper did not enable auto-merge: ${decision.reason}.`
+            });
+          } catch (err) {
+            getLogger().warn({ pr: pr.number, err: err.message }, "Could not explain skipped auto-merge");
+          }
+        }
+      }
+
+      if ((isDependabot && !refusedDependabot) || isBotUser) {
         const mergeMethod = autoMerge.merge_method || "squash";
         getLogger().info({ pr: pr.number, sender, mergeMethod }, "Enabling auto-merge");
 
@@ -1097,8 +1129,10 @@ function initScheduler(app) {
     if (result.config) {
       const labels = extractLabelsFromConfig(result.config);
       if (labels.length > 0) await ensureLabelsExist(kit, owner, repo, labels);
-      await applyDependabotConfig(kit, owner, repo, result.config);
-      logger.info(`Scheduler: applied dependabot config to ${owner}/${repo}`);
+      const applied = await applyDependabotConfig(kit, owner, repo, result.config);
+      logger.info(applied?.applied === false
+        ? `Scheduler: ${applied.reason}`
+        : `Scheduler: applied dependabot config to ${owner}/${repo}`);
     } else {
       logger.info(`Scheduler: no ecosystems detected in ${owner}/${repo}, skipping`);
     }
