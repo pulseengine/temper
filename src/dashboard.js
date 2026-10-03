@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process';
+import crypto from 'node:crypto';
 import { getConfig } from './config.js';
 import { getLogger } from './logger.js';
 import { analyzeOrganizationRepositories, synchronizeAllRepositories, generateOrganizationAnalysisReport } from './organization.js';
@@ -1284,10 +1285,79 @@ function readBody(req) {
 }
 function redirect(res, loc) { res.writeHead(302, {'Location':loc}); res.end(); }
 
+// Bug #3: dashboard POST actions and JSON APIs were reachable without auth.
+// Anyone able to hit the bot's HTTP port could trigger org-wide reconfig
+// or exfiltrate repo data. Now: a shared-secret bearer token. Set
+// DASHBOARD_TOKEN in the environment; the bot rejects /api/* and
+// /dashboard/actions/* without a matching `Authorization: Bearer <token>`.
+//
+// If DASHBOARD_TOKEN is unset, the routes return 503 with a clear message
+// — fail-closed beats fail-open for an admin surface. The HTML dashboard
+// itself (read-only renders of cached data, served via /dashboard*) is
+// still public; the operator should additionally bind to 127.0.0.1
+// behind an authenticating reverse proxy if the rendered data is
+// sensitive.
+function readDashboardToken() {
+  const t = process.env.DASHBOARD_TOKEN || '';
+  return t.trim();
+}
+
+function timingSafeMatches(a, b) {
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Returns true when the request carries a valid bearer token, false when
+ * auth is required but missing/wrong, and 'unconfigured' when no token
+ * is set in the environment.
+ */
+function checkBearerAuth(req) {
+  const expected = readDashboardToken();
+  if (!expected) return 'unconfigured';
+  const header = req.headers?.authorization || '';
+  const match = header.match(/^Bearer\s+(\S+)\s*$/i);
+  if (!match) return false;
+  return timingSafeMatches(match[1], expected);
+}
+
+function denyUnauthorized(res, reason) {
+  const body = JSON.stringify({ success: false, error: reason });
+  res.writeHead(reason === 'auth_unconfigured' ? 503 : 401, {
+    'Content-Type': 'application/json',
+    'WWW-Authenticate': 'Bearer realm="temper-dashboard"'
+  });
+  res.end(body);
+}
+
 export function createDashboardHandler() {
   return async (req, res) => {
     const url = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));
     const path = url.pathname;
+
+    // Bug #3: gate side-effecting and data-exfiltration routes behind a
+    // bearer token. Read-only HTML pages are still public; the operator
+    // can put a reverse proxy in front if even that's too much exposure.
+    const requiresAuth =
+      path.startsWith('/dashboard/actions/') ||
+      path.startsWith('/api/');
+    if (requiresAuth) {
+      const ok = checkBearerAuth(req);
+      if (ok === 'unconfigured') {
+        getLogger().warn(
+          { path, method: req.method },
+          'Dashboard auth: DASHBOARD_TOKEN not configured — rejecting request'
+        );
+        denyUnauthorized(res, 'auth_unconfigured');
+        return true;
+      }
+      if (!ok) {
+        denyUnauthorized(res, 'unauthorized');
+        return true;
+      }
+    }
 
     if (req.method === 'GET' && (path === '/' || path === '')) { redirect(res, '/dashboard'); return true; }
     if (req.method === 'GET' && path === '/dashboard') { sendHtml(res, 200, renderDashboardPage()); return true; }
