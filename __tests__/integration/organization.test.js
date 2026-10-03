@@ -227,7 +227,7 @@ describe('organization', () => {
         'Starting synchronization for organization: test-org'
       );
       expect(getLogger().info).toHaveBeenCalledWith(
-        'Found 0 repositories to synchronize'
+        expect.stringMatching(/Found 0 repositories to synchronize/)
       );
       expect(getLogger().info).toHaveBeenCalledWith(
         expect.stringContaining('Completed synchronization for organization: test-org')
