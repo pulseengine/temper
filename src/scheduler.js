@@ -23,6 +23,9 @@ function createScheduler(store, octokitOrFactory, options = {}) {
   const handlers = new Map();
   let timer = null;
   let running = false;
+  // Bug #8: /health uses this to detect a hung scheduler. Updated at the
+  // *end* of every tick (success, no-op, or error caught inside tick).
+  let lastTickAt = null;
 
   async function getOctokit() {
     if (typeof octokitOrFactory === 'function') {
@@ -98,6 +101,7 @@ function createScheduler(store, octokitOrFactory, options = {}) {
       }
     } finally {
       running = false;
+      lastTickAt = Date.now();
     }
   }
 
@@ -128,6 +132,17 @@ function createScheduler(store, octokitOrFactory, options = {}) {
     /** Check if the scheduler is running. */
     isRunning() {
       return timer !== null;
+    },
+
+    /** Timestamp (ms since epoch) of the last completed tick, or null
+     *  before the first tick finishes. Used by /health for liveness. */
+    getLastTickAt() {
+      return lastTickAt;
+    },
+
+    /** Configured interval; /health uses 2× this as the staleness threshold. */
+    getIntervalMs() {
+      return intervalMs;
     }
   };
 }

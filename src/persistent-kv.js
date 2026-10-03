@@ -77,5 +77,12 @@ export function initKVStore(dbPath, name, opts = {}) {
     db.close();
   }
 
-  return { has, get, set, sweep, close, _db: db };
+  // Bug #8: /health uses ping() as a SQLite liveness probe. Throws if
+  // the connection is dead, the file is locked beyond timeout, or disk
+  // I/O is jammed. SELECT 1 doesn't touch any table — minimum latency.
+  function ping() {
+    db.prepare('SELECT 1 AS ok').get();
+  }
+
+  return { has, get, set, sweep, close, ping, _db: db };
 }
