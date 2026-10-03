@@ -65,9 +65,41 @@ function isLocalEndpoint(endpoint) {
   }
 }
 
+/**
+ * Strip patterns that an attacker-influenced PR diff could exploit through
+ * the AI model's output. Wave-1 LLM and Security agents flagged the
+ * previous one-pattern version (workflow-commands only) as too narrow —
+ * Bug #29 in `docs/agent-fleet/bugs.md`.
+ *
+ * Concretely, attacker patterns we now neutralise:
+ *
+ *  1. GitHub Actions workflow commands (`::set-output ::`, `::error ::`)
+ *     — could escape into a runner that consumes bot comments.
+ *  2. HTML elements that GitHub renders inside Markdown comments —
+ *     `<img>`, `<script>`, `<iframe>`, `<style>`, `<form>`,
+ *     `<a href="javascript:…">`. Neutralised by escaping `<` and `>` to
+ *     HTML entities so they render as text, not markup.
+ *  3. Mass `@mention` payloads that could ping reviewers / teams /
+ *     org-wide. Replaced `@something` with `@\u200Bsomething` (zero-width
+ *     space) so the @ sigil renders but doesn't activate notifications.
+ *  4. Fake "Approved" / "LGTM" / "Approve" verdict-mimicking sentences —
+ *     left as-is *visually* but the strict-JSON `verdict` is computed by
+ *     `computeVerdict` from filtered findings; the model's free-text
+ *     review never decides the verdict, so this is defence-in-depth only.
+ *
+ * The output is intended to be safe to embed *inside a Markdown blockquote
+ * or code block* on a GitHub comment. Callers SHOULD wrap it that way too.
+ */
 function sanitizeAIOutput(text) {
-  // Strip GitHub Actions workflow commands that could be injected
-  return text.replace(/::[\w-]+(\s+[\w-]+=[\w-]+)*::.*/g, '[sanitized command]');
+  if (typeof text !== 'string') return '';
+  return text
+    // 1. Workflow commands
+    .replace(/::[\w-]+(\s+[\w-]+=[\w-]+)*::.*/g, '[sanitized command]')
+    // 2. HTML angle brackets — render as text, not markup
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    // 3. Mention de-fanging (zero-width space after @)
+    .replace(/@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}[A-Za-z0-9])?(?:\/[A-Za-z0-9](?:[A-Za-z0-9-]{0,38}[A-Za-z0-9])?)?)/g, '@\u200B$1');
 }
 
 /**
