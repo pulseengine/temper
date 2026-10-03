@@ -422,7 +422,13 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
         : path.resolve(__dirname, '..', rivetCfg.binary_path);
       try {
         if (headSha && (await hasRivetYaml(octokit, owner, repo, headSha))) {
-          oracleSummary = await withTempRepoCheckout(
+          // Run head oracle and base validate in parallel — they are
+          // independent (different tarballs, different cwds, different
+          // commands). Sequential they cost ~2× tarball-fetch + 2× extract +
+          // 2× rivet runtime; parallel halves wall-time. Each side has its
+          // own try/catch so a base-ref failure (e.g. base SHA gone, schema
+          // drift) gracefully degrades to head-only findings.
+          const headPromise = withTempRepoCheckout(
             octokit,
             owner,
             repo,
@@ -432,15 +438,9 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
               timeout: rivetCfg.timeout_ms || 60000
             })
           );
-          let headOracleFindings = oracleSummary?.findings || [];
 
-          // Delta filter: subtract findings already present at the PR base.
-          // Without this, the review surfaces the entire repo backlog every
-          // time (see spar#175 — 91 pre-existing warnings drowning the diff).
-          let baseValidate = null;
-          if (baseSha && baseSha !== headSha) {
-            try {
-              baseValidate = await withTempRepoCheckout(
+          const basePromise = (baseSha && baseSha !== headSha)
+            ? withTempRepoCheckout(
                 octokit,
                 owner,
                 repo,
@@ -448,14 +448,21 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
                 (repoPath) => runRivetValidate(resolvedBinary, repoPath, {
                   timeout: rivetCfg.timeout_ms || 60000
                 })
-              );
-            } catch (err) {
-              getLogger().warn(
-                { pr: prNumber, err: err.message },
-                'base-ref validate failed — falling back to head-only oracle findings'
-              );
-            }
-          }
+              ).catch((err) => {
+                getLogger().warn(
+                  { pr: prNumber, err: err.message },
+                  'base-ref validate failed — falling back to head-only oracle findings'
+                );
+                return null;
+              })
+            : Promise.resolve(null);
+
+          const [headResult, baseValidate] = await Promise.all([
+            headPromise,
+            basePromise
+          ]);
+          oracleSummary = headResult;
+          let headOracleFindings = oracleSummary?.findings || [];
           const droppedCount = headOracleFindings.length;
           headOracleFindings = subtractFindings(
             headOracleFindings,
