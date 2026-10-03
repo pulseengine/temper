@@ -1,5 +1,9 @@
 name: CI
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
   push:
     branches: [main]
@@ -72,6 +76,8 @@ jobs:
           name: sbom
           path: sbom.spdx.json
 
+  # Attest build provenance for main-branch artifacts (consumed by
+  # downstream attestation verifiers).
   provenance:
     runs-on: ubuntu-latest
     needs: [test, lint]
