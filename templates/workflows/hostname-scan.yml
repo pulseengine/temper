@@ -1,0 +1,34 @@
+# Managed by temper (pulseengine/temper). Edits are overwritten on sync;
+# per-repo exceptions go in .github/hostname-scan-allow.txt instead.
+#
+# The job name `hostname-scan` is a required status check. It must run on
+# merge_group too, and must never get a `paths` filter: a required check that
+# does not report hangs the PR / queue entry.
+name: hostname-scan
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [__TEMPER_DEFAULT_BRANCH__]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostname-scan-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  hostname-scan:
+    name: hostname-scan
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pulseengine/temper/.github/actions/hostname-scan@__TEMPER_PIN__
+        with:
+          denylist: ${{ secrets.HOSTNAME_SCAN_DENYLIST }}
