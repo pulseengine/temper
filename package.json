@@ -8,11 +8,12 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "test": "jest --config jest.config.cjs",
-    "lint": "eslint src/ index.js functions.js __tests__/",
+    "lint": "eslint src/ index.js functions.js __tests__/ scripts/",
     "build": "bazel build //...",
     "bazel:test": "bazel test //...",
     "docker:build": "docker build -t temper .",
-    "setup": "node scripts/setup.js"
+    "setup": "node scripts/setup.js",
+    "plan": "node scripts/cli.js plan"
   },
   "keywords": [
     "github",

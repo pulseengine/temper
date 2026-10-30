@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { normalizeRepoInput, getDefaultBranch } from './helpers.js';
 import { getLogger } from './logger.js';
 import {
@@ -11,6 +14,7 @@ import {
 } from './config.js';
 import { applyBranchProtection } from './branch-protection.js';
 import { applyRulesetFromBranchProtection } from './rulesets.js';
+import { getStandards, fetchSnapshot, enforceStandards } from './standards.js';
 import { applyTemplates, applyCodeowners } from './templates.js';
 import { synchronizeIssueLabels } from './labels.js';
 import {
@@ -18,6 +22,32 @@ import {
   checkExistingDependabotConfig,
   fixDependabotPRLabels
 } from './dependabot.js';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const readTemplate = (rel) => fs.readFileSync(path.resolve(ROOT, rel), 'utf8');
+
+/**
+ * Apply the org standards (config.yml `standards:`) to one repo. Forks keep the
+ * pre-standards behaviour (fork_overrides via applyBranchEnforcement) unless
+ * `standards.include_forks` is set; private repos on GitHub Free are skipped
+ * for branch enforcement, which their plan does not expose.
+ */
+async function applyStandards(octokit, owner, repo, defaultBranch, protectionConfig, std, { skipWorkflows }) {
+  const snap = await fetchSnapshot(octokit, owner, repo);
+  const stdForRun = skipWorkflows ? { ...std, required_workflows: [] } : std;
+  const { evaluation, actions } = await enforceStandards(octokit, owner, protectionConfig, snap, stdForRun, {
+    readTemplate
+  });
+  if (evaluation.scope === 'fork') {
+    const legacy = await applyBranchEnforcement(octokit, owner, repo, defaultBranch, protectionConfig);
+    return { mode: 'fork', legacy };
+  }
+  if (evaluation.scope === 'unenforceable') {
+    getLogger().warn(`Standards not enforceable on ${owner}/${repo}: ${evaluation.blocker}`);
+  }
+  for (const a of actions) getLogger().info(`standards ${owner}/${repo}: ${a}`);
+  return { mode: 'standards', scope: evaluation.scope, actions };
+}
 
 /**
  * Apply branch-level enforcement (rulesets when enabled, legacy branch protection
@@ -105,7 +135,14 @@ async function configureRepository(
       const protectionConfig = mergePullRequestRules(
         getBranchProtectionConfig(repoInfo) || {}
       );
-      await applyBranchEnforcement(octokit, owner, repo, defaultBranch, protectionConfig);
+      const std = getStandards(config);
+      if (std.enabled) {
+        await applyStandards(octokit, owner, repo, defaultBranch, protectionConfig, std, {
+          skipWorkflows: skipBranchScopedWork
+        });
+      } else {
+        await applyBranchEnforcement(octokit, owner, repo, defaultBranch, protectionConfig);
+      }
     }
 
     const targetLabels = getTargetIssueLabels();

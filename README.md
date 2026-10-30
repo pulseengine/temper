@@ -129,8 +129,18 @@ All behavior is controlled by [`config.yml`](config.yml). Key sections:
 | `templates` / `codeowners` | PR/issue templates and CODEOWNERS paths |
 | `ai_review` | AI review endpoint, model, prompt, and limits |
 | `auto_merge` | Auto-merge rules for Dependabot and bot PRs |
+| `standards` | The org floor: binding required checks, no admin bypass, signed commits, update-branch settings, release-tag rulesets, required workflows (hostname-scan), per-repo check overrides |
 
 See the file itself for the full schema and defaults.
+
+### Dry-run before any sync
+
+`node scripts/cli.js plan` reports, per repo, the drift from `standards` and
+the exact writes a sync would send — and sends none of them. It runs temper's
+real apply code against an octokit that passes reads through (throttled to
+1 req/s, `--cache DIR` to persist them) and records every write. A plain
+token is enough: `GITHUB_TOKEN=$(gh auth token) node scripts/cli.js plan --repo kiln`.
+`node scripts/cli.js audit --snapshots DIR` evaluates a saved sweep offline.
 
 ## Development
 

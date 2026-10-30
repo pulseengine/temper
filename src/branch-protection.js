@@ -5,12 +5,18 @@ async function applyBranchProtection(octokit, owner, repo, branch, protectionCon
   try {
     getLogger().info(`Applying branch protection to ${owner}/${repo}@${branch}`);
 
+    // PUT replaces classic protection wholesale. Keep the contexts the repo
+    // already requires, or a sync would silently empty a per-repo gate
+    // (e.g. a 19-context list) down to the org's empty default.
+    const existingContexts = await getExistingContexts(octokit, owner, repo, branch);
     const requiredStatusChecks =
       protectionConfig.required_status_checks === null
         ? null
         : {
             strict: protectionConfig.required_status_checks?.strict || false,
-            contexts: protectionConfig.required_status_checks?.contexts || []
+            contexts: [
+              ...new Set([...(protectionConfig.required_status_checks?.contexts || []), ...existingContexts])
+            ]
           };
 
     await octokit.request('PUT /repos/{owner}/{repo}/branches/{branch}/protection', {
@@ -35,6 +41,21 @@ async function applyBranchProtection(octokit, owner, repo, branch, protectionCon
     getLogger().info(`✅ Branch protection applied to ${owner}/${repo}`);
   } catch (error) {
     getLogger().error(`❌ Error applying branch protection to ${owner}/${repo}:`, error.message);
+    throw error;
+  }
+}
+
+async function getExistingContexts(octokit, owner, repo, branch) {
+  try {
+    const { data } = await octokit.request('GET /repos/{owner}/{repo}/branches/{branch}/protection', {
+      owner,
+      repo,
+      branch
+    });
+    const rsc = data?.required_status_checks;
+    return [...(rsc?.contexts || []), ...(rsc?.checks || []).map((c) => c.context)];
+  } catch (error) {
+    if (error.status === 404) return [];
     throw error;
   }
 }

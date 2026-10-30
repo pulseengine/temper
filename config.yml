@@ -18,6 +18,12 @@ settings:
     allow_rebase_merge: false
     delete_branch_on_merge: true
     allow_auto_merge: true
+    # "Always suggest updating pull request branches" off. The button's rebase
+    # mode rewrites a PR's signed commits unsigned (merge then BLOCKED on
+    # required signatures, pulseengine.eu#236); the merge queue already tests
+    # every entry against the latest main. The API endpoint itself stays
+    # callable — no repo setting can block it.
+    allow_update_branch: false
 
 forks:
   merge:
@@ -58,6 +64,70 @@ branch_protection:
     allow_force_pushes: false
     allow_deletions: false
     require_signed_commits: true
+
+# Org standards — the floor temper enforces and reports drift against.
+# `node scripts/cli.js plan` shows, per repo, the drift and the exact writes a
+# sync would make (read-only). Rule numbers match the 2026-10-30 owner decision:
+#   1 never merge around red  -> required_checks + no_bypass
+#   2 signed commits          -> required_signatures
+#   3 update-branch           -> settings.merge.allow_update_branch + queue strict
+#   4 no private hostnames    -> required_workflows: hostname_scan
+#   5 tag only from main      -> tag_protection (WHO may create v* tags; that the
+#                                tagged commit is green is the release workflow's job)
+standards:
+  enabled: true
+  # Forks mirror upstream history; requiring our signatures/checks there would
+  # block syncing. They keep the pre-standards fork_overrides behaviour.
+  include_forks: false
+  required_signatures: true
+  # enforce_admins on classic protection AND no bypass actors on any ruleset
+  # that applies to the default branch.
+  no_bypass: true
+  # Strip bypass actors from repo rulesets temper does not manage. Shown in the
+  # plan per ruleset before any apply.
+  fix_foreign_bypass: true
+  # Non-empty required checks. Temper never invents check names: it carries
+  # the contexts a repo already requires into its managed ruleset (where they
+  # bind admins), or uses standards.repos.<repo>.required_checks.
+  require_status_checks: true
+  require_pull_request: true
+  merge_queue:
+    # Intended queue repos. Audit-only: creating a queue is a per-repo rollout
+    # (every required workflow needs a merge_group trigger first).
+    repos: [pulseengine.eu, rivet, relay, spar, loom, varve, gale, meld]
+    # The queue re-tests against the latest main; strict only adds
+    # update-branch pressure and ~N^2/2 CI runs.
+    strict_up_to_date: false
+  tag_protection:
+    enabled: true
+    include: ["refs/tags/v*"]
+    # Two rulesets (the shape ordeal#186 runs today): one makes release tags
+    # immutable for everyone (no bypass); one restricts creation, and its
+    # bypass list is the allowlist of who may cut a release tag. A repo that
+    # already has an equivalent ruleset is left alone.
+    immutable_name: temper-release-tags-immutable
+    create_name: temper-release-tags-create
+    create_bypass_actors:
+      - actor_type: RepositoryRole   # 5 = admin
+        actor_id: 5
+        bypass_mode: always
+  required_workflows:
+    - name: hostname_scan
+      context: hostname-scan
+      path: .github/workflows/hostname-scan.yml
+      template: templates/workflows/hostname-scan.yml
+      # Commit sha of pulseengine/temper that carries
+      # .github/actions/hostname-scan. Unset until this lands on main; while
+      # unset, the stub is not distributed and the plan reports "blocked".
+      pin: null
+  # Per-repo required checks, where the repo requires none today. Names are
+  # the check runs the repo's PR workflows actually report (verified on main
+  # 2026-10-30). Every other repo carries over what it already requires.
+  repos:
+    temper:
+      required_checks: [test, lint, ci]   # temper#76
+    .github:
+      required_checks: [ci, lint, test]
 
 # Repository Rulesets (modern replacement for legacy branch protection).
 # When enabled, Temper applies a Repository Ruleset derived from

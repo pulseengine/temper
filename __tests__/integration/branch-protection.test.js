@@ -49,8 +49,13 @@ describe('branch-protection', () => {
         enforce_admins: true
       });
 
-      // Only the PUT call should have been made, no POST/DELETE for signatures
-      expect(octokit.request).toHaveBeenCalledTimes(1);
+      // A GET of the existing protection (to keep its contexts) and the PUT;
+      // no POST/DELETE for signatures.
+      const routes = octokit.request.mock.calls.map((c) => c[0]);
+      expect(routes).toEqual([
+        'GET /repos/{owner}/{repo}/branches/{branch}/protection',
+        'PUT /repos/{owner}/{repo}/branches/{branch}/protection'
+      ]);
       expect(octokit.request).toHaveBeenCalledWith(
         'PUT /repos/{owner}/{repo}/branches/{branch}/protection',
         expect.anything()
@@ -98,5 +103,37 @@ describe('branch-protection', () => {
       octokit.request.mockRejectedValue(error);
       await expect(setRequiredSignatures(octokit, 'o', 'r', 'main', true)).rejects.toThrow('Server error');
     });
+  });
+});
+
+describe('applyBranchProtection keeps per-repo contexts', () => {
+  it('unions the contexts the branch already requires into the PUT (never wipes them)', async () => {
+    const octokit = {
+      request: jest.fn().mockImplementation((route) => {
+        if (route.startsWith('GET ')) {
+          return Promise.resolve({
+            data: { required_status_checks: { contexts: ['Format', 'Test'], checks: [{ context: 'Miri' }] } }
+          });
+        }
+        return Promise.resolve({ status: 200, data: {} });
+      })
+    };
+    await applyBranchProtection(octokit, 'o', 'r', 'main', {
+      required_status_checks: { strict: true, contexts: [] }
+    });
+    const put = octokit.request.mock.calls.find((c) => c[0].startsWith('PUT '));
+    expect(put[1].required_status_checks.contexts.sort()).toEqual(['Format', 'Miri', 'Test']);
+  });
+
+  it('treats an unprotected branch (404) as no existing contexts', async () => {
+    const octokit = {
+      request: jest.fn().mockImplementation((route) => {
+        if (route.startsWith('GET ')) return Promise.reject(Object.assign(new Error('nf'), { status: 404 }));
+        return Promise.resolve({ status: 200, data: {} });
+      })
+    };
+    await applyBranchProtection(octokit, 'o', 'r', 'main', { required_status_checks: { contexts: ['ci'] } });
+    const put = octokit.request.mock.calls.find((c) => c[0].startsWith('PUT '));
+    expect(put[1].required_status_checks.contexts).toEqual(['ci']);
   });
 });

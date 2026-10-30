@@ -44,6 +44,24 @@ async function pLimitMap(items, concurrency, fn) {
 
 const SYNC_CONCURRENCY = 3;
 
+/**
+ * The repos a sync configures. Shared with the dry-run planner so the plan
+ * covers exactly the set an apply would touch.
+ */
+function selectSyncTargets(repos) {
+  return repos.filter((repo) => {
+    if (repo.archived) {
+      getLogger().info(`Skipping archived repository: ${repo.full_name}`);
+      return false;
+    }
+    if (isControlSurfaceRepo(repo.full_name)) {
+      getLogger().info(`Skipping control-surface repository: ${repo.full_name}`);
+      return false;
+    }
+    return true;
+  });
+}
+
 async function synchronizeAllRepositories(octokit, org) {
   try {
     getLogger().info(`Starting synchronization for organization: ${org}`);
@@ -56,17 +74,7 @@ async function synchronizeAllRepositories(octokit, org) {
 
     getLogger().info(`Found ${repos.length} repositories to synchronize (concurrency=${SYNC_CONCURRENCY})`);
 
-    const todo = repos.filter((repo) => {
-      if (repo.archived) {
-        getLogger().info(`Skipping archived repository: ${repo.full_name}`);
-        return false;
-      }
-      if (isControlSurfaceRepo(repo.full_name)) {
-        getLogger().info(`Skipping control-surface repository: ${repo.full_name}`);
-        return false;
-      }
-      return true;
-    });
+    const todo = selectSyncTargets(repos);
 
     await pLimitMap(todo, SYNC_CONCURRENCY, async (repo) => {
       getLogger().info(`Processing repository: ${repo.full_name}`);
@@ -370,6 +378,7 @@ async function generateOrganizationAnalysisReport(octokit, org) {
 }
 
 export {
+  selectSyncTargets,
   checkOrganizationMembership,
   synchronizeAllRepositories,
   analyzeOrganizationRepositories,
