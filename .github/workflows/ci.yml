@@ -39,7 +39,24 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
-      - run: npx eslint src/ index.js functions.js __tests__/
+      - run: npx eslint src/ index.js functions.js __tests__/ scripts/
+
+  # The org hostname scanner temper distributes (rule 4): its own tests, the
+  # Python 3.9 floor checked mechanically, then the action run on this repo's
+  # own diff — temper is the first repo the check gates.
+  hostname-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scanner self-test
+        run: python3 -m unittest discover -s .github/actions/hostname-scan -p 'test_*.py' -v
+      - name: Python 3.9 floor
+        run: pipx run --spec vermin==1.9.2 vermin -t=3.9- --no-tips --violations .github/actions/hostname-scan/
+      - name: Scan this change
+        uses: ./.github/actions/hostname-scan
 
   ci:
     runs-on: ubuntu-latest

@@ -186,3 +186,42 @@ describe('applyRulesetFromBranchProtection', () => {
     expect(result.action).toBe('created');
   });
 });
+
+describe('rulesetsMatch sees bypass actors and target', () => {
+  const base = translateBranchProtectionToRuleset({ require_signed_commits: true });
+
+  it('matches itself (positive control)', () => {
+    expect(rulesetsMatch({ ...base }, base)).toBe(true);
+  });
+
+  it('an admin bypass on otherwise identical rules is drift', () => {
+    const actual = {
+      ...base,
+      bypass_actors: [{ actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: 'always' }]
+    };
+    expect(rulesetsMatch(actual, base)).toBe(false);
+  });
+
+  it('a tag ruleset never matches a branch ruleset of the same rules', () => {
+    expect(rulesetsMatch({ ...base, target: 'tag' }, base)).toBe(false);
+  });
+});
+
+describe('rulesetsMatch ignores parameters GitHub adds on its own', () => {
+  const desired = translateBranchProtectionToRuleset({ required_pull_request_reviews: {} });
+
+  it('extra server-side defaults are not drift', () => {
+    const actual = structuredClone(desired);
+    Object.assign(actual.rules.find((r) => r.type === 'pull_request').parameters, {
+      allowed_merge_methods: ['merge', 'squash', 'rebase'],
+      required_reviewers: []
+    });
+    expect(rulesetsMatch(actual, desired)).toBe(true);
+  });
+
+  it('a changed parameter temper sets is still drift', () => {
+    const actual = structuredClone(desired);
+    actual.rules.find((r) => r.type === 'pull_request').parameters.required_approving_review_count = 2;
+    expect(rulesetsMatch(actual, desired)).toBe(false);
+  });
+});

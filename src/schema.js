@@ -1,3 +1,5 @@
+import { validateStandards } from './standards-schema.js';
+
 export function validateConfig(config) {
   const errors = [];
 
@@ -19,7 +21,14 @@ export function validateConfig(config) {
 
   if (config.settings?.merge) {
     const merge = config.settings.merge;
-    const boolFields = ['allow_merge_commit', 'allow_squash_merge', 'allow_rebase_merge', 'delete_branch_on_merge'];
+    const boolFields = [
+      'allow_merge_commit',
+      'allow_squash_merge',
+      'allow_rebase_merge',
+      'delete_branch_on_merge',
+      'allow_auto_merge',
+      'allow_update_branch'
+    ];
     for (const field of boolFields) {
       if (merge[field] !== undefined && typeof merge[field] !== 'boolean') {
         errors.push(`settings.merge.${field} must be a boolean`);
@@ -221,6 +230,8 @@ export function validateConfig(config) {
       }
     }
   }
+
+  errors.push(...validateStandards(config));
 
   return { valid: errors.length === 0, errors };
 }

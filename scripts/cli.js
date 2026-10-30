@@ -5,12 +5,18 @@ import { createAppAuth } from '@octokit/auth-app';
 import { Octokit } from '@octokit/rest';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenvConfig({ path: path.join(__dirname, '..', '.env'), quiet: true });
 
 // ── Octokit Setup ────────────────────────────────────────────────────
 async function getOctokit() {
+  // A plain token (e.g. `GITHUB_TOKEN=$(gh auth token)`) is enough for the
+  // read-only `plan` / `org` / `repo` commands; the App is used otherwise.
+  if (process.env.GITHUB_TOKEN && !process.env.APP_ID) {
+    return new Octokit({ auth: process.env.GITHUB_TOKEN });
+  }
   const appId = process.env.APP_ID;
   const privateKey = (process.env.PRIVATE_KEY || '').replace(/\\n/g, '\n');
   const org = process.env.ORGANIZATION || 'pulseengine';
@@ -224,6 +230,46 @@ async function cmdSync(octokit, org) {
   }
 }
 
+// ── Plan (dry-run) ───────────────────────────────────────────────────
+
+function flag(args, name, fallback = null) {
+  const i = args.indexOf(name);
+  return i >= 0 && args[i + 1] !== undefined ? args[i + 1] : fallback;
+}
+
+async function cmdPlan(octokit, org, args) {
+  const { planOrg, renderPlan } = await import('../src/plan.js');
+  const { setLogger } = await import('../src/logger.js');
+  const pino = (await import('pino')).default;
+  setLogger(pino({ level: process.env.LOG_LEVEL || 'silent' }));
+  const repos = flag(args, '--repo') ? flag(args, '--repo').split(',') : null;
+  const plan = await planOrg(octokit, org, {
+    repos,
+    cacheDir: flag(args, '--cache'),
+    minIntervalMs: Number(flag(args, '--interval', '1000'))
+  });
+  process.stdout.write(renderPlan(plan.results, { showOk: args.includes('--all') }));
+  const writes = plan.results.reduce((n, r) => n + r.writes.length, 0);
+  const drifted = plan.results.filter((r) => r.drift).length;
+  console.log(`\n${plan.results.length} repos, ${drifted} with drift, ${writes} planned write(s); ` +
+    `${plan.stats.live} live GET(s), ${plan.stats.cached} cached. Nothing was sent.`);
+  if (flag(args, '--json')) fs.writeFileSync(flag(args, '--json'), JSON.stringify(plan, null, 2));
+  if (args.includes('--fail-on-drift') && drifted > 0) process.exitCode = 3;
+}
+
+async function cmdAudit(org, args) {
+  const { auditSnapshots, renderPlan } = await import('../src/plan.js');
+  const dir = flag(args, '--snapshots');
+  if (!dir) throw new Error('audit needs --snapshots <dir>');
+  const repos = flag(args, '--repo') ? flag(args, '--repo').split(',') : null;
+  const results = auditSnapshots(dir, { repos });
+  process.stdout.write(renderPlan(results, { showOk: args.includes('--all') }));
+  const drifted = results.filter((r) => r.drift).length;
+  console.log(`\n${results.length} repos, ${drifted} with drift (offline audit of ${dir}).`);
+  if (flag(args, '--json')) fs.writeFileSync(flag(args, '--json'), JSON.stringify(results, null, 2));
+  if (args.includes('--fail-on-drift') && drifted > 0) process.exitCode = 3;
+}
+
 // ── Main ─────────────────────────────────────────────────────────────
 async function main() {
   const args = process.argv.slice(2);
@@ -238,13 +284,19 @@ async function main() {
     node scripts/cli.js org health     Summary of all repos
     node scripts/cli.js org repos      Detailed per-repo table
     node scripts/cli.js repo check <n> Check a single repo
-    node scripts/cli.js sync           Sync all repos to config
+    node scripts/cli.js sync           Sync all repos to config (WRITES)
+    node scripts/cli.js plan [--repo a,b] [--cache DIR] [--json FILE] [--all] [--fail-on-drift]
+                                       Dry-run: drift + the writes a sync would make (sends nothing)
+    node scripts/cli.js audit --snapshots DIR [--repo a,b] [--json FILE] [--all] [--fail-on-drift]
+                                       Offline drift report from a sweep cache
 `);
     process.exit(0);
   }
 
   const org = process.env.ORGANIZATION || 'pulseengine';
+  if (cmd === 'audit') return cmdAudit(org, args);
   const octokit = await getOctokit();
+  if (cmd === 'plan') return cmdPlan(octokit, org, args);
 
   if (cmd === 'org' && sub === 'health') return cmdOrgHealth(octokit, org);
   if (cmd === 'org' && sub === 'repos') return cmdOrgRepos(octokit, org);

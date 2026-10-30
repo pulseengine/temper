@@ -1,0 +1,59 @@
+name: hostname-scan
+description: >
+  Fail when a change adds a private-network hostname or address (mDNS/LAN
+  names, tailnet names, RFC 1918 / CGNAT / link-local IPv4, ULA / link-local
+  IPv6, or a name from the run-time denylist). Findings are redacted in the log.
+  Requires a checkout with full history (fetch-depth: 0).
+
+inputs:
+  mode:
+    description: "diff (default: lines added by this PR / queue entry / push), all, or history"
+    required: false
+    default: diff
+  allowlist:
+    description: Repo-relative allowlist file (path:<glob> / value:<regex> lines)
+    required: false
+    default: .github/hostname-scan-allow.txt
+  denylist:
+    description: >
+      Newline-separated regular expressions for names that must never appear
+      (pass an org secret; never commit real names).
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Scan for private hostnames and addresses
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        ALLOWLIST: ${{ inputs.allowlist }}
+        HOSTNAME_SCAN_DENYLIST: ${{ inputs.denylist }}
+        EVENT: ${{ github.event_name }}
+        PR_BASE: ${{ github.event.pull_request.base.sha }}
+        PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        MQ_BASE: ${{ github.event.merge_group.base_sha }}
+        MQ_HEAD: ${{ github.event.merge_group.head_sha }}
+        PUSH_BEFORE: ${{ github.event.before }}
+        PUSH_AFTER: ${{ github.event.after }}
+        SCANNER: ${{ github.action_path }}/hostname_scan.py
+      run: |
+        set -euo pipefail
+        case "$MODE" in
+          all) exec python3 "$SCANNER" --all --allowlist "$ALLOWLIST" ;;
+          history) exec python3 "$SCANNER" --history --allowlist "$ALLOWLIST" ;;
+          diff) ;;
+          *) echo "::error::hostname-scan: unknown mode '$MODE'"; exit 2 ;;
+        esac
+        case "$EVENT" in
+          pull_request|pull_request_target) base=$PR_BASE head=$PR_HEAD ;;
+          merge_group) base=$MQ_BASE head=$MQ_HEAD ;;
+          push) base=$PUSH_BEFORE head=$PUSH_AFTER ;;
+          *) base="" head="" ;;
+        esac
+        # A new branch push has no "before"; scan the whole tree instead.
+        if [ -z "$base" ] || [ "$base" = 0000000000000000000000000000000000000000 ]; then
+          exec python3 "$SCANNER" --all --allowlist "$ALLOWLIST"
+        fi
+        exec python3 "$SCANNER" --diff "$base" "$head" --allowlist "$ALLOWLIST"
