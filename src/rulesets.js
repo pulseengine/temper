@@ -119,7 +119,18 @@ export function rulesetsMatch(actual, desired) {
   if (JSON.stringify(canonicalize(actual.conditions)) !== JSON.stringify(canonicalize(desired.conditions))) {
     return false;
   }
-  if (JSON.stringify(normalizeRules(actual.rules)) !== JSON.stringify(normalizeRules(desired.rules))) {
+  // GitHub fills in parameters temper never sets (allowed_merge_methods,
+  // required_reviewers, ...). Compare only the parameters temper specifies,
+  // or every sync re-PUTs an unchanged ruleset.
+  const wanted = new Map((desired.rules || []).map((r) => [r.type, r.parameters]));
+  const projected = (actual.rules || []).map((r) => {
+    const want = wanted.get(r.type);
+    if (!want || !r.parameters) return r;
+    const parameters = {};
+    for (const k of Object.keys(want)) parameters[k] = r.parameters[k];
+    return { type: r.type, parameters };
+  });
+  if (JSON.stringify(normalizeRules(projected)) !== JSON.stringify(normalizeRules(desired.rules))) {
     return false;
   }
   return true;
