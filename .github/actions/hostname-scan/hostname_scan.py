@@ -2,8 +2,9 @@
 """hostname-scan: refuse private-network hostnames and addresses in a repo.
 
 A public repo must not carry the shape of a private network: mDNS/LAN host
-names (``*.local``, ``*.lan``, ``*.internal``, ``*.home.arpa``, consumer-router
-domains such as ``*.fritz.box`` ...), tailnet names (``*.ts.net``), RFC 1918 / CGNAT / link-local IPv4, and ULA / link-local
+names (``*.local``, ``*.lan``, ``*.internal``, ``*.home.arpa``,
+consumer-router domains such as ``*.fritz.box`` ...), tailnet names
+(``*.ts.net``), RFC 1918 / CGNAT / link-local IPv4, and ULA / link-local
 IPv6. Real home-network names are NOT listed here -- they would leak the very
 thing this check exists to keep out. Supply them at run time through the
 ``HOSTNAME_SCAN_DENYLIST`` environment variable (newline-separated regular
@@ -72,16 +73,17 @@ CODE_RECEIVERS = {"self", "this", "cls", "super", "threading", "os", "ctx", "con
 IPV4_RE = re.compile(r"(?<![\d.])((?:\d{1,3}\.){3}\d{1,3})(?![\d]|\.\d)")
 IPV6_CANDIDATE_RE = re.compile(r"(?<![0-9a-f:])([0-9a-f]{1,4}(?::[0-9a-f]{0,4}){2,7})", re.IGNORECASE)
 
+# The range definitions themselves are the one place these prefixes belong.
 IPV4_NETS = (
-    ("rfc1918-ipv4", ipaddress.ip_network("10.0.0.0/8")),
-    ("rfc1918-ipv4", ipaddress.ip_network("172.16.0.0/12")),
-    ("rfc1918-ipv4", ipaddress.ip_network("192.168.0.0/16")),
-    ("cgnat-ipv4", ipaddress.ip_network("100.64.0.0/10")),
-    ("link-local-ipv4", ipaddress.ip_network("169.254.0.0/16")),
+    ("rfc1918-ipv4", ipaddress.ip_network("10.0.0.0/8")),  # hostname-scan: allow
+    ("rfc1918-ipv4", ipaddress.ip_network("172.16.0.0/12")),  # hostname-scan: allow
+    ("rfc1918-ipv4", ipaddress.ip_network("192.168.0.0/16")),  # hostname-scan: allow
+    ("cgnat-ipv4", ipaddress.ip_network("100.64.0.0/10")),  # hostname-scan: allow
+    ("link-local-ipv4", ipaddress.ip_network("169.254.0.0/16")),  # hostname-scan: allow
 )
 IPV6_NETS = (
-    ("ula-ipv6", ipaddress.ip_network("fc00::/7")),
-    ("link-local-ipv6", ipaddress.ip_network("fe80::/10")),
+    ("ula-ipv6", ipaddress.ip_network("fc00::/7")),  # hostname-scan: allow
+    ("link-local-ipv6", ipaddress.ip_network("fe80::/10")),  # hostname-scan: allow
 )
 
 
