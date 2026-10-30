@@ -53,6 +53,8 @@ describe('planOrg (dry-run)', () => {
 
     const fork = plan.results.find((r) => r.repo === 'up');
     expect(fork.scope).toBe('fork');
+    // Forks: merge settings / labels only, never a branch or tag ruleset.
+    expect(fork.writes.filter((w) => w.url.includes('/rulesets') || w.url.includes('/protection'))).toEqual([]);
 
     const text = renderPlan(plan.results);
     expect(text).toMatch(/## bare — enforced, DRIFT/);

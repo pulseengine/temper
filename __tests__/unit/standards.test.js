@@ -155,8 +155,8 @@ describe('evaluateRepo', () => {
     expect(hasDrift(evaluateRepo(compliantSnapshot(), std()))).toBe(false);
   });
 
-  it('kiln shape: classic enforce_admins off + an inert ruleset = admin bypass, checks not binding', () => {
-    const snap = compliantSnapshot('kiln');
+  it('classic enforce_admins off + an inert ruleset = admin bypass, checks not binding', () => {
+    const snap = compliantSnapshot('r1');
     snap.protection.body.enforce_admins.enabled = false;
     snap.protection.body.required_pull_request_reviews = null;
     snap.rulesets.items = [{ id: 7, name: 'main', target: 'branch', enforcement: 'active',
@@ -193,9 +193,9 @@ describe('evaluateRepo', () => {
   });
 
   it('queue repo: strict up-to-date is drift only once the queue is live', () => {
-    const snap = compliantSnapshot('spar');
+    const snap = compliantSnapshot('q');
     snap.protection.body.required_status_checks.strict = true;
-    const s = std({ merge_queue_repos: ['spar'] });
+    const s = std({ merge_queue_repos: ['q'] });
     let ev = evaluateRepo(snap, s);
     expect(drifted(ev)).toEqual(['merge_queue']);
     expect(ev.findings.find((f) => f.rule === 'update_branch' && f.intended.startsWith('strict')).note)
@@ -213,8 +213,8 @@ describe('evaluateRepo', () => {
     expect(drifted(evaluateRepo(snap, std()))).toEqual(['update_branch']);
   });
 
-  it('varve shape: immutable tags without a creation restriction is partial', () => {
-    const snap = compliantSnapshot('varve');
+  it('immutable tags without a creation restriction is partial', () => {
+    const snap = compliantSnapshot('r2');
     snap.rulesets.items = snap.rulesets.items.filter((r) => r.id !== 902);
     const f = evaluateRepo(snap, std()).findings.find((x) => x.rule === 'tag_protection');
     expect(f).toMatchObject({ drift: true, note: 'missing: creation restricted' });
@@ -236,7 +236,7 @@ describe('evaluateRepo', () => {
   });
 
   it('private repo on GitHub Free is unenforceable, but repo settings are still evaluated', () => {
-    const snap = compliantSnapshot('smithy');
+    const snap = compliantSnapshot('priv');
     const msg = 'gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)';
     snap.repo.body.private = true;
     snap.repo.body.allow_auto_merge = false;
@@ -257,13 +257,28 @@ describe('evaluateRepo', () => {
   });
 
   it('forks are out of scope by default; archived repos are skipped', () => {
-    const fork = compliantSnapshot('wasmtime');
+    const fork = compliantSnapshot('upstream-fork');
     fork.repo.body.fork = true;
     expect(evaluateRepo(fork, std())).toMatchObject({ scope: 'fork', findings: [] });
     expect(evaluateRepo(fork, std({ include_forks: true })).scope).toBe('enforced');
     const arch = compliantSnapshot('old');
     arch.repo.body.archived = true;
     expect(evaluateRepo(arch, std()).scope).toBe('archived');
+  });
+
+  it('report_only: findings are reported but nothing is enforced', async () => {
+    const snap = compliantSnapshot('held');
+    snap.protection.body.enforce_admins.enabled = false;
+    const s = std({ repos: { held: { report_only: 'bot pushes to main' } } });
+    const ev = evaluateRepo(snap, s);
+    expect(ev).toMatchObject({ scope: 'held', blocker: 'report-only: bot pushes to main' });
+    expect(drifted(ev)).toContain('no_bypass');
+    const kit = recordingOctokit();
+    expect((await enforceStandards(kit, 'o', REPO_CONFIG.branch_protection.default, snap, s, {})).actions).toEqual([]);
+    expect(kit.calls).toEqual([]);
+    expect(validateStandards({ branch_protection: { default: { enforce_admins: true, require_signed_commits: true } },
+      standards: { enabled: true, repos: { x: { report_only: '' } } } }))
+      .toEqual(['standards.repos.x.report_only must be a non-empty reason string']);
   });
 
   it('hostname-scan: absent stub with no pin is blocked; with a pin it is auto', () => {
@@ -330,8 +345,8 @@ function recordingOctokit(existingRulesets = []) {
 describe('enforceStandards', () => {
   const bp = REPO_CONFIG.branch_protection.default;
 
-  it('kiln shape: narrow legacy fixes, managed ruleset with carried contexts, tag rulesets; never PUT protection', async () => {
-    const snap = compliantSnapshot('kiln');
+  it('classic bypass: narrow legacy fixes, managed ruleset with carried contexts, tag rulesets; never PUT protection', async () => {
+    const snap = compliantSnapshot('r1');
     snap.protection.body.enforce_admins.enabled = false;
     snap.rulesets.items = [];
     snap.branchRules.body = [];
@@ -375,11 +390,11 @@ describe('enforceStandards', () => {
   });
 
   it('switches classic strict off on a live queue repo via the narrow endpoint', async () => {
-    const snap = compliantSnapshot('spar');
+    const snap = compliantSnapshot('q');
     snap.protection.body.required_status_checks.strict = true;
     snap.branchRules.body.push({ type: 'merge_queue', ruleset_id: 55 });
     const kit = recordingOctokit([snap.rulesets.items[0]]);
-    await enforceStandards(kit, 'pulseengine', bp, snap, std({ merge_queue_repos: ['spar'] }), {});
+    await enforceStandards(kit, 'pulseengine', bp, snap, std({ merge_queue_repos: ['q'] }), {});
     const patch = kit.calls.find((c) => c[0] === 'PATCH /repos/{owner}/{repo}/branches/{branch}/protection/required_status_checks');
     expect(patch[1]).toMatchObject({ strict: false });
   });

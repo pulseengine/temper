@@ -27,10 +27,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readTemplate = (rel) => fs.readFileSync(path.resolve(ROOT, rel), 'utf8');
 
 /**
- * Apply the org standards (config.yml `standards:`) to one repo. Forks keep the
- * pre-standards behaviour (fork_overrides via applyBranchEnforcement) unless
- * `standards.include_forks` is set; private repos on GitHub Free are skipped
- * for branch enforcement, which their plan does not expose.
+ * Apply the org standards (config.yml `standards:`) to one repo. Forks get no
+ * branch enforcement unless `standards.include_forks` is set (their default
+ * branch mirrors upstream); private repos on GitHub Free are skipped for
+ * branch enforcement, which their plan does not expose.
  */
 async function applyStandards(octokit, owner, repo, defaultBranch, protectionConfig, std, { skipWorkflows }) {
   const snap = await fetchSnapshot(octokit, owner, repo);
@@ -39,8 +39,10 @@ async function applyStandards(octokit, owner, repo, defaultBranch, protectionCon
     readTemplate
   });
   if (evaluation.scope === 'fork') {
-    const legacy = await applyBranchEnforcement(octokit, owner, repo, defaultBranch, protectionConfig);
-    return { mode: 'fork', legacy };
+    // Report-only: a ruleset requiring our signatures / non-fast-forward on a
+    // fork's default branch breaks syncing it from upstream.
+    getLogger().info(`Standards: ${owner}/${repo} is a fork — branch enforcement skipped (include_forks: false)`);
+    return { mode: 'fork', actions: [] };
   }
   if (evaluation.scope === 'unenforceable') {
     getLogger().warn(`Standards not enforceable on ${owner}/${repo}: ${evaluation.blocker}`);

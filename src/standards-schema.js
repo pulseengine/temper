@@ -38,6 +38,9 @@ export function validateStandards(config = {}) {
     if (r?.required_checks !== undefined && !Array.isArray(r.required_checks)) {
       errors.push(`standards.repos.${name}.required_checks must be an array`);
     }
+    if (r?.report_only !== undefined && (typeof r.report_only !== 'string' || !r.report_only)) {
+      errors.push(`standards.repos.${name}.report_only must be a non-empty reason string`);
+    }
   }
   return errors;
 }

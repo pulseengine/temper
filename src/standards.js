@@ -321,6 +321,12 @@ export function evaluateRepo(snap, std) {
   }
   const f = out.findings;
   const queue = std.merge_queue_repos.includes(st.name);
+  // A repo whose own automation the floor would break: report, never enforce.
+  const hold = std.repos?.[st.name]?.report_only;
+  if (hold) {
+    out.scope = 'held';
+    out.blocker = `report-only: ${hold}`;
+  }
 
   // Repo settings work on every plan, so they are evaluated even when blocked.
   const m = std.merge;

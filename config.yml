@@ -77,7 +77,8 @@ branch_protection:
 standards:
   enabled: true
   # Forks mirror upstream history; requiring our signatures/checks there would
-  # block syncing. They keep the pre-standards fork_overrides behaviour.
+  # block syncing. With this false, forks get merge settings and labels only —
+  # no branch or tag rulesets (existing ones are left as they are).
   include_forks: false
   required_signatures: true
   # enforce_admins on classic protection AND no bypass actors on any ruleset
@@ -128,6 +129,14 @@ standards:
       required_checks: [test, lint, ci]   # temper#76
     .github:
       required_checks: [ci, lint, test]
+    # report_only: drift is reported, nothing is enforced, until the reason
+    # is resolved and the line removed.
+    pulseengine-layers:
+      report_only: >-
+        deposit.yml (and the layer scanner) commit as github-actions[bot] and
+        push straight to main; a PR + signed-commits ruleset would break the
+        deposit pipeline. Route those commits through PRs (or a signing app
+        identity on a bypass list) first.
 
 # Repository Rulesets (modern replacement for legacy branch protection).
 # When enabled, Temper applies a Repository Ruleset derived from
