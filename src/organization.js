@@ -2,6 +2,7 @@ import { getTargetIssueLabels, isControlSurfaceRepo } from './config.js';
 import { getLogger } from './logger.js';
 import { configureRepository } from './repository.js';
 import { checkExistingDependabotConfig } from './dependabot.js';
+import { findTagPinnedActions } from './action-pinning.js';
 
 async function checkOrganizationMembership(octokit, org, username) {
   try {
@@ -200,6 +201,14 @@ async function analyzeOrganizationRepositories(octokit, org) {
       }
 
       try {
+        const tagPinned = await findTagPinnedActions(octokit, repo.owner.login, repo.name);
+        repoAnalysis.configurations.action_pinning = { tag_pinned_count: tagPinned.length, findings: tagPinned };
+      } catch (error) {
+        getLogger().error(`Error checking action pinning for ${repo.full_name}:`, error.message);
+        repoAnalysis.configurations.action_pinning = { error: error.message };
+      }
+
+      try {
         const currentLabels = await octokit.paginate('GET /repos/{owner}/{repo}/labels', {
           owner: repo.owner.login,
           repo: repo.name,
@@ -264,6 +273,12 @@ async function generateOrganizationAnalysisReport(octokit, org) {
     );
 
     report += `- With Correct Merge Settings: ${correctMergeSettings.length}\n\n`;
+
+    const tagPinnedActions = repos.reduce(
+      (sum, r) => sum + (r.configurations.action_pinning?.tag_pinned_count || 0),
+      0
+    );
+    report += `- Tag-pinned Actions (should be SHA-pinned): ${tagPinnedActions}\n\n`;
 
     const dependabotLabelIssues = repos.reduce(
       (sum, r) => sum + (r.configurations.dependabot?.label_issues || 0),
