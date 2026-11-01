@@ -299,7 +299,28 @@ function buildDependabotYaml(ecosystems, genConfig = {}) {
     labels
   }));
 
-  return { version: 2, updates };
+  // One PR per logical release across all directories. Version-locked families
+  // (wasm-tools, wasmtime) and all github-actions pins in / must not split into
+  // one PR per directory — on loom/witness/mcp/relay/rules_wasm_component a single
+  // upstream release arrived as 4-8 PRs because each directory got its own.
+  const groups = {
+    'wasm-tools-family': {
+      patterns: [
+        'wasmparser',
+        'wasm-encoder',
+        'wasmprinter',
+        'wit-component',
+        'wit-parser',
+        'wasm-metadata',
+        'wat',
+        'walrus'
+      ]
+    },
+    wasmtime: { patterns: ['wasmtime', 'wasmtime-*'] },
+    'github-actions-all': { 'package-ecosystem': 'github-actions', patterns: ['*'] }
+  };
+
+  return { version: 2, groups, updates };
 }
 
 /**

@@ -722,6 +722,13 @@ describe('dependabot', () => {
       expect(result.version).toBe(2);
       expect(result.updates).toEqual([]);
     });
+
+    it('always emits the standard groups so one release lands as one PR', () => {
+      const result = buildDependabotYaml([{ ecosystem: 'cargo', directory: '/' }]);
+      expect(result.groups['wasm-tools-family'].patterns).toContain('wasmparser');
+      expect(result.groups.wasmtime.patterns).toContain('wasmtime-*');
+      expect(result.groups['github-actions-all']['package-ecosystem']).toBe('github-actions');
+    });
   });
 
   // ---------------------------------------------------------------------------
