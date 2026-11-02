@@ -727,7 +727,7 @@ describe('dependabot', () => {
       const result = buildDependabotYaml([{ ecosystem: 'cargo', directory: '/' }]);
       expect(result.groups['wasm-tools-family'].patterns).toContain('wasmparser');
       expect(result.groups.wasmtime.patterns).toContain('wasmtime-*');
-      expect(result.groups['github-actions-all']['package-ecosystem']).toBe('github-actions');
+      expect(result.groups['github-actions-all'].patterns).toContain('^[^@]+/');
     });
   });
 

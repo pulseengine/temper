@@ -317,7 +317,10 @@ function buildDependabotYaml(ecosystems, genConfig = {}) {
       ]
     },
     wasmtime: { patterns: ['wasmtime', 'wasmtime-*'] },
-    'github-actions-all': { 'package-ecosystem': 'github-actions', patterns: ['*'] }
+    // groups cannot be scoped by package-ecosystem; action names are
+    // owner/name (contain a slash, never start with @), which cargo crates
+    // and unscoped npm packages never match.
+    'github-actions-all': { patterns: ['^[^@]+/'] }
   };
 
   return { version: 2, groups, updates };
