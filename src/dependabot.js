@@ -323,7 +323,10 @@ function buildDependabotYaml(ecosystems, genConfig = {}) {
     'github-actions-all': { patterns: ['^[^@]+/'] }
   };
 
-  return { version: 2, groups, updates };
+  // groups is a per-entry key in dependabot's schema (top-level groups: is
+  // rejected), so it rides on the first updates entry.
+  if (updates.length > 0) updates[0].groups = groups;
+  return { version: 2, updates };
 }
 
 /**
