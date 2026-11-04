@@ -1,0 +1,13 @@
+project:
+  name: temper
+  version: "0.1.0"
+  schemas:
+    - common
+    - dev
+    - stpa
+    - stpa-sec
+    - cybersecurity
+
+sources:
+  - path: artifacts
+    format: generic-yaml

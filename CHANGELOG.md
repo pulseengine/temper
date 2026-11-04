@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — rivet traceability and the varve layer
+- `varve.toml` pins realm `pulseengine`, layer `2026.11.0` (rivet 0.41.1);
+  `varve-realms.toml` carries the realm's registry and trust root.
+- `rivet.yaml` and `artifacts/`: STPA-Sec analysis (7 losses, 10 hazards,
+  13 constraints, 8 controllers, 15 control actions, 13 UCAs, 12
+  scenarios), 29 requirements (16 in v1.1.0, 9 in v1.2.0, 4 backlog),
+  3 features, 6 verifications backed by existing tests.
+- CI job `rivet`: installs varve v0.44.0 verified (cosign + sums), lays down
+  the pinned layer, runs `rivet validate` and `rivet check bidirectional`.
+
 ### Added — AI review hardening (PR-A)
 - **`src/ai-review-prompt.js`**: strict-JSON contract + parser + slop filter +
   quote-or-die + verdict-from-findings. New default for AI review on PRs.

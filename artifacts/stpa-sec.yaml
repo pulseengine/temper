@@ -1,0 +1,1144 @@
+# STPA-Sec for temper — initial pass (2026-11-04), revised after a clean-room
+# soundness review the same day. Status draft until a maintainer reviews it.
+#
+# temper is a GitHub App holding org-wide write on repository settings,
+# branch protection, contents and pull requests. It redeploys itself on every
+# push to a repo named like its own (src/app.js push handler ->
+# src/self-update.js -> tools/self-update). What temper gets wrong, it gets
+# wrong in every repository at once.
+#
+# Attacker model:
+#   external-network  any GitHub user who can open a PR (incl. from a fork),
+#                     issue or comment on an org repo, so controls diff
+#                     content, rivet.yaml, comment text and PR metadata; also
+#                     anyone who can reach temper's HTTP port.
+#   supply-chain      an upstream package, crate or action whose release
+#                     reaches temper or an org repo through a bot PR.
+#   insider           an org member or a compromised maintainer account with
+#                     write on config.yml or temper's main; also covers
+#                     misconfiguration by the owner.
+
+artifacts:
+  # ── Losses ──────────────────────────────────────────────────────────────
+  - id: SL-001
+    type: sec-loss
+    title: Unreviewed or malicious code lands on a protected branch of an org repository
+    status: draft
+    fields:
+      cia-impact: [integrity]
+      stakeholders: [org maintainers, downstream users of pulseengine releases]
+
+  - id: SL-002
+    type: sec-loss
+    title: An org repository's security posture is weakened without the owner knowing
+    status: draft
+    description: >
+      Branch protection, signed-commit, required-check or merge settings are
+      below the org standard while dashboards and reports say otherwise.
+    fields:
+      cia-impact: [integrity]
+      stakeholders: [org owner, auditors relying on temper reports]
+
+  - id: SL-003
+    type: sec-loss
+    title: temper's credentials are disclosed or used by someone else
+    status: draft
+    description: >
+      GitHub App private key, installation tokens, WEBHOOK_SECRET,
+      DASHBOARD_TOKEN, or temper's on-disk stores (dedup.db, tasks.db,
+      reviews.json) are read or driven by a party other than temper.
+    fields:
+      cia-impact: [confidentiality, integrity]
+      stakeholders: [org owner]
+
+  - id: SL-004
+    type: sec-loss
+    title: Development across the org is blocked
+    status: draft
+    description: >
+      Repositories cannot merge, CI cannot run, or bot updates stop, because
+      of settings or files temper applied.
+    fields:
+      cia-impact: [availability]
+      stakeholders: [org maintainers, agents working the org]
+
+  - id: SL-005
+    type: sec-loss
+    title: Reviewers act on false statements temper posted about a pull request
+    status: draft
+    fields:
+      cia-impact: [integrity]
+      stakeholders: [PR reviewers, PR authors]
+
+  - id: SL-006
+    type: sec-loss
+    title: Private-repository content is disclosed outside the org
+    status: draft
+    description: >
+      PR titles, branch names, authors, file trees, diffs or review history
+      of private repositories reach unauthenticated readers or a remote
+      model endpoint.
+    fields:
+      cia-impact: [confidentiality]
+      stakeholders: [org owner, private-repo maintainers]
+
+  - id: SL-007
+    type: sec-loss
+    title: temper loses the ability to govern the org
+    status: draft
+    description: >
+      API quota exhausted, config parsed to empty, or the process crash-
+      looping, so pending reverts and drift corrections are not applied.
+    fields:
+      cia-impact: [availability]
+      stakeholders: [org owner]
+
+  # ── Hazards (system states) ─────────────────────────────────────────────
+  - id: SH-001
+    type: sec-hazard
+    title: The running temper is a commit that no required gate has passed
+    status: draft
+    description: >
+      The push handler gates only on self_update.enabled, repository.name and
+      ref (src/app.js:1074-1080); the updater hard-resets to whatever
+      origin/main is at that moment (tools/self-update/src/main.rs:47), not
+      the push's `after` SHA. temper's own main requires no status contexts
+      (#76), although config.yml's standards.repos.temper.required_checks
+      lists [test, lint, ci].
+    fields:
+      cia-impact: [integrity, confidentiality]
+      severity: critical
+    links:
+      - type: leads-to-sec-loss
+        target: SL-001
+      - type: leads-to-sec-loss
+        target: SL-003
+
+  - id: SH-002
+    type: sec-hazard
+    title: A repository's enforced settings are weaker than the standard while temper reports it compliant
+    status: draft
+    description: >
+      Covers advertised-vs-enforced divergence (#66), a merge-setting
+      relaxation still outstanding, temper's own protection PUT replacing a
+      stricter repo's settings with defaults (src/branch-protection.js:22-34),
+      and protections the standard does not cover at all (#59, #63, #64).
+    fields:
+      cia-impact: [integrity]
+      severity: high
+    links:
+      - type: leads-to-sec-loss
+        target: SL-002
+      - type: leads-to-sec-loss
+        target: SL-001
+
+  - id: SH-003
+    type: sec-hazard
+    title: A bot PR is set to auto-merge although its passing checks did not exercise its diff
+    status: draft
+    description: >
+      Non-PR-triggered workflows, uncompiled cargo features (#67) or a
+      breaking version bump (semver-major handled by #72).
+    fields:
+      cia-impact: [integrity]
+      severity: high
+    links:
+      - type: leads-to-sec-loss
+        target: SL-001
+
+  - id: SH-004
+    type: sec-hazard
+    title: temper's authorization predicate admits principals outside the authorized set
+    status: draft
+    description: >
+      The allowlist check passes everyone when allowed_command_users is empty
+      (src/app.js:93, :395, :517), config parse failure yields config = {}
+      (src/config.js:76-78), the issue-form ChatOps path checks no org
+      membership (src/app.js:92-99), and bot PRs are recognised by login
+      string (src/app.js:901-903).
+    fields:
+      cia-impact: [integrity]
+      severity: high
+    links:
+      - type: leads-to-sec-loss
+        target: SL-002
+      - type: leads-to-sec-loss
+        target: SL-001
+
+  - id: SH-005
+    type: sec-hazard
+    title: A process consuming PR- or dependency-controlled input holds temper's secrets
+    status: draft
+    description: >
+      rivet runs over a PR's rivet.yaml with temper's full environment
+      (src/rivet-oracle.js:35, no env option); the updater inherits
+      process.env (src/self-update.js:20-24) and runs npm ci lifecycle
+      scripts (main.rs:78) and cargo build scripts (main.rs:61).
+    fields:
+      cia-impact: [confidentiality, integrity]
+      severity: critical
+    links:
+      - type: leads-to-sec-loss
+        target: SL-003
+      - type: leads-to-sec-loss
+        target: SL-001
+
+  - id: SH-006
+    type: sec-hazard
+    title: A posted review asserts content that is not in the reviewed commit
+    status: draft
+    description: >
+      The review JSON contract validates shape, not that a cited "verbatim
+      line" exists at the reviewed SHA (#74).
+    fields:
+      cia-impact: [integrity]
+      severity: medium
+    links:
+      - type: leads-to-sec-loss
+        target: SL-005
+
+  - id: SH-007
+    type: sec-hazard
+    title: temper has fanned out a configuration that target repositories or GitHub reject
+    status: draft
+    description: >
+      An invalid dependabot.yml (#78, fixed by #80) or a required-check
+      context no workflow produces (#65), applied org-wide.
+    fields:
+      cia-impact: [availability]
+      severity: high
+    links:
+      - type: leads-to-sec-loss
+        target: SL-004
+
+  - id: SH-008
+    type: sec-hazard
+    title: temper's process model of a repository is stale
+    status: draft
+    description: >
+      Feedback was lost or delayed: missed webhook deliveries, the dashboard
+      cache, or a task orphaned in `in_progress` by a restart (nothing resets
+      it, src/task-store.js:41-55), so temper believes a revert or fix was
+      applied when it was not.
+    fields:
+      cia-impact: [integrity, availability]
+      severity: high
+    links:
+      - type: leads-to-sec-loss
+        target: SL-002
+      - type: leads-to-sec-loss
+        target: SL-007
+
+  - id: SH-009
+    type: sec-hazard
+    title: temper serves private-repository data to unauthenticated readers or a non-local endpoint
+    status: draft
+    description: >
+      /dashboard/partials/* are public by design (src/dashboard.js:1340-1345)
+      and render open PR titles, branches, authors and AI review history; the
+      remote-endpoint guard exists in reviewPullRequest (src/ai-review.js:406)
+      but not in enhanceDependabotWithAI (src/dependabot.js:345).
+    fields:
+      cia-impact: [confidentiality]
+      severity: high
+    links:
+      - type: leads-to-sec-loss
+        target: SL-006
+
+  - id: SH-010
+    type: sec-hazard
+    title: temper cannot exercise control while corrective actions are pending
+    status: draft
+    description: >
+      The scheduler skips a whole tick on low quota (src/scheduler.js:41-46);
+      unauthenticated dashboard GETs trigger uncached fetchOrgData at about 4
+      API calls per repo (src/dashboard.js:41-95); a parse failure leaves
+      config = {}, which also disables self-update, so a fix cannot be pushed.
+    fields:
+      cia-impact: [availability]
+      severity: medium
+    links:
+      - type: leads-to-sec-loss
+        target: SL-007
+      - type: leads-to-sec-loss
+        target: SL-002
+
+  # ── Security constraints ────────────────────────────────────────────────
+  - id: SC-001
+    type: sec-constraint
+    title: temper SHALL only run the exact commit of itself whose required checks passed
+    status: draft
+    links:
+      - type: prevents-sec-hazard
+        target: SH-001
+
+  - id: SC-002
+    type: sec-constraint
+    title: temper SHALL report compliance from enforced state, never weaken a stricter setting, and restore every relaxation it makes
+    status: draft
+    links:
+      - type: prevents-sec-hazard
+        target: SH-002
+
+  - id: SC-003
+    type: sec-constraint
+    title: temper SHALL NOT enable auto-merge unless the passing checks exercised the diff and the update is non-breaking
+    status: draft
+    links:
+      - type: prevents-sec-hazard
+        target: SH-003
+
+  - id: SC-004
+    type: sec-constraint
+    title: Every state-changing entry point SHALL authenticate and authorize its principal, failing closed when the policy is empty or unreadable
+    status: draft
+    links:
+      - type: prevents-sec-hazard
+        target: SH-004
+
+  - id: SC-005
+    type: sec-constraint
+    title: PR content SHALL be treated as hostile data, confined on extraction, size-bounded, and neutralized before it is posted back
+    status: draft
+    links:
+      - type: prevents-sec-hazard
+        target: SH-005
+      - type: prevents-sec-hazard
+        target: SH-006
+
+  - id: SC-006
+    type: sec-constraint
+    title: temper SHALL NOT post a review claim about code it has not checked against the reviewed commit
+    status: draft
+    links:
+      - type: prevents-sec-hazard
+        target: SH-006
+
+  - id: SC-007
+    type: sec-constraint
+    title: temper SHALL validate a configuration against its consumer's rules before applying it to any repository
+    status: draft
+    links:
+      - type: prevents-sec-hazard
+        target: SH-007
+
+  - id: SC-008
+    type: sec-constraint
+    title: Every tool and dependency temper executes SHALL be pinned and verified, with no known high advisory
+    status: draft
+    links:
+      - type: prevents-sec-hazard
+        target: SH-005
+
+  - id: SC-009
+    type: sec-constraint
+    title: The enforced standard SHALL cover every org and repo protection GitHub offers, or record why one is excluded
+    status: draft
+    links:
+      - type: prevents-sec-hazard
+        target: SH-002
+
+  - id: SC-010
+    type: sec-constraint
+    title: temper SHALL detect lost feedback and reconcile, recovering orphaned tasks and re-reading state before reporting
+    status: draft
+    links:
+      - type: prevents-sec-hazard
+        target: SH-008
+
+  - id: SC-011
+    type: sec-constraint
+    title: Private-repository data SHALL be served only to authenticated readers and sent only to a local model endpoint
+    status: draft
+    links:
+      - type: prevents-sec-hazard
+        target: SH-009
+
+  - id: SC-012
+    type: sec-constraint
+    title: temper SHALL reserve the capacity to apply corrective actions, and SHALL keep its last valid config when a new one fails to parse
+    status: draft
+    links:
+      - type: prevents-sec-hazard
+        target: SH-010
+
+  - id: SC-013
+    type: sec-constraint
+    title: A subprocess that consumes untrusted input SHALL run without temper's secrets in its environment
+    status: draft
+    links:
+      - type: prevents-sec-hazard
+        target: SH-005
+
+  # ── Control structure ───────────────────────────────────────────────────
+  - id: CTRL-OWNER
+    type: controller
+    title: Org owner / temper maintainer
+    status: draft
+    description: Edits config.yml, merges to temper main, holds DASHBOARD_TOKEN.
+    fields:
+      controller-type: human
+      feedback:
+        - from: CTRL-TEMPER
+          via: dashboard, drift report, issue comments
+
+  - id: CTRL-TEMPER
+    type: controller
+    title: temper webhook handlers
+    status: draft
+    description: >
+      Probot handlers for repository, issues, issue_comment, pull_request and
+      push, plus dashboard actions.
+    fields:
+      controller-type: automated
+      source-file: src/app.js
+      process-model:
+        - config.yml standard (desired state)
+        - per-repo settings and protection read from the GitHub API
+        - PR check results and dependabot update metadata
+        - processed webhook delivery IDs (dedup.db)
+      feedback:
+        - from: CTRL-GITHUB
+          via: signed webhook deliveries, REST reads of settings and checks
+
+  - id: CTRL-SCHED
+    type: controller
+    title: temper scheduler
+    status: draft
+    description: Separate loop with its own Octokit factory draining tasks.db (src/app.js:1184-1258, src/scheduler.js).
+    fields:
+      controller-type: automated
+      source-file: src/scheduler.js
+      process-model:
+        - pending, in_progress, completed and failed tasks (tasks.db)
+        - remaining API quota
+
+  - id: CTRL-UPDATER
+    type: controller
+    title: temper self-update binary
+    status: draft
+    description: >
+      Detached process running git fetch/reset, cargo build, npm ci and a pm2
+      restart. stdio is ignored (src/self-update.js:19); no health check or
+      rollback after deploy.
+    fields:
+      controller-type: automated
+      source-file: tools/self-update/src/main.rs
+
+  - id: CTRL-GITHUB
+    type: controller
+    title: GitHub platform
+    status: draft
+    description: Authenticates senders, signs webhook deliveries, and enforces branch protection and rulesets at merge.
+    fields:
+      controller-type: automated
+
+  - id: CTRL-DEPENDABOT
+    type: controller
+    title: Dependabot
+    status: draft
+    description: Opens version-update PRs in org repos and in temper itself.
+    fields:
+      controller-type: automated
+
+  - id: CTRL-CI
+    type: controller
+    title: GitHub Actions CI in each repo
+    status: draft
+    description: Produces the check results temper and GitHub gate on.
+    fields:
+      controller-type: automated
+
+  - id: CTRL-AI
+    type: controller
+    title: AI review model (OpenAI-compatible endpoint)
+    status: draft
+    fields:
+      controller-type: automated
+      source-file: src/ai-review.js
+
+  - id: CP-REPOS
+    type: controlled-process
+    title: Org repository settings, protection and managed files
+    status: draft
+
+  - id: CP-PRS
+    type: controlled-process
+    title: Pull requests in org repositories
+    status: draft
+
+  - id: CP-HOST
+    type: controlled-process
+    title: temper's deployment host (process, filesystem, secrets, SQLite stores)
+    status: draft
+
+  - id: CA-001
+    type: control-action
+    title: Apply settings, branch protection (wholesale PUT) and rulesets
+    status: draft
+    fields:
+      action: apply-protection
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: acts-on
+        target: CP-REPOS
+
+  - id: CA-002
+    type: control-action
+    title: Push managed files (templates, CODEOWNERS, dependabot.yml)
+    status: draft
+    fields:
+      action: push-files
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: acts-on
+        target: CP-REPOS
+
+  - id: CA-003
+    type: control-action
+    title: Enable auto-merge on a bot PR
+    status: draft
+    fields:
+      action: enable-auto-merge
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: acts-on
+        target: CP-PRS
+
+  - id: CA-004
+    type: control-action
+    title: Post an AI review comment
+    status: draft
+    fields:
+      action: post-review
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: acts-on
+        target: CP-PRS
+
+  - id: CA-005
+    type: control-action
+    title: Trigger self-update
+    status: draft
+    fields:
+      action: trigger-self-update
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: acts-on
+        target: CTRL-UPDATER
+
+  - id: CA-006
+    type: control-action
+    title: Fetch, extract and run the rivet oracle over a PR tree
+    status: draft
+    fields:
+      action: run-oracle
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: acts-on
+        target: CP-HOST
+
+  - id: CA-007
+    type: control-action
+    title: Merge to temper main / change config.yml
+    status: draft
+    fields:
+      action: merge-temper
+    links:
+      - type: issued-by
+        target: CTRL-OWNER
+      - type: acts-on
+        target: CTRL-TEMPER
+
+  - id: CA-008
+    type: control-action
+    title: Generate review text from a diff
+    status: draft
+    fields:
+      action: generate-review
+    links:
+      - type: issued-by
+        target: CTRL-AI
+      - type: acts-on
+        target: CTRL-TEMPER
+
+  - id: CA-009
+    type: control-action
+    title: Relax merge settings to preserve signed commits
+    status: draft
+    fields:
+      action: relax-merge-settings
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: acts-on
+        target: CP-REPOS
+
+  - id: CA-010
+    type: control-action
+    title: Revert merge settings (queued task)
+    status: draft
+    fields:
+      action: revert-merge-settings
+    links:
+      - type: issued-by
+        target: CTRL-SCHED
+      - type: acts-on
+        target: CP-REPOS
+
+  - id: CA-011
+    type: control-action
+    title: Deploy origin/main (reset, cargo build, npm ci, pm2 restart)
+    status: draft
+    fields:
+      action: deploy
+    links:
+      - type: issued-by
+        target: CTRL-UPDATER
+      - type: acts-on
+        target: CP-HOST
+
+  - id: CA-012
+    type: control-action
+    title: Provision a repository from an issue form
+    status: draft
+    fields:
+      action: provision-repo
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: acts-on
+        target: CP-REPOS
+
+  - id: CA-013
+    type: control-action
+    title: Enforce protection and rulesets at merge
+    status: draft
+    fields:
+      action: enforce-protection
+    links:
+      - type: issued-by
+        target: CTRL-GITHUB
+      - type: acts-on
+        target: CP-PRS
+
+  - id: CA-014
+    type: control-action
+    title: Open a version-update PR
+    status: draft
+    fields:
+      action: open-update-pr
+    links:
+      - type: issued-by
+        target: CTRL-DEPENDABOT
+      - type: acts-on
+        target: CP-PRS
+
+  - id: CA-015
+    type: control-action
+    title: Report check results on a PR
+    status: draft
+    fields:
+      action: report-checks
+    links:
+      - type: issued-by
+        target: CTRL-CI
+      - type: acts-on
+        target: CP-PRS
+
+  # ── Security UCAs ───────────────────────────────────────────────────────
+  - id: SU-001
+    type: sec-uca
+    title: Updater deploys origin/main without binding it to a commit that passed the gate
+    status: draft
+    fields:
+      uca-type: providing
+      context: >
+        A push to main (or to any repo named like self_update.repo) arrives;
+        temper requires no checks on main (#76).
+      adversarial-causation: >
+        Tamper via supply chain: a malicious release reaches temper as a
+        dependabot PR, temper auto-merges its own bot PR, the push triggers
+        the updater, which resets to whatever origin/main is and runs it with
+        the App's private key.
+      attacker-type: supply-chain
+    links:
+      - type: issued-by
+        target: CTRL-UPDATER
+      - type: leads-to-sec-hazard
+        target: SH-001
+
+  - id: SU-002
+    type: sec-uca
+    title: Auto-merge enabled on a bot PR whose checks did not exercise the diff
+    status: draft
+    fields:
+      uca-type: providing
+      context: The repo's required checks are not PR-triggered, or skip the changed feature or path.
+      adversarial-causation: >
+        Inject via supply chain: a malicious upstream release ships through a
+        dependabot PR; temper sees green checks that never built the new code
+        and enables merge.
+      attacker-type: supply-chain
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: leads-to-sec-hazard
+        target: SH-003
+
+  - id: SU-003
+    type: sec-uca
+    title: Privileged action executed for a principal the policy did not intend to admit
+    status: draft
+    fields:
+      uca-type: providing
+      context: >
+        allowed_command_users is empty or config failed to parse; or the
+        request uses the issue-form path; or a bot PR is identified by login.
+      adversarial-causation: >
+        An insider (or a misconfiguration) empties the allowlist, after which
+        any org member passes; a user registers or renames to a login listed
+        in auto_merge.on_bot_users (`thrum` is a real human account) to get a
+        PR auto-merged. GitHub authenticates the sender, so the weakness is
+        temper's predicate, not spoofed identity.
+      attacker-type: insider
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: leads-to-sec-hazard
+        target: SH-004
+
+  - id: SU-004
+    type: sec-uca
+    title: Dashboard partials render private-repo data for an unauthenticated request
+    status: draft
+    fields:
+      uca-type: providing
+      context: GET /dashboard/partials/* from anyone who can reach temper's port.
+      adversarial-causation: >
+        Intercept: a party on the network path, or anyone if the port is
+        exposed, scrapes open PR titles, branch names, authors and AI review
+        history of private repos.
+      attacker-type: external-network
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: leads-to-sec-hazard
+        target: SH-009
+
+  - id: SU-005
+    type: sec-uca
+    title: Protection drift not re-applied or not reported
+    status: draft
+    fields:
+      uca-type: not-providing
+      context: A repo admin relaxes protection manually, or enforced and advertised settings diverge (#66).
+      adversarial-causation: >
+        Tampering by an insider who disables required reviews before pushing
+        directly; temper's report keeps showing compliant.
+      attacker-type: insider
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: leads-to-sec-hazard
+        target: SH-002
+
+  - id: SU-006
+    type: sec-uca
+    title: Merge-setting revert applied too late or never
+    status: draft
+    fields:
+      uca-type: too-early-too-late
+      context: >
+        The revert is a persisted task, but its dedup key is per PR
+        (src/merge-strategy.js:68, INSERT OR IGNORE at src/task-store.js:37),
+        an `in_progress` task orphaned by a restart is never recovered, the
+        task is marked failed after 3 attempts, and low quota skips ticks.
+      adversarial-causation: >
+        An insider re-triggers relaxation on the same PR after a completed
+        revert, so no new revert is queued; or anyone able to restart temper
+        (a push to a repo named like self_update.repo) during task execution
+        orphans it.
+      attacker-type: insider
+    links:
+      - type: issued-by
+        target: CTRL-SCHED
+      - type: leads-to-sec-hazard
+        target: SH-002
+      - type: leads-to-sec-hazard
+        target: SH-008
+
+  - id: SU-007
+    type: sec-uca
+    title: rivet runs over a fork PR's rivet.yaml with temper's full environment
+    status: draft
+    fields:
+      uca-type: providing
+      context: >
+        Target repo ships rivet.yaml; the oracle fires on fork PRs with no
+        fork check (src/app.js:968); the tarball is buffered without a size
+        cap (src/rivet-fetch.js:182-193). Tar traversal and escaping symlinks
+        are already rejected (src/rivet-fetch.js:67, :99-160).
+      adversarial-causation: >
+        Inject: a fork PR crafts rivet.yaml or artifacts to exploit a rivet
+        parser bug; the resulting code runs with PRIVATE_KEY and
+        WEBHOOK_SECRET in its env. Or an oversized tree exhausts memory.
+      attacker-type: external-network
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: leads-to-sec-hazard
+        target: SH-005
+
+  - id: SU-008
+    type: sec-uca
+    title: Review posted with injected or fabricated content
+    status: draft
+    fields:
+      uca-type: providing
+      context: The diff carries text addressed to the model; the model quotes lines that do not exist (#74).
+      adversarial-causation: >
+        Inject: the PR author embeds instructions, @mentions, workflow
+        commands or HTML in the diff so the posted comment notifies people,
+        misstates the change or quotes invented code.
+      attacker-type: external-network
+    links:
+      - type: issued-by
+        target: CTRL-AI
+      - type: leads-to-sec-hazard
+        target: SH-006
+
+  - id: SU-009
+    type: sec-uca
+    title: Unvalidated managed file pushed to every repository
+    status: draft
+    fields:
+      uca-type: providing
+      context: config.yml changes a template (dependabot groups, required checks) with no consumer-side validation.
+      adversarial-causation: >
+        Observed as a non-adversarial bug (#78). The adversarial form is an
+        insider or compromised maintainer merging a config GitHub rejects, or
+        one requiring a check nobody produces; org sync applies it everywhere.
+      attacker-type: insider
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: leads-to-sec-hazard
+        target: SH-007
+
+  - id: SU-010
+    type: sec-uca
+    title: Updater runs npm and cargo build scripts with temper's secrets in the environment
+    status: draft
+    fields:
+      uca-type: providing
+      context: >
+        package-lock.json or the updater source changed; npm ci --production
+        runs without --ignore-scripts (main.rs:78), cargo build runs build.rs
+        (main.rs:61), both inheriting process.env (src/self-update.js:20-24).
+      adversarial-causation: >
+        Tamper via supply chain: a dependency's postinstall or a crate's
+        build.rs reads PRIVATE_KEY from the environment and exfiltrates it.
+      attacker-type: supply-chain
+    links:
+      - type: issued-by
+        target: CTRL-UPDATER
+      - type: leads-to-sec-hazard
+        target: SH-005
+
+  - id: SU-011
+    type: sec-uca
+    title: Protection PUT replaces a stricter repo's settings with the standard's defaults
+    status: draft
+    fields:
+      uca-type: providing
+      context: >
+        PUT .../protection replaces protection wholesale; reviews,
+        restrictions and enforce_admins default to null/false; only status
+        contexts are preserved (src/branch-protection.js:22-34).
+      adversarial-causation: >
+        An insider weakens a field in config.yml, and org sync downgrades every
+        repo whose own protection was stricter, with no diff shown.
+      attacker-type: insider
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: leads-to-sec-hazard
+        target: SH-002
+
+  - id: SU-012
+    type: sec-uca
+    title: Dependabot AI enhancement sends the repo file tree to an unguarded endpoint
+    status: draft
+    fields:
+      uca-type: providing
+      context: ai_enhance enabled; callLocalAI at src/dependabot.js:345 has no remote-endpoint check (off today, ai_enhance false).
+      adversarial-causation: >
+        Intercept: an insider points the AI endpoint at a remote host and
+        receives private-repo file trees.
+      attacker-type: insider
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: leads-to-sec-hazard
+        target: SH-009
+
+  - id: SU-013
+    type: sec-uca
+    title: Unauthenticated dashboard reads spend the API quota corrective actions need
+    status: draft
+    fields:
+      uca-type: providing
+      context: Cache miss on fetchOrgData with no single-flight; the scheduler skips its tick on low quota.
+      adversarial-causation: >
+        Anyone reaching the port repeats dashboard GETs until the installation
+        quota is low, holding pending reverts back.
+      attacker-type: external-network
+    links:
+      - type: issued-by
+        target: CTRL-TEMPER
+      - type: leads-to-sec-hazard
+        target: SH-010
+
+  # ── Security scenarios ──────────────────────────────────────────────────
+  - id: SS-001
+    type: sec-scenario
+    title: Dependabot PR to temper is auto-merged, deployed, and its install script takes the private key
+    status: draft
+    description: >
+      1. A compromised npm package version is published. 2. Dependabot opens
+      a bump PR in temper. 3. temper enables auto-merge on its own bot PR;
+      no required checks on main (#76), or CI passes because install scripts
+      are not tested. 4. The merge pushes main. 5. The push handler matches
+      on repository.name and ref only. 6. The updater resets to origin/main
+      and runs npm ci with process.env. 7. postinstall reads PRIVATE_KEY.
+    fields:
+      scenario-type: adversarial-control-path
+      attack-vector: network
+      attacker-type: supply-chain
+      causal-factors:
+        - no required checks on temper main (#76)
+        - deploy not bound to payload.after or a passing check suite
+        - repo matched by name only (src/app.js:1080)
+        - npm ci without --ignore-scripts, full env inherited
+        - no post-deploy health check or rollback
+    links:
+      - type: caused-by-sec-uca
+        target: SU-001
+      - type: caused-by-sec-uca
+        target: SU-010
+      - type: leads-to-sec-hazard
+        target: SH-001
+      - type: leads-to-sec-hazard
+        target: SH-005
+
+  - id: SS-002
+    type: sec-scenario
+    title: Malicious dependency release auto-merged on checks that never built it
+    status: draft
+    description: >
+      1. An upstream crate adds a malicious path behind a cargo feature. 2.
+      Dependabot bumps it in an org repo. 3. The repo's CI builds default
+      features only. 4. Checks go green. 5. temper enables auto-merge (minor
+      bump, so #72 does not hold it).
+    fields:
+      scenario-type: adversarial-feedback-injection
+      attack-vector: network
+      attacker-type: supply-chain
+      causal-factors: [check potency not evaluated per diff (#67)]
+    links:
+      - type: caused-by-sec-uca
+        target: SU-002
+      - type: leads-to-sec-hazard
+        target: SH-003
+
+  - id: SS-003
+    type: sec-scenario
+    title: Empty allowlist after a bad config edit admits any org member to ChatOps
+    status: draft
+    description: >
+      1. A config.yml edit fails to parse; config becomes {}. 2.
+      allowed_command_users is []. 3. The check `length === 0 ||
+      includes(login)` passes everyone. 4. A low-privilege org member runs a
+      repo-configuring command. Separately, a PR from a human whose login
+      equals an on_bot_users entry is auto-merged.
+    fields:
+      scenario-type: adversarial-control-algorithm
+      attack-vector: network
+      attacker-type: insider
+      causal-factors:
+        - allowlist fails open when empty
+        - config parse failure falls back to {}
+        - bot identity by login string, not sender.type and app id
+    links:
+      - type: caused-by-sec-uca
+        target: SU-003
+      - type: leads-to-sec-hazard
+        target: SH-004
+
+  - id: SS-004
+    type: sec-scenario
+    title: A second relaxation on the same PR is never reverted
+    status: draft
+    description: >
+      1. temper relaxes merge settings for PR N and queues
+      revert-merge-settings:<repo>:N. 2. The revert completes. 3. A later
+      synchronize relaxes again. 4. INSERT OR IGNORE drops the new task on
+      the reused key. 5. The repo keeps merge commits enabled; the dashboard
+      reads the standard, not the repo.
+    fields:
+      scenario-type: adversarial-process-interaction
+      attack-vector: network
+      attacker-type: insider
+      causal-factors:
+        - revert dedup key per PR, not per relaxation
+        - orphaned in_progress tasks never recovered
+        - failed after 3 attempts with no alert
+    links:
+      - type: caused-by-sec-uca
+        target: SU-006
+      - type: leads-to-sec-hazard
+        target: SH-002
+
+  - id: SS-005
+    type: sec-scenario
+    title: Fork PR's rivet.yaml exploits the rivet parser inside temper's environment
+    status: draft
+    description: >
+      1. An outsider forks a rivet-instrumented repo and opens a PR with a
+      crafted rivet.yaml. 2. temper fetches the tarball (no fork check, no
+      size cap). 3. rivet runs with execFile and no env override. 4. A parser
+      bug yields code execution with PRIVATE_KEY in the environment.
+    fields:
+      scenario-type: adversarial-feedback-injection
+      attack-vector: network
+      attacker-type: external-network
+      causal-factors: [oracle runs on fork PRs, secrets inherited by subprocess, no sandbox, no tarball size cap]
+    links:
+      - type: caused-by-sec-uca
+        target: SU-007
+      - type: leads-to-sec-hazard
+        target: SH-005
+
+  - id: SS-006
+    type: sec-scenario
+    title: Invalid dependabot groups config fanned out by org sync
+    status: draft
+    description: Observed. #78 merged a config dependabot's validator rejects; #80 is the fix.
+    fields:
+      scenario-type: adversarial-control-algorithm
+      attack-vector: network
+      attacker-type: insider
+      causal-factors: [no validation of managed files against the consumer's schema before apply]
+    links:
+      - type: caused-by-sec-uca
+        target: SU-009
+      - type: leads-to-sec-hazard
+        target: SH-007
+
+  - id: SS-007
+    type: sec-scenario
+    title: Replaced rivet binary at data/rivet/rivet runs inside temper
+    status: draft
+    description: >
+      Anyone with write on the deploy directory swaps the binary; temper
+      executes it on the next instrumented PR with no hash or signature check.
+    fields:
+      scenario-type: adversarial-control-path
+      attack-vector: local
+      attacker-type: supply-chain
+      causal-factors: [rivet binary_path is a bare file path, no varve verification at use]
+    links:
+      - type: caused-by-sec-uca
+        target: SU-007
+      - type: leads-to-sec-hazard
+        target: SH-005
+
+  - id: SS-008
+    type: sec-scenario
+    title: Network scrape of /dashboard/partials discloses private PR metadata
+    status: draft
+    fields:
+      scenario-type: adversarial-control-path
+      attack-vector: network
+      attacker-type: external-network
+      causal-factors: [read-only HTML deliberately public, deployment relies on a reverse proxy that may be absent]
+    links:
+      - type: caused-by-sec-uca
+        target: SU-004
+      - type: leads-to-sec-hazard
+        target: SH-009
+
+  - id: SS-009
+    type: sec-scenario
+    title: Repeated dashboard GETs drain quota while a revert is pending
+    status: draft
+    fields:
+      scenario-type: adversarial-process-interaction
+      attack-vector: network
+      attacker-type: external-network
+      causal-factors: [no single-flight on cache miss, scheduler skips whole tick on low quota, no quota reserved for reverts]
+    links:
+      - type: caused-by-sec-uca
+        target: SU-013
+      - type: leads-to-sec-hazard
+        target: SH-010
+
+  - id: SS-010
+    type: sec-scenario
+    title: Org sync downgrades a repo that had stricter protection
+    status: draft
+    fields:
+      scenario-type: adversarial-control-algorithm
+      attack-vector: network
+      attacker-type: insider
+      causal-factors: [wholesale PUT, only status contexts merged from existing protection, dry-run plan not required before sync]
+    links:
+      - type: caused-by-sec-uca
+        target: SU-011
+      - type: caused-by-sec-uca
+        target: SU-005
+      - type: leads-to-sec-hazard
+        target: SH-002
+
+  - id: SS-011
+    type: sec-scenario
+    title: AI endpoint repointed to a remote host receives private file trees
+    status: draft
+    fields:
+      scenario-type: insider-threat
+      attack-vector: network
+      attacker-type: insider
+      causal-factors: [remote-endpoint guard only in reviewPullRequest]
+    links:
+      - type: caused-by-sec-uca
+        target: SU-012
+      - type: leads-to-sec-hazard
+        target: SH-009
+
+  - id: SS-012
+    type: sec-scenario
+    title: Diff text steers the model into quoting invented code in a posted comment
+    status: draft
+    description: >
+      1. A PR adds a comment block addressed to the reviewer model. 2. The
+      model emits a finding whose quoted_line is paraphrased from that text.
+      3. The quote-or-die filter matches against the diff, which contains the
+      planted text, so it passes. 4. The comment states the planted claim as
+      a finding about the code (#74).
+    fields:
+      scenario-type: adversarial-feedback-injection
+      attack-vector: network
+      attacker-type: external-network
+      causal-factors: [quote check against diff text, not against code at the reviewed SHA]
+    links:
+      - type: caused-by-sec-uca
+        target: SU-008
+      - type: leads-to-sec-hazard
+        target: SH-006
