@@ -1,0 +1,442 @@
+# temper requirements — derived from the STPA-Sec constraints in stpa-sec.yaml.
+#
+# release: v1.1.0 is the first rivet-tracked release: close the red main, make
+# temper's own gate real, and record the controls already landed under
+# CHANGELOG [Unreleased]. v1.2.0 takes the remaining hazard-derived work.
+# release: backlog marks triaged work that is not scheduled.
+#
+# fields.effect: behaviour = changes what temper does; confidence = only
+# raises our confidence about existing behaviour (release-planning skill).
+
+artifacts:
+  # ── v1.1.0 — new work ───────────────────────────────────────────────────
+  - id: REQ-001
+    type: requirement
+    title: Self-update SHALL deploy a commit only after its required checks report success
+    status: draft
+    release: v1.1.0
+    description: >
+      The push handler (src/app.js) currently triggers self-update on any
+      push to main. It must first confirm a completed-success check suite
+      for the pushed SHA, and refuse otherwise.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+      upstream-ref: "pulseengine/temper#76"
+    links:
+      - type: derives-from
+        target: SC-001
+
+  - id: REQ-002
+    type: requirement
+    title: temper's own main SHALL require its CI checks (lint, test, ci) before merge
+    status: draft
+    release: v1.1.0
+    fields:
+      priority: must
+      category: constraint
+      effect: behaviour
+      upstream-ref: "pulseengine/temper#76"
+    links:
+      - type: derives-from
+        target: SC-001
+
+  - id: REQ-003
+    type: requirement
+    title: temper SHALL ship with no high-severity npm advisory, and CI SHALL fail on one
+    status: draft
+    release: v1.1.0
+    description: >
+      At c4ee454 the audit step reports 19 advisories (7 high) and main is
+      red. Fix the advisories; keep the audit failing the build.
+    fields:
+      priority: must
+      category: non-functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-008
+
+  - id: REQ-004
+    type: requirement
+    title: temper SHALL run on a supported Node LTS (22 or 24) in CI, Docker and engines
+    status: draft
+    release: v1.1.0
+    fields:
+      priority: must
+      category: non-functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-008
+
+  - id: REQ-005
+    type: requirement
+    title: The rivet oracle SHALL run the rivet binary from the varve layer pinned in varve.toml
+    status: draft
+    release: v1.1.0
+    description: >
+      varve.toml pins realm pulseengine, layer 2026.11.0 (rivet 0.41.1).
+      ai_review.rivet.binary_path must resolve through `varve which rivet`
+      instead of the hand-placed data/rivet/rivet.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-008
+
+  - id: REQ-006
+    type: requirement
+    title: The managed dependabot.yml SHALL pass dependabot's config validator before temper applies it
+    status: draft
+    release: v1.1.0
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+      upstream-ref: "pulseengine/temper#80"
+    links:
+      - type: derives-from
+        target: SC-007
+
+  # ── v1.1.0 — controls already landed (CHANGELOG [Unreleased]) ───────────
+  - id: REQ-007
+    type: requirement
+    title: temper SHALL refuse to start without a non-default WEBHOOK_SECRET
+    status: implemented
+    release: v1.1.0
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-004
+
+  - id: REQ-008
+    type: requirement
+    title: Dashboard actions and JSON APIs SHALL require the DASHBOARD_TOKEN bearer and refuse when it is unset
+    status: implemented
+    release: v1.1.0
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+      upstream-ref: "pulseengine/temper#55"
+    links:
+      - type: derives-from
+        target: SC-004
+
+  - id: REQ-009
+    type: requirement
+    title: Comment ChatOps and issues.opened provisioning SHALL check org membership as well as allowed_command_users
+    description: >
+      Implemented for those two paths. The empty-allowlist fail-open and the
+      issue-form path without a membership check are tracked separately.
+    status: implemented
+    release: v1.1.0
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+      upstream-ref: "pulseengine/temper#48"
+    links:
+      - type: derives-from
+        target: SC-004
+
+  - id: REQ-010
+    type: requirement
+    title: AI review output SHALL be sanitized of workflow commands, HTML and live @mentions before posting
+    status: implemented
+    release: v1.1.0
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+      upstream-ref: "pulseengine/temper#49"
+    links:
+      - type: derives-from
+        target: SC-005
+
+  - id: REQ-011
+    type: requirement
+    title: PR tarball extraction SHALL reject path traversal and escaping symlinks
+    status: implemented
+    release: v1.1.0
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+      upstream-ref: "pulseengine/temper#39"
+    links:
+      - type: derives-from
+        target: SC-005
+
+  - id: REQ-012
+    type: requirement
+    title: temper SHALL NOT enable auto-merge on a breaking (semver-major) dependency update
+    status: implemented
+    release: v1.1.0
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+      upstream-ref: "pulseengine/temper#72"
+    links:
+      - type: derives-from
+        target: SC-003
+
+  # ── v1.2.0 ──────────────────────────────────────────────────────────────
+  - id: REQ-013
+    type: requirement
+    title: A review that cites a verbatim line SHALL be posted only if that line exists at the reviewed SHA
+    status: draft
+    release: v1.2.0
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+      upstream-ref: "pulseengine/temper#74"
+    links:
+      - type: derives-from
+        target: SC-006
+
+  - id: REQ-014
+    type: requirement
+    title: temper SHALL hold auto-merge when the passing checks did not exercise the diff
+    status: draft
+    release: v1.2.0
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+      upstream-ref: "pulseengine/temper#67"
+    links:
+      - type: derives-from
+        target: SC-003
+
+  - id: REQ-015
+    type: requirement
+    title: Compliance SHALL be computed from enforced state, with deliberate divergence recorded in config
+    status: draft
+    release: v1.2.0
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+      upstream-ref: "pulseengine/temper#66"
+    links:
+      - type: derives-from
+        target: SC-002
+
+  - id: REQ-016
+    type: requirement
+    title: Every merge-setting relaxation SHALL get its own revert task, and orphaned or failed reverts SHALL be recovered and reported
+    status: draft
+    release: v1.2.0
+    description: >
+      Revert key unique per relaxation, not per PR; reset stale in_progress
+      tasks at startup; surface a failed revert on the dashboard and as an
+      issue.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-002
+      - type: derives-from
+        target: SC-010
+      - type: derives-from
+        target: SU-006
+
+  - id: REQ-017
+    type: requirement
+    title: Per-repo required-check contexts SHALL be reviewable config, linted for producibility before apply
+    status: draft
+    release: v1.2.0
+    fields:
+      priority: should
+      category: functional
+      effect: behaviour
+      upstream-ref: "pulseengine/temper#65"
+    links:
+      - type: derives-from
+        target: SC-007
+
+  # ── Backlog (triaged, no release) ───────────────────────────────────────
+  - id: REQ-018
+    type: requirement
+    title: The hardening sweep SHALL enable secret scanning and push protection org-wide
+    status: draft
+    release: backlog
+    fields:
+      priority: should
+      category: functional
+      upstream-ref: "pulseengine/temper#64"
+    links:
+      - type: derives-from
+        target: SC-009
+
+
+  - id: REQ-019
+    type: requirement
+    title: temper SHALL manage a tag-protection ruleset for v* release tags
+    status: draft
+    release: backlog
+    fields:
+      priority: should
+      category: functional
+      upstream-ref: "pulseengine/temper#63"
+    links:
+      - type: derives-from
+        target: SC-009
+
+
+  - id: REQ-020
+    type: requirement
+    title: temper SHALL manage the org fork-PR approval policy and allowed-actions list from config.yml
+    status: draft
+    release: backlog
+    fields:
+      priority: should
+      category: functional
+      upstream-ref: "pulseengine/temper#59"
+    links:
+      - type: derives-from
+        target: SC-009
+
+
+  - id: REQ-021
+    type: requirement
+    title: temper SHALL read its own config.yml through rivet's YAML stack
+    status: draft
+    description: Blocked on pulseengine/rivet#1094.
+    release: backlog
+    fields:
+      priority: could
+      category: constraint
+      upstream-ref: "pulseengine/temper#73"
+    links:
+      - type: derives-from
+        target: SC-008
+
+  # ── Added after the clean-room review (2026-11-04) ──────────────────────
+  - id: REQ-022
+    type: requirement
+    title: Authorization SHALL fail closed on an empty allowlist or unreadable config, on every path, and bots SHALL be identified by sender type and app id
+    status: draft
+    release: v1.1.0
+    description: >
+      src/app.js:93, :395, :517 admit everyone when allowed_command_users is
+      empty; the issue-form path (src/app.js:92-99) checks no membership;
+      auto-merge matches on_bot_users by login (src/app.js:901-903).
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-004
+
+  - id: REQ-023
+    type: requirement
+    title: Self-update SHALL deploy exactly the pushed `after` SHA of the configured owner/repo and branch, with a health check and rollback
+    status: draft
+    release: v1.1.0
+    description: >
+      Today the handler matches repository.name only and the updater resets
+      to origin/main with `main` hardcoded (tools/self-update/src/main.rs:47).
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-001
+
+  - id: REQ-024
+    type: requirement
+    title: Subprocesses over untrusted input SHALL run with a scrubbed environment, and the updater SHALL run npm ci with --ignore-scripts
+    status: draft
+    release: v1.1.0
+    description: >
+      rivet via execFile with no env (src/rivet-oracle.js:35); the updater
+      inherits process.env (src/self-update.js:20-24).
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-013
+
+  - id: REQ-025
+    type: requirement
+    title: The rivet oracle SHALL NOT run on fork PRs unless sandboxed, and SHALL cap the tarball size
+    status: draft
+    release: v1.2.0
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-005
+
+  - id: REQ-026
+    type: requirement
+    title: Dashboard partials that render repository data SHALL require the dashboard bearer token
+    status: draft
+    release: v1.1.0
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-011
+
+  - id: REQ-027
+    type: requirement
+    title: Every call to the AI endpoint SHALL pass the local-endpoint guard
+    status: draft
+    release: v1.2.0
+    description: enhanceDependabotWithAI (src/dependabot.js:345) bypasses the guard in src/ai-review.js:406.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-011
+
+  - id: REQ-028
+    type: requirement
+    title: Applying branch protection SHALL keep any existing setting stricter than the standard
+    status: draft
+    release: v1.2.0
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-002
+
+  - id: REQ-029
+    type: requirement
+    title: temper SHALL keep its last valid config when config.yml fails to parse, and reserve API quota for queued reverts
+    status: draft
+    release: v1.2.0
+    description: config parse failure yields {} (src/config.js:76-78); the scheduler skips whole ticks on low quota (src/scheduler.js:41-46).
+    fields:
+      priority: should
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-012

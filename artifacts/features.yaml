@@ -1,0 +1,40 @@
+# Features that satisfy the controls already landed (CHANGELOG [Unreleased]).
+
+artifacts:
+  - id: FEAT-001
+    type: feature
+    title: Entry-point authentication and authorization
+    status: implemented
+    release: v1.1.0
+    description: >
+      Webhook-secret fail-fast at startup, bearer gate on dashboard actions
+      and APIs, allowed_command_users plus org membership on ChatOps and
+      provisioning.
+    links:
+      - type: satisfies
+        target: REQ-007
+      - type: satisfies
+        target: REQ-008
+      - type: satisfies
+        target: REQ-009
+
+  - id: FEAT-002
+    type: feature
+    title: Hostile PR content handling
+    status: implemented
+    release: v1.1.0
+    description: Confined tarball extraction for the rivet oracle; sanitized AI review output.
+    links:
+      - type: satisfies
+        target: REQ-010
+      - type: satisfies
+        target: REQ-011
+
+  - id: FEAT-003
+    type: feature
+    title: Bot auto-merge guard for breaking updates
+    status: implemented
+    release: v1.1.0
+    links:
+      - type: satisfies
+        target: REQ-012

@@ -1,0 +1,75 @@
+# Verifications backed by existing jest suites. Status stays `implemented`
+# until CI on main is green (main is red at c4ee454 on the audit step).
+
+artifacts:
+  - id: VER-007
+    type: verification
+    title: assertWebhookSecret fail-fast unit tests
+    status: implemented
+    fields:
+      method: automated-test
+      test-name: "assertWebhookSecret (Bug #2 — trust-boundary fail-fast)"
+      test-location: __tests__/unit/webhook-secret.test.js
+    links:
+      - type: verifies
+        target: REQ-007
+
+  - id: VER-008
+    type: verification
+    title: Dashboard bearer-token auth gate unit tests
+    status: implemented
+    fields:
+      method: automated-test
+      test-name: "dashboard auth gate (Bug #3)"
+      test-location: __tests__/unit/dashboard-auth.test.js
+    links:
+      - type: verifies
+        target: REQ-008
+
+  - id: VER-009
+    type: verification
+    title: ChatOps and provisioning authorization integration tests
+    status: implemented
+    fields:
+      method: automated-test
+      test-name: "issues.opened (controller-repo provisioning); requireOrgMember (via /configure-repo)"
+      test-location: __tests__/integration/app.test.js
+    links:
+      - type: verifies
+        target: REQ-009
+
+  - id: VER-010
+    type: verification
+    title: sanitizeAIOutput integration tests
+    status: implemented
+    fields:
+      method: automated-test
+      test-name: "sanitizeAIOutput"
+      test-location: __tests__/integration/ai-review.test.js
+    links:
+      - type: verifies
+        target: REQ-010
+
+  - id: VER-011
+    type: verification
+    title: Tarball extraction and symlink-escape unit tests
+    status: implemented
+    fields:
+      method: automated-test
+      test-name: "extractTarballBuffer; assertNoEscapingSymlinks"
+      test-location: __tests__/unit/rivet-fetch.test.js
+    links:
+      - type: verifies
+        target: REQ-011
+
+  - id: VER-012
+    type: verification
+    title: isBreakingUpdate unit tests
+    status: implemented
+    fields:
+      method: automated-test
+      test-name: "dependabot-update-type / isBreakingUpdate"
+      test-location: __tests__/unit/dependabot-update-type.test.js
+    links:
+      - type: verifies
+        target: REQ-012
