@@ -264,3 +264,21 @@ issue_labels:
   - name: "automation"
     color: "0e8a16"
     description: "Automation updates"
+  # Labels the pulseengine-claude skills file into or read from. They were
+  # created by hand and existed in only 5-15 of ~33 repos with drifting colors;
+  # merge mode creates them everywhere and makes one color win.
+  - name: "tool-friction"          # report-tool-friction
+    color: "fbbf24"
+    description: "Friction hit while using the tool for real work (dogfooding signal)"
+  - name: "needs-decision"         # issue-hunt backlog brake
+    color: "d4c5f9"
+    description: "Scope, architecture, priority, or no oracle yet — under the issue-hunt backlog brake"
+  - name: "agent-closable"         # issue-hunt backlog brake
+    color: "0e8a16"
+    description: "A repro-run link to a FAILING Actions run that adds a test — exempt from the brake"
+  - name: "perennial"              # repo-hygiene
+    color: "c5def5"
+    description: "A living surface, not a task — never closes; hygiene sweeps must skip it"
+  - name: "release-standard"       # release-artifact-pipeline
+    color: "6c8cff"
+    description: "Org-wide release-consistency campaign (five-track standard)"
