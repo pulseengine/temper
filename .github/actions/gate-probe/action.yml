@@ -1,0 +1,16 @@
+name: gate-probe
+description: >
+  Fail when a change detector in front of a required check fails open: it is
+  run on control paths (a .rs file under docs/, a new file under
+  supply-chain/, a file in a new top-level directory, plus the repo's own) and
+  every output the repo declares in .github/gate-probe.json must be "true".
+  A missing or invalid contract fails closed. The detector runs with a
+  minimal environment (no secrets). Use with pull_request (never
+  pull_request_target) and `permissions: contents: read`.
+
+runs:
+  using: composite
+  steps:
+    - name: Probe change detectors
+      shell: bash
+      run: python3 "${{ github.action_path }}/gate_probe.py" "$GITHUB_WORKSPACE"

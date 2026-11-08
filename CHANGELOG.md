@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — skipped required checks must fail closed (report only)
+- `src/gate-skip.js` reads each repo's workflows and required checks. It
+  reports `dir/**` ignores, `paths` allowlists, stub/real filter mismatches,
+  `if: always()` gates that accept a skip without reading the detector, and
+  detector-skippable required checks with no probe contract. The finding is
+  `gate_skip` in the plan and `standards.drift` in temper-report.v1. The
+  sweep now also reads each workflow file and `.github/gate-probe.json`.
+- `.github/actions/gate-probe` runs each detector declared in
+  `.github/gate-probe.json` on control paths (`docs/*.rs`, `supply-chain/`, a
+  new top-level directory) and fails when one comes back as not-code. It is
+  stdlib-only Python with a self-test in CI. See `docs/gate-probe.md`.
+
 ### Added — temper-report.v1 for warte
 - `src/report.js` builds and validates `temper-report.v1` against the same
   rules as warte's parser (`src/temper/report.rs`): closed objects, no free

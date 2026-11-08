@@ -89,3 +89,27 @@ artifacts:
     links:
       - type: verifies
         target: REQ-030
+
+  - id: VER-014
+    type: verification
+    title: gate-skip rule tests with positive and negative controls
+    status: implemented
+    fields:
+      method: automated-test
+      test-name: "gate-skip.test.js; report.test.js fail-open skipped required check"
+      test-location: __tests__/unit/gate-skip.test.js
+    links:
+      - type: verifies
+        target: REQ-031
+
+  - id: VER-015
+    type: verification
+    title: gate-probe self-test (fail-open detector caught, fail-closed passes, errors fail closed)
+    status: implemented
+    fields:
+      method: automated-test
+      test-name: "test_gate_probe.py"
+      test-location: .github/actions/gate-probe/test_gate_probe.py
+    links:
+      - type: verifies
+        target: REQ-031

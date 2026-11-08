@@ -461,3 +461,23 @@ artifacts:
         target: SC-002
       - type: derives-from
         target: SC-011
+
+  - id: REQ-031
+    type: requirement
+    title: temper SHALL report every required check that a skipped job can satisfy for a change that matters, and SHALL provide a probe that runs each declared change detector on controls
+    status: implemented
+    release: v1.1.0
+    description: >
+      Phase 1, report only (owner decision 2026-11-08). Static rules in
+      src/gate-skip.js; the behavioural probe in .github/actions/gate-probe.
+      Making the probe a required check is phase 2, applied per repo by
+      smithy after the owner approves.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-009
+      - type: derives-from
+        target: SC-003

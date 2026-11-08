@@ -160,6 +160,22 @@ describe('repoEntry maps standards findings to report checks', () => {
     expect(byId(entry(snap))['ruleset.tag_v']).toMatchObject({ ok: false, code: 'missing' });
   });
 
+  it('a fail-open skipped required check is drift and fails standards.drift', () => {
+    const snap = compliantSnapshot();
+    const ci = [
+      'on: [pull_request]',
+      'jobs:',
+      '  changes: { runs-on: x, steps: [{ run: detect }] }',
+      '  build: { needs: changes, if: "needs.changes.outputs.rust == \'true\'", runs-on: x, steps: [{ run: make }] }'
+    ].join('\n');
+    snap.workflowTexts = [{ path: '.github/workflows/ci.yml', text: ci }];
+    const ev = evaluateRepo(snap, std());
+    expect(ev.findings.find((f) => f.rule === 'gate_skip')).toMatchObject({ drift: true, fix: 'owner' });
+    expect(byId(entry(snap))['standards.drift']).toMatchObject({ ok: false });
+    snap.probeContract = true;
+    expect(evaluateRepo(snap, std()).findings.find((f) => f.rule === 'gate_skip').drift).toBe(false);
+  });
+
   it('an unreadable repo is undecided, not compliant', () => {
     const snap = compliantSnapshot('gone');
     snap.repo = err(403, 'Resource not accessible');
