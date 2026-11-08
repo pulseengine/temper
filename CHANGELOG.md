@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added — skipped required checks must fail closed (report only)
+- `probe_workflow_skippable`: the workflow that runs the gate-probe action
+  must not be skippable. That means no `pull_request` filter, no `if:`, no
+  `continue-on-error`, no `pull_request_target`, and a full-sha action ref.
 - `src/gate-skip.js` reads each repo's workflows and required checks. It
   reports `dir/**` ignores, `paths` allowlists, stub/real filter mismatches,
   `if: always()` gates that accept a skip without reading the detector, and

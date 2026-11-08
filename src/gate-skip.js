@@ -17,6 +17,10 @@
  *   detector_unprobed          a required check can be skipped by a change
  *                              detector the repo has not declared in
  *                              .github/gate-probe.json
+ *   probe_workflow_skippable   the workflow that runs the gate-probe action
+ *                              can be skipped or weakened: a pull_request
+ *                              filter, an `if:`, pull_request_target, or an
+ *                              action ref that is not a full commit sha
  * Whether a detector itself fails closed is the behavioural probe's job
  * (.github/actions/gate-probe): source text cannot show it.
  */
@@ -163,6 +167,40 @@ export function analyzeGateSkips(files, requiredContexts, { probeContract = fals
       if (detectors.length && !probeContract) {
         hits.push({ rule: 'detector_unprobed', workflow: wf.path, job: id,
           detail: `skippable by ${detectors.join(',')}; no ${PROBE_CONTRACT}` });
+      }
+    }
+  }
+  hits.push(...probeWorkflowHits(wfs));
+  return hits;
+}
+
+const PROBE_USES = /^pulseengine\/temper\/\.github\/actions\/gate-probe@(.*)$/;
+
+/** A skipped job reports success, so the probe's own workflow must never skip. */
+export function probeWorkflowHits(wfs) {
+  const hits = [];
+  for (const wf of wfs) {
+    for (const [id, { job }] of Object.entries(wf.jobs)) {
+      const steps = asList(job.steps);
+      const probeSteps = steps.filter((st) => PROBE_USES.test(String(st?.uses ?? '')));
+      if (!probeSteps.length) continue;
+      const problems = [];
+      if (wf.on.pull_request_target !== undefined) problems.push('pull_request_target trigger');
+      if (wf.on.pull_request === undefined) problems.push('no pull_request trigger');
+      const pr = wf.on.pull_request || {};
+      for (const k of ['paths', 'paths-ignore', 'branches', 'branches-ignore']) {
+        if (pr[k] !== undefined) problems.push(`pull_request.${k}`);
+      }
+      if (job.if !== undefined) problems.push('job if:');
+      for (const st of probeSteps) {
+        if (st.if !== undefined) problems.push('step if:');
+        if (st['continue-on-error'] !== undefined) problems.push('continue-on-error');
+        const ref = String(st.uses).match(PROBE_USES)[1];
+        if (!/^[0-9a-f]{40}$/.test(ref)) problems.push('action ref is not a full sha');
+      }
+      if (job['continue-on-error'] !== undefined) problems.push('job continue-on-error');
+      if (problems.length) {
+        hits.push({ rule: 'probe_workflow_skippable', workflow: wf.path, job: id, detail: problems.join(', ') });
       }
     }
   }

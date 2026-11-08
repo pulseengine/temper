@@ -24,6 +24,7 @@ temper-report.v1):
 | `stub_mismatch` | a not-applicable stub's `paths` is not exactly the real workflow's `paths-ignore` (or the reverse) |
 | `aggregate_accepts_skip` | an `if: always()` gate needs a job a detector can skip, and never reads the detector's result |
 | `detector_unprobed` | a required check can be skipped by a change detector the repo has not declared for the probe |
+| `probe_workflow_skippable` | the workflow that runs the probe has a `pull_request` filter, an `if:`, `continue-on-error`, `pull_request_target`, or a non-sha action ref |
 
 A stub is told from the real workflow by step count: the real one does the work.
 
@@ -72,6 +73,23 @@ jobs:
           persist-credentials: false
       - uses: pulseengine/temper/.github/actions/gate-probe@<temper sha>
 ```
+
+The probe's own workflow is held to the rule it checks. A required check that
+never reports keeps the PR pending, so a missing probe already fails closed.
+A **skipped** probe reports success, and that is the hole. The probe workflow
+therefore:
+
+- MUST trigger on `pull_request` with no `paths`, `paths-ignore`, `branches`
+  or `branches-ignore` filter;
+- MUST NOT have an `if:` on the job or on the probe step, or a
+  `continue-on-error`;
+- MUST NOT use `pull_request_target`;
+- MUST pin the action to a full 40-character temper commit sha;
+- MUST run with `permissions: contents: read` on `[self-hosted, light]`.
+
+temper's `gate_skip` finding reports the first four as
+`probe_workflow_skippable`. The runner and permissions are checked by
+smithy's phase-2 dry run.
 
 The check name `gate-probe` must stay stable: renaming a required check
 silently drops the requirement. Fixes inside a repo belong to that repo.
