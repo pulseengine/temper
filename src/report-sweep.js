@@ -94,7 +94,7 @@ async function rateNow(octokit, now) {
  * @param {object} [deps.taskStore] - getReportStats()
  * @param {object} [deps.stateStore] - KV {get,set} for last_sweep_at
  */
-export function createReportSweep({ octokitFactory, org, taskStore, stateStore, config = getConfig(), clock = Date.now }) {
+export function createReportSweep({ octokitFactory, org, taskStore, stateStore, config = getConfig(), clock = Date.now, build = buildInfo }) {
   const settings = reportSettings(config);
   let lastSweepAt = Number(stateStore?.get('last_sweep_at')) || null;
   let running = false;
@@ -116,7 +116,7 @@ export function createReportSweep({ octokitFactory, org, taskStore, stateStore, 
       const report = buildReport({
         org,
         now,
-        build: buildInfo(),
+        build: build(),
         source: { trigger: 'sweep', last_sweep_at: iso(lastSweepAt), api: await rateNow(octokit, now) },
         repos,
         reviews: reviewTotals(settings.windowDays, now),

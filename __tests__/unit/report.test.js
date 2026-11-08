@@ -85,6 +85,7 @@ function compliantSnapshot(name = 'good') {
 }
 
 const T = '2026-11-08T10:00:00Z';
+const BUILD = () => ({ version: '1.0.0', commit: 'c'.repeat(40), config_sha256: 'd'.repeat(64) });
 const entry = (snap) => repoEntry(snap, evaluateRepo(snap, std()), T);
 const byId = (e) => Object.fromEntries(e.checks.map((c) => [c.id, c]));
 
@@ -347,15 +348,10 @@ describe('report sweep', () => {
     bad.protection.body.enforce_admins.enabled = false;
     const sweep = createReportSweep({
       octokitFactory: async () => fakeOctokit({ good: compliantSnapshot('good'), bad }),
-      org: 'pulseengine', stateStore: kv, config: config(file), clock
+      org: 'pulseengine', stateStore: kv, config: config(file), clock, build: BUILD
     });
     expect(sweep.due()).toBe(true);
     const res = await sweep.run();
-    // A dev checkout may lack a 40-hex commit (e.g. a tarball); only then is the write refused.
-    if (!/^[0-9a-f]{40}$/.test(buildInfo().commit)) {
-      expect(res).toEqual({ written: false, error: 'invalid temper.commit' });
-      return;
-    }
     expect(res.written).toBe(true);
     const r = JSON.parse(fs.readFileSync(file, 'utf8'));
     expect(validateReport(r)).toBeNull();
@@ -366,9 +362,31 @@ describe('report sweep', () => {
     expect(sweep.due()).toBe(false);
     expect(Number(kv.get('last_sweep_at'))).toBe(Date.parse(T));
     // a restart reads it back
-    const again = createReportSweep({ octokitFactory: async () => ({}), org: 'pulseengine', stateStore: kv, config: config(file), clock });
+    const again = createReportSweep({ octokitFactory: async () => ({}), org: 'pulseengine', stateStore: kv, config: config(file), clock, build: BUILD });
     expect(again.lastSweepAt).toBe(Date.parse(T));
     kv.close();
+  });
+
+  it('a build without a commit is refused, keeping the previous file', async () => {
+    const file = path.join(dir, 'report.json');
+    const sweep = createReportSweep({
+      octokitFactory: async () => fakeOctokit({ good: compliantSnapshot('good') }),
+      org: 'pulseengine', config: config(file), clock: () => Date.parse(T), build: () => ({ ...BUILD(), commit: '' })
+    });
+    expect(await sweep.run()).toEqual({ written: false, error: 'invalid temper.commit' });
+    expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it('buildInfo reads version and hashes config.yml plus config.local.yml', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'build-'));
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '3.2.1' }));
+    fs.writeFileSync(path.join(root, 'config.yml'), 'a: 1\n');
+    const b1 = buildInfo(root);
+    expect(b1.version).toBe('3.2.1');
+    expect(b1.config_sha256).toMatch(/^[0-9a-f]{64}$/);
+    fs.writeFileSync(path.join(root, 'config.local.yml'), 'b: 2\n');
+    expect(buildInfo(root).config_sha256).not.toBe(b1.config_sha256);
+    fs.rmSync(root, { recursive: true, force: true });
   });
 
   it('a sweep that cannot list repos keeps the previous file and last_sweep_at', async () => {
@@ -376,7 +394,7 @@ describe('report sweep', () => {
     fs.writeFileSync(file, 'previous');
     const sweep = createReportSweep({
       octokitFactory: async () => fakeOctokit({}, { listFails: true }),
-      org: 'pulseengine', config: config(file), clock: () => Date.parse(T)
+      org: 'pulseengine', config: config(file), clock: () => Date.parse(T), build: BUILD
     });
     expect(await sweep.run()).toEqual({ written: false, error: 'boom' });
     expect(fs.readFileSync(file, 'utf8')).toBe('previous');
