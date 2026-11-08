@@ -16,7 +16,15 @@
  *                              can skip, without reading the detector
  *   detector_unprobed          a required check can be skipped by a change
  *                              detector the repo has not declared in
- *                              .github/gate-probe.json
+ *                              .github/gate-probe.json (or the file is not
+ *                              valid JSON)
+ *   output_unprobed            a detector output that gates a required check
+ *                              is neither in a detector's `outputs` nor in
+ *                              its `exempt_outputs` (with a reason)
+ *   probe_workflow_skippable   the workflow that runs the gate-probe action
+ *                              can be skipped or weakened: a pull_request
+ *                              filter, an `if:`, pull_request_target, or an
+ *                              action ref that is not a full commit sha
  * Whether a detector itself fails closed is the behavioural probe's job
  * (.github/actions/gate-probe): source text cannot show it.
  */
@@ -69,6 +77,34 @@ function detectorsIn(text) {
   return [...new Set([...String(text).matchAll(DETECTOR_REF)].map((m) => m[1]))];
 }
 
+const OUTPUT_REF = /needs\.[A-Za-z0-9_-]+\.outputs\.([A-Za-z0-9_-]+)/g;
+function outputsIn(text) {
+  return [...new Set([...String(text).matchAll(OUTPUT_REF)].map((m) => m[1]))];
+}
+
+/**
+ * The probe contract as temper sees it: null when absent, {invalid: true}
+ * when unreadable, else the output names it probes or exempts.
+ */
+export function readProbeContract(text) {
+  if (text === null || text === undefined || text === false) return null;
+  if (text === true) return { covered: null }; // present, content unknown
+  try {
+    const doc = JSON.parse(text);
+    const covered = new Set();
+    for (const d of Array.isArray(doc?.detectors) ? doc.detectors : []) {
+      for (const o of Array.isArray(d?.outputs) ? d.outputs : []) covered.add(String(o));
+      const ex = d?.exempt_outputs;
+      if (ex && typeof ex === 'object' && !Array.isArray(ex)) {
+        for (const [k, why] of Object.entries(ex)) if (typeof why === 'string' && why.trim()) covered.add(k);
+      }
+    }
+    return { covered };
+  } catch {
+    return { invalid: true };
+  }
+}
+
 /**
  * @param {{path: string, text: string}[]} files - workflow files
  * @param {string[]} requiredContexts - the default branch's required checks
@@ -76,6 +112,7 @@ function detectorsIn(text) {
  * @returns {{rule: string, workflow: string, job?: string, detail: string}[]}
  */
 export function analyzeGateSkips(files, requiredContexts, { probeContract = false } = {}) {
+  const contract = readProbeContract(probeContract);
   const wfs = parseWorkflows(files);
   const required = new Set(requiredContexts);
   const hits = [];
@@ -160,9 +197,50 @@ export function analyzeGateSkips(files, requiredContexts, { probeContract = fals
       const direct = skippable.get(id) || [];
       const viaGate = always ? needs.flatMap((n) => skippable.get(n) || []) : [];
       const detectors = [...new Set([...direct, ...viaGate])];
-      if (detectors.length && !probeContract) {
+      if (detectors.length && (!contract || contract.invalid)) {
         hits.push({ rule: 'detector_unprobed', workflow: wf.path, job: id,
-          detail: `skippable by ${detectors.join(',')}; no ${PROBE_CONTRACT}` });
+          detail: `skippable by ${detectors.join(',')}; ${contract ? `${PROBE_CONTRACT} is not valid JSON` : `no ${PROBE_CONTRACT}`}` });
+      } else if (detectors.length && contract.covered) {
+        const gating = [job.if, ...(always ? needs.map((n) => wf.jobs[n]?.job.if) : [])].flatMap(outputsIn);
+        const missing = [...new Set(gating)].filter((o) => !contract.covered.has(o));
+        if (missing.length) {
+          hits.push({ rule: 'output_unprobed', workflow: wf.path, job: id,
+            detail: `gated by ${missing.join(',')}, neither probed nor exempted in ${PROBE_CONTRACT}` });
+        }
+      }
+    }
+  }
+  hits.push(...probeWorkflowHits(wfs));
+  return hits;
+}
+
+const PROBE_USES = /^pulseengine\/temper\/\.github\/actions\/gate-probe@(.*)$/;
+
+/** A skipped job reports success, so the probe's own workflow must never skip. */
+export function probeWorkflowHits(wfs) {
+  const hits = [];
+  for (const wf of wfs) {
+    for (const [id, { job }] of Object.entries(wf.jobs)) {
+      const steps = asList(job.steps);
+      const probeSteps = steps.filter((st) => PROBE_USES.test(String(st?.uses ?? '')));
+      if (!probeSteps.length) continue;
+      const problems = [];
+      if (wf.on.pull_request_target !== undefined) problems.push('pull_request_target trigger');
+      if (wf.on.pull_request === undefined) problems.push('no pull_request trigger');
+      const pr = wf.on.pull_request || {};
+      for (const k of ['paths', 'paths-ignore', 'branches', 'branches-ignore']) {
+        if (pr[k] !== undefined) problems.push(`pull_request.${k}`);
+      }
+      if (job.if !== undefined) problems.push('job if:');
+      for (const st of probeSteps) {
+        if (st.if !== undefined) problems.push('step if:');
+        if (st['continue-on-error'] !== undefined) problems.push('continue-on-error');
+        const ref = String(st.uses).match(PROBE_USES)[1];
+        if (!/^[0-9a-f]{40}$/.test(ref)) problems.push('action ref is not a full sha');
+      }
+      if (job['continue-on-error'] !== undefined) problems.push('job continue-on-error');
+      if (problems.length) {
+        hits.push({ rule: 'probe_workflow_skippable', workflow: wf.path, job: id, detail: problems.join(', ') });
       }
     }
   }

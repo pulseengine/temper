@@ -61,7 +61,7 @@ class Repo:
 
 
 def contract(**extra):
-    d = {"command": ["detect.sh"], "outputs": ["rust"]}
+    d = {"command": ["detect.sh"], "outputs": ["rust"], "negative_controls": ["README.md"]}
     d.update(extra)
     return {"version": 1, "detectors": [d]}
 
@@ -71,7 +71,8 @@ class GateProbeTest(unittest.TestCase):
         with Repo(DENYLIST, contract()) as root:
             code, lines = gate_probe.probe(root)
             self.assertEqual(code, 0, lines)
-            self.assertEqual(len(lines), len(gate_probe.DEFAULT_CONTROLS))
+            self.assertEqual(len(lines), len(gate_probe.DEFAULT_CONTROLS) + 1)
+            self.assertTrue(lines[-1].startswith("non-code"))
 
     def test_allowlist_detector_fails_open(self):
         with Repo(ALLOWLIST, contract()) as root:
@@ -93,6 +94,27 @@ class GateProbeTest(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertTrue(any("README.md" in l and l.startswith("OPEN") for l in lines))
 
+    def test_detector_that_says_code_for_everything_is_vacuous(self):
+        # gale's case: an unknown event runs everything, no file is classified
+        always = "#!/bin/sh\necho rust=true >> \"$GITHUB_OUTPUT\"\n"
+        with Repo(always, contract()) as root:
+            code, lines = gate_probe.probe(root)
+            self.assertEqual(code, 1)
+            self.assertTrue(any(l.startswith("VACUOUS") and "README.md" in l for l in lines))
+        # an output that is missing on the non-code path is not "false" either
+        with Repo("#!/bin/sh\ntrue\n", contract()) as root:
+            self.assertEqual(gate_probe.probe(root)[0], 1)
+
+    def test_detector_sees_a_pull_request_event(self):
+        event = ("#!/bin/sh\nif [ \"$GITHUB_EVENT_NAME\" = pull_request ] && [ \"$EVENT_NAME\" = pull_request ]; then\n"
+                 + DENYLIST.split("\n", 1)[1] + "else echo rust=true >> \"$GITHUB_OUTPUT\"; fi\n")
+        with Repo(event, contract()) as root:
+            self.assertEqual(gate_probe.probe(root)[0], 0)
+
+    def test_exempt_outputs_are_not_probed(self):
+        with Repo(DENYLIST, contract(exempt_outputs={"matrix": "data-tier changes skip the matrix"})) as root:
+            self.assertEqual(gate_probe.probe(root)[0], 0)
+
     def test_missing_contract_fails_closed(self):
         with Repo(DENYLIST) as root:
             self.assertEqual(gate_probe.probe(root)[0], 2)
@@ -100,7 +122,11 @@ class GateProbeTest(unittest.TestCase):
     def test_invalid_contracts_fail_closed(self):
         for bad in ["{", {"version": 2, "detectors": []}, {"version": 1, "detectors": []},
                     contract(command=[]), contract(outputs=[]), contract(command=["/bin/sh"]),
-                    contract(command=["../x.sh"]), contract(controls="docs/x.rs")]:
+                    contract(command=["../x.sh"]), contract(controls="docs/x.rs"),
+                    contract(negative_controls=[]), contract(negative_controls="README.md"),
+                    contract(exempt_outputs=["rust"]), contract(exempt_outputs={"rust": ""}),
+                    contract(exempt_outputs={"rust": "x"}, outputs=["rust"]),
+                    {"version": 1, "detectors": [{"command": ["detect.sh"], "outputs": ["rust"]}]}]:
             with Repo(DENYLIST, bad) as root:
                 self.assertEqual(gate_probe.probe(root)[0], 2, bad)
 
@@ -115,7 +141,8 @@ class GateProbeTest(unittest.TestCase):
     def test_detector_gets_no_secrets(self):
         os.environ["GATE_PROBE_SECRET"] = "s3cret"
         try:
-            leak = "#!/bin/sh\nif [ -n \"$GATE_PROBE_SECRET\" ]; then echo rust=false; else echo rust=true; fi >> \"$GITHUB_OUTPUT\"\n"
+            leak = ("#!/bin/sh\nif [ -n \"$GATE_PROBE_SECRET\" ]; then echo rust=leak >> \"$GITHUB_OUTPUT\"; exit 0; fi\n"
+                    + DENYLIST.split("\n", 1)[1])
             with Repo(leak, contract()) as root:
                 self.assertEqual(gate_probe.probe(root)[0], 0)
         finally:
