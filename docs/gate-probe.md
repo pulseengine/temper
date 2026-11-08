@@ -63,6 +63,13 @@ classify as not code. Every output must come back `false` for each of them.
 Otherwise the probe reports `VACUOUS` ("classification not exercised") and
 fails.
 
+Controls are read only from `.github/gate-probe.json`; the action takes no
+inputs. Never write a control path anywhere else in a tracked file, least of
+all in workflow YAML or a probe workflow. Some detectors count a file as code
+when another file references it (varve treats a `.md` as code if its basename
+appears in `*.rs`, `.github/workflows/*` or `tools/*`), so naming a negative
+control there would silently turn it into code.
+
 Exit 0 means every detector fails closed and was exercised. 1 means one fails
 open or was not exercised. 2 means the contract is missing or invalid or a
 detector did not run, and the probe fails closed in that case too.
