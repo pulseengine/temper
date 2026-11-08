@@ -24,6 +24,7 @@ temper-report.v1):
 | `stub_mismatch` | a not-applicable stub's `paths` is not exactly the real workflow's `paths-ignore` (or the reverse) |
 | `aggregate_accepts_skip` | an `if: always()` gate needs a job a detector can skip, and never reads the detector's result |
 | `detector_unprobed` | a required check can be skipped by a change detector the repo has not declared for the probe |
+| `output_unprobed` | a detector output that gates a required check is in neither `outputs` nor `exempt_outputs` |
 | `probe_workflow_skippable` | the workflow that runs the probe has a `pull_request` filter, an `if:`, `continue-on-error`, `pull_request_target`, or a non-sha action ref |
 
 A stub is told from the real workflow by step count: the real one does the work.
@@ -38,7 +39,8 @@ declares its detectors in `.github/gate-probe.json`:
   "version": 1,
   "detectors": [
     { "command": ["tools/ci/detect-changes.sh"], "outputs": ["rust"],
-      "negative_controls": ["docs/architecture.md"], "controls": [] }
+      "negative_controls": ["docs/architecture.md"], "controls": [],
+      "exempt_outputs": { "rust": "data-tier changes skip the full matrix (owner)" } }
   ]
 }
 ```
@@ -54,6 +56,15 @@ For each control path the probe runs `command` (repo-relative, no shell) with:
 Every name in `outputs` must come back `true` for the default controls
 (`docs/gate-probe-control.rs`, `supply-chain/gate-probe-control.toml`,
 `gate-probe-new-dir/control.bin`) and for the repo's own `controls`.
+
+A tiered detector declares in `outputs` the tier that gates the
+always-required checks, because every declared output must be `true` for
+every control. Any other output that gates a required check goes in
+`exempt_outputs` with a reason. rivet's `rust` tier, for example, is false on
+`supply-chain/` by the owner's choice, so rivet declares `tests` and exempts
+`rust`. The probe does not run exempt outputs. temper's static check reports
+an output that gates a required check and is in neither list as
+`output_unprobed`, so a hidden tier shows up as a reasoned exemption.
 
 A probe that cannot go red proves nothing. A detector that answers `true` for
 everything, for example because it runs every job on an unknown event, would

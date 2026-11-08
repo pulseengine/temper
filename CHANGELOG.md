@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added — skipped required checks must fail closed (report only)
+- Tiered detectors: the contract gains `exempt_outputs` (output → reason),
+  and the static check reports `output_unprobed` for an output that gates a
+  required check and is in neither `outputs` nor `exempt_outputs`. The sweep
+  now reads the contract's content, not only whether it exists.
 - gate-probe contract: every detector must list `negative_controls` paths and answer
   `false` for them, or the probe fails with "classification not exercised".
   A detector that answers `true` for everything can no longer pass. The

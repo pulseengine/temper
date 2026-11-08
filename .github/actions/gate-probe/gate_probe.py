@@ -11,6 +11,7 @@ The repo declares its detectors in .github/gate-probe.json:
      "detectors": [{"command": ["tools/ci/detect-changes.sh"],
                     "outputs": ["rust"],
                     "negative_controls": ["docs/architecture.md"],
+                    "exempt_outputs": {"rust": "why this tier may skip"},
                     "controls": ["optional/extra/path.rs"]}]}
 
 For each control path (the defaults below, plus the detector's own), the probe
@@ -25,6 +26,11 @@ pass the controls without classifying a single file. So every detector also
 names `negative_controls` paths, and must answer "false" for each of them; otherwise
 its classification was not exercised and the probe fails. The detector sees
 EVENT_NAME=GITHUB_EVENT_NAME=pull_request, as in a real PR.
+
+A tiered detector declares in `outputs` the tier that gates the always-
+required checks. Any other output that gates a required check goes in
+`exempt_outputs` with a reason; temper's static check flags an output that is
+in neither. The probe does not run exempt outputs.
 
 Exit 0: every detector fails closed. 1: a detector fails open. 2: the contract
 is missing or invalid, or a detector did not run (fail closed).
@@ -74,6 +80,10 @@ def load_contract(root):
             raise ValueError("detectors[%d].outputs must be a non-empty list of strings" % i)
         if not (isinstance(ctl, list) and all(isinstance(c, str) and c for c in ctl)):
             raise ValueError("detectors[%d].controls must be a list of strings" % i)
+        ex = d.get("exempt_outputs", {}) if isinstance(d, dict) else None
+        if not (isinstance(ex, dict) and all(isinstance(k, str) and k and isinstance(v, str) and v.strip()
+                                              and k not in (outs or []) for k, v in ex.items())):
+            raise ValueError("detectors[%d].exempt_outputs must map output names (not in outputs) to a reason" % i)
         if not (isinstance(nc, list) and nc and all(isinstance(c, str) and c for c in nc)):
             raise ValueError("detectors[%d].negative_controls must be a non-empty list of paths the detector classifies as not code" % i)
     return dets

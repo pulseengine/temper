@@ -189,3 +189,50 @@ ${stepExtra}`);
     expect(hits[0].detail).toContain(problem);
   });
 });
+
+describe('tiered detectors: every gating output is probed or exempted', () => {
+  const TIERED = wf('ci.yml', `
+name: CI
+on: [pull_request]
+jobs:
+  changes:
+    runs-on: x
+    steps: [{ run: detect }]
+  test:
+    name: Test
+    needs: changes
+    if: needs.changes.outputs.tests == 'true'
+    runs-on: x
+    steps: [{ run: cargo test }]
+  matrix:
+    name: Matrix
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: x
+    steps: [{ run: cargo build }]
+`);
+  const contract = (d) => JSON.stringify({ version: 1, detectors: [{ command: ['detect'], negative_controls: ['README.md'], ...d }] });
+
+  it('an output that gates a required check but is not declared is flagged', () => {
+    const hits = analyzeGateSkips([TIERED], ['Test', 'Matrix'], { probeContract: contract({ outputs: ['tests'] }) });
+    expect(hits).toEqual([{ rule: 'output_unprobed', workflow: '.github/workflows/ci.yml', job: 'matrix',
+      detail: 'gated by rust, neither probed nor exempted in .github/gate-probe.json' }]);
+  });
+
+  it('a reasoned exemption covers it; an empty reason does not', () => {
+    expect(analyzeGateSkips([TIERED], ['Test', 'Matrix'],
+      { probeContract: contract({ outputs: ['tests'], exempt_outputs: { rust: 'data-tier changes skip the matrix (owner, rivet#1211)' } }) })).toEqual([]);
+    expect(rules(analyzeGateSkips([TIERED], ['Test', 'Matrix'],
+      { probeContract: contract({ outputs: ['tests'], exempt_outputs: { rust: ' ' } }) }))).toEqual(['output_unprobed']);
+  });
+
+  it('declaring both outputs covers both', () => {
+    expect(analyzeGateSkips([TIERED], ['Test', 'Matrix'], { probeContract: contract({ outputs: ['tests', 'rust'] }) })).toEqual([]);
+  });
+
+  it('an unreadable contract counts as no contract', () => {
+    const hits = analyzeGateSkips([TIERED], ['Test'], { probeContract: '{ not json' });
+    expect(hits).toEqual([{ rule: 'detector_unprobed', workflow: '.github/workflows/ci.yml', job: 'test',
+      detail: 'skippable by changes; .github/gate-probe.json is not valid JSON' }]);
+  });
+});

@@ -111,6 +111,10 @@ class GateProbeTest(unittest.TestCase):
         with Repo(event, contract()) as root:
             self.assertEqual(gate_probe.probe(root)[0], 0)
 
+    def test_exempt_outputs_are_not_probed(self):
+        with Repo(DENYLIST, contract(exempt_outputs={"matrix": "data-tier changes skip the matrix"})) as root:
+            self.assertEqual(gate_probe.probe(root)[0], 0)
+
     def test_missing_contract_fails_closed(self):
         with Repo(DENYLIST) as root:
             self.assertEqual(gate_probe.probe(root)[0], 2)
@@ -120,6 +124,8 @@ class GateProbeTest(unittest.TestCase):
                     contract(command=[]), contract(outputs=[]), contract(command=["/bin/sh"]),
                     contract(command=["../x.sh"]), contract(controls="docs/x.rs"),
                     contract(negative_controls=[]), contract(negative_controls="README.md"),
+                    contract(exempt_outputs=["rust"]), contract(exempt_outputs={"rust": ""}),
+                    contract(exempt_outputs={"rust": "x"}, outputs=["rust"]),
                     {"version": 1, "detectors": [{"command": ["detect.sh"], "outputs": ["rust"]}]}]:
             with Repo(DENYLIST, bad) as root:
                 self.assertEqual(gate_probe.probe(root)[0], 2, bad)
