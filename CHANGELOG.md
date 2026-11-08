@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — temper-report.v1 for warte
+- `src/report.js` builds and validates `temper-report.v1` against the same
+  rules as warte's parser (`src/temper/report.rs`): closed objects, no free
+  text, caps of 500 repos, 40 checks per repo, 1 MiB. It writes the file
+  atomically (tmp, fsync, rename, mode 0640). An invalid or oversized report
+  never replaces the previous one.
+- `src/report-sweep.js` evaluates every repo a sync would touch against the
+  standards (read-only), every `report.sweep_interval_hours` (default 12).
+  `last_sweep_at` moves only when a sweep completed and persists across
+  restarts.
+- `src/report-stats.js` counts API calls in the last hour from response
+  headers, and AI review outcomes per UTC day (persisted).
+- `TaskStore.getReportStats()` gives pending age and stale in_progress tasks.
+- `config.yml` gains `report:` (enabled, path `/var/lib/temper/report.json`);
+  `TEMPER_REPORT_PATH` overrides the path.
+
 ### Added — rivet traceability and the varve layer
 - `varve.toml` pins realm `pulseengine`, layer `2026.11.0` (rivet 0.41.1);
   `varve-realms.toml` carries the realm's registry and trust root.

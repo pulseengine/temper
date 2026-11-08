@@ -18,6 +18,7 @@ import {
   groupOracleFindings
 } from './rivet-oracle.js';
 import { hasRivetYaml, withTempRepoCheckout } from './rivet-fetch.js';
+import { countReview } from './report-stats.js';
 
 const _reviewTimestamps = new Map();
 
@@ -493,6 +494,7 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
             headPromise,
             basePromise
           ]);
+          countReview('rivet_oracle_runs');
           oracleSummary = headResult;
           let headOracleFindings = oracleSummary?.findings || [];
           const droppedCount = headOracleFindings.length;
@@ -577,6 +579,7 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
         modelSummary = parsed.data.summary;
         const droppedCount = parsed.data.findings.length - modelFindings.length;
         if (droppedCount > 0) {
+          countReview('dropped_unquoted', droppedCount);
           getLogger().info(
             { pr: prNumber, droppedCount, kept: modelFindings.length },
             'Filtered out hedging/unquoted findings from model output'
@@ -599,6 +602,7 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
           { pr: prNumber },
           'AI review skipped: model parse failed and no oracle findings'
         );
+        countReview('errors');
         return { success: false, error: `parse: ${parsed.error}`, skipped: true };
       }
 
@@ -618,6 +622,7 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
           { pr: prNumber },
           'AI review approved with no findings — skipping post'
         );
+        countReview('suppressed_no_findings');
         storeReview({
           repo: `${owner}/${repo}`,
           prNumber,
@@ -642,6 +647,8 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
       'POST /repos/{owner}/{repo}/issues/{issue_number}/comments',
       { owner, repo, issue_number: prNumber, body: comment }
     );
+    countReview('posted');
+    countReview('findings', findingsCount || 0);
 
     storeReview({
       repo: `${owner}/${repo}`,
@@ -656,6 +663,7 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
     return { success: true, comment, assessment, findings: findingsCount };
   } catch (error) {
     getLogger().error(`❌ Error reviewing PR #${prNumber}:`, error.message);
+    countReview('errors');
     return { success: false, error: error.message };
   }
 }

@@ -30,6 +30,8 @@ import { applySecurityMiddleware } from './middleware.js';
 import { initTaskStore } from './task-store.js';
 import { createScheduler } from './scheduler.js';
 import { initKVStore } from './persistent-kv.js';
+import { trackOctokit, setReviewStatsStore } from './report-stats.js';
+import { createReportSweep, reportSettings } from './report-sweep.js';
 import { provisionRepo, parseIssueFormBody, validateProvisionRequest } from './provisioning.js';
 import { evaluateHealth } from './health.js';
 
@@ -38,6 +40,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Module-level state for the task store and scheduler
 let _taskStore = null;
 let _scheduler = null;
+let _reportSweep = null;
 // Bug #8: /health uses _dedupStore.ping() as a SQLite liveness probe.
 // Same instance that backs setIdempotencyStore — exposed here so the
 // /health handlers can access it without reaching into idempotency.js.
@@ -242,6 +245,14 @@ function createCustomRoutesHandler() {
 }
 
 function registerApp(app, options = {}) {
+  // Registered first so it runs before every other handler: counts each
+  // webhook-driven API call for the report's calls_last_hour.
+  if (typeof app.onAny === 'function') {
+    app.onAny(async (context) => {
+      trackOctokit(context.octokit);
+    });
+  }
+
   const { getRouter, addHandler } = options;
   app.on('repository.created', async (context) => {
     if (context.log) setLogger(context.log);
@@ -1168,6 +1179,10 @@ function initPersistence() {
     });
     setRateLimitStore(rateStore);
 
+    setReviewStatsStore(initKVStore(path.join(dataDir, 'dedup.db'), 'review_stats', {
+      ttlMs: 31 * 24 * 60 * 60 * 1000
+    }));
+
     getLogger().info('Persistent KV stores initialized (idempotency, ai_rate_limits)');
   } catch (err) {
     getLogger().warn({ err: err.message }, 'Failed to initialise persistent KV — falling back to in-memory');
@@ -1202,7 +1217,7 @@ function initScheduler(app) {
       'GET /orgs/{org}/installation',
       { org: targetOrg }
     );
-    return await app.auth(installation.id);
+    return trackOctokit(await app.auth(installation.id));
   }
 
   _scheduler = createScheduler(_taskStore, octokitFactory, {
@@ -1253,6 +1268,18 @@ function initScheduler(app) {
 
   _scheduler.start();
   getLogger().info('Task store and scheduler initialized');
+
+  if (reportSettings(config).enabled) {
+    _reportSweep = createReportSweep({
+      octokitFactory,
+      org: targetOrg,
+      taskStore: _taskStore,
+      stateStore: initKVStore(path.join(getDataDir(), 'dedup.db'), 'report_state'),
+      config
+    });
+    _reportSweep.start();
+    getLogger().info({ path: _reportSweep.settings.path }, 'temper-report.v1 sweep started');
+  }
 
   return { store: _taskStore, scheduler: _scheduler };
 }

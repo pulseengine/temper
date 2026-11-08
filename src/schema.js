@@ -116,6 +116,25 @@ export function validateConfig(config) {
     }
   }
 
+  if (config.report !== undefined) {
+    const rp = config.report;
+    if (typeof rp !== 'object' || rp === null) {
+      errors.push('report must be an object');
+    } else {
+      if (rp.enabled !== undefined && typeof rp.enabled !== 'boolean') {
+        errors.push('report.enabled must be a boolean');
+      }
+      if (rp.path !== undefined && (typeof rp.path !== 'string' || !rp.path.startsWith('/'))) {
+        errors.push('report.path must be an absolute path');
+      }
+      for (const k of ['sweep_interval_hours', 'review_window_days']) {
+        if (rp[k] !== undefined && (typeof rp[k] !== 'number' || rp[k] <= 0)) {
+          errors.push(`report.${k} must be a positive number`);
+        }
+      }
+    }
+  }
+
   if (config.scheduler !== undefined) {
     const sc = config.scheduler;
     if (typeof sc !== 'object' || sc === null) {
