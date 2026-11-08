@@ -440,3 +440,24 @@ artifacts:
     links:
       - type: derives-from
         target: SC-012
+
+  # ── Added with the warte seam (2026-11-08) ──────────────────────────────
+  - id: REQ-030
+    type: requirement
+    title: temper SHALL publish compliance as a temper-report.v1 file that warte's parser accepts, written atomically and only after a completed sweep
+    status: implemented
+    release: v1.1.0
+    description: >
+      The contract is warte's parser (warte src/temper/report.rs): closed
+      objects, no free text, caps of 500 repos, 40 checks and 1 MiB. An
+      invalid or oversized report never replaces the previous file;
+      last_sweep_at moves only when a sweep completed and survives restarts.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-002
+      - type: derives-from
+        target: SC-011

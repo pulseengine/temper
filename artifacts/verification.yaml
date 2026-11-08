@@ -73,3 +73,19 @@ artifacts:
     links:
       - type: verifies
         target: REQ-012
+
+  - id: VER-013
+    type: verification
+    title: temper-report.v1 contract, atomic write and sweep tests
+    status: implemented
+    description: >
+      Accepts warte's own sample report and refuses each of warte's negative
+      cases; maps standards findings with positive and negative controls;
+      keeps the previous file on an invalid, oversized or failed sweep.
+    fields:
+      method: automated-test
+      test-name: "report.test.js"
+      test-location: __tests__/unit/report.test.js
+    links:
+      - type: verifies
+        target: REQ-030

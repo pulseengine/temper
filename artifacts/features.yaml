@@ -38,3 +38,13 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-012
+
+  - id: FEAT-004
+    type: feature
+    title: temper-report.v1 writer and sweep for warte's Compliance view
+    status: implemented
+    release: v1.1.0
+    description: src/report.js, src/report-stats.js, src/report-sweep.js.
+    links:
+      - type: satisfies
+        target: REQ-030

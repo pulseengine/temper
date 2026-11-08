@@ -82,6 +82,14 @@ function initTaskStore(dbPath) {
 
     stats: db.prepare(`
       SELECT status, COUNT(*) as count FROM tasks GROUP BY status
+    `),
+
+    oldestPending: db.prepare(`
+      SELECT MIN(next_run_at) as t FROM tasks WHERE status = 'pending' AND next_run_at <= @now
+    `),
+
+    staleInProgress: db.prepare(`
+      SELECT COUNT(*) as count FROM tasks WHERE status = 'in_progress' AND updated_at < @before
     `)
   };
 
@@ -170,6 +178,22 @@ function initTaskStore(dbPath) {
         stats[row.status] = row.count;
       }
       return stats;
+    },
+
+    /**
+     * The report's task block. A pending task's age counts from when it
+     * became due; an in_progress task untouched for `staleMs` is stale.
+     */
+    getReportStats(now = Date.now(), staleMs = 60 * 60 * 1000) {
+      const s = this.getStats();
+      const oldest = stmts.oldestPending.get({ now }).t;
+      return {
+        pending: s.pending,
+        in_progress: s.in_progress,
+        failed: s.failed,
+        oldest_pending_age_s: oldest ? Math.max(0, Math.floor((now - oldest) / 1000)) : 0,
+        stale_in_progress: stmts.staleInProgress.get({ before: now - staleMs }).count
+      };
     },
 
     /** Close the database connection. */

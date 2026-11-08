@@ -191,6 +191,17 @@ auto_merge:
     - thrum
   merge_method: squash
 
+# temper-report.v1 for warte's Compliance view. The warte probe on this host
+# forwards the file (warte probe send --feed temper=<path>). The directory is
+# provisioned by smithy (0750, group temper-report); the file is written 0640,
+# atomically. warte flags the report stale after 2 x sweep_interval_hours.
+# TEMPER_REPORT_PATH overrides path (e.g. for local runs).
+report:
+  enabled: true
+  path: /var/lib/temper/report.json
+  sweep_interval_hours: 12
+  review_window_days: 7
+
 self_update:
   enabled: true
   repo: temper
