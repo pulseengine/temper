@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added — skipped required checks must fail closed (report only)
+- gate-probe contract: every detector must list `non_code` paths and answer
+  `false` for them, or the probe fails with "classification not exercised".
+  A detector that answers `true` for everything can no longer pass. The
+  detector sees `EVENT_NAME=GITHUB_EVENT_NAME=pull_request`. (Found by
+  gale's session.)
 - `probe_workflow_skippable`: the workflow that runs the gate-probe action
   must not be skippable. That means no `pull_request` filter, no `if:`, no
   `continue-on-error`, no `pull_request_target`, and a full-sha action ref.

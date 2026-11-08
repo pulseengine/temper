@@ -10,6 +10,7 @@ The repo declares its detectors in .github/gate-probe.json:
     {"version": 1,
      "detectors": [{"command": ["tools/ci/detect-changes.sh"],
                     "outputs": ["rust"],
+                    "non_code": ["docs/architecture.md"],
                     "controls": ["optional/extra/path.rs"]}]}
 
 For each control path (the defaults below, plus the detector's own), the probe
@@ -17,6 +18,13 @@ runs the command with the changed-file list in the file named by
 $GATE_PROBE_FILES and a fresh $GITHUB_OUTPUT, and requires every listed output
 to be "true". A detector that says "no code changed" for a .rs file under
 docs/ or a file in a new top-level directory fails open.
+
+A probe that cannot go red proves nothing: a detector that answers "true" for
+everything (for example because it runs all jobs on an unknown event) would
+pass the controls without classifying a single file. So every detector also
+names `non_code` paths, and must answer "false" for each of them; otherwise
+its classification was not exercised and the probe fails. The detector sees
+EVENT_NAME=GITHUB_EVENT_NAME=pull_request, as in a real PR.
 
 Exit 0: every detector fails closed. 1: a detector fails open. 2: the contract
 is missing or invalid, or a detector did not run (fail closed).
@@ -56,6 +64,7 @@ def load_contract(root):
         cmd = d.get("command") if isinstance(d, dict) else None
         outs = d.get("outputs") if isinstance(d, dict) else None
         ctl = d.get("controls", []) if isinstance(d, dict) else None
+        nc = d.get("non_code") if isinstance(d, dict) else None
         if not (isinstance(cmd, list) and cmd and all(isinstance(c, str) and c for c in cmd)):
             raise ValueError("detectors[%d].command must be a non-empty list of strings" % i)
         exe = os.path.normpath(cmd[0])
@@ -65,6 +74,8 @@ def load_contract(root):
             raise ValueError("detectors[%d].outputs must be a non-empty list of strings" % i)
         if not (isinstance(ctl, list) and all(isinstance(c, str) and c for c in ctl)):
             raise ValueError("detectors[%d].controls must be a list of strings" % i)
+        if not (isinstance(nc, list) and nc and all(isinstance(c, str) and c for c in nc)):
+            raise ValueError("detectors[%d].non_code must be a non-empty list of paths the detector classifies as not code" % i)
     return dets
 
 
@@ -90,6 +101,8 @@ def run_detector(root, command, changed):
             "HOME": tmp,
             "GATE_PROBE_FILES": files,
             "GITHUB_OUTPUT": output,
+            "EVENT_NAME": "pull_request",
+            "GITHUB_EVENT_NAME": "pull_request",
         }
         exe = os.path.join(root, os.path.normpath(command[0]))
         proc = subprocess.run([exe] + command[1:], cwd=root, env=env, stdout=subprocess.PIPE,
@@ -123,6 +136,19 @@ def probe(root):
                 worst = max(worst, 1)
             else:
                 lines.append("closed %s on %s" % (name, control))
+        for path in d["non_code"]:
+            try:
+                outs = run_detector(root, d["command"], [path])
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
+                lines.append("ERROR  %s on %s: did not run (%s)" % (name, path, type(e).__name__ if not isinstance(e, RuntimeError) else e))
+                worst = max(worst, 2)
+                continue
+            unexercised = [o for o in d["outputs"] if outs.get(o) != "false"]
+            if unexercised:
+                lines.append("VACUOUS %s on %s: %s not false; classification not exercised" % (name, path, ",".join(unexercised)))
+                worst = max(worst, 1)
+            else:
+                lines.append("non-code %s on %s" % (name, path))
     return worst, lines
 
 
@@ -132,7 +158,7 @@ def main(argv):
     for line in lines:
         print(line)
     print({0: "gate-probe: every detector fails closed",
-           1: "gate-probe: a detector FAILS OPEN; a required check could be skipped for a change that matters",
+           1: "gate-probe: a detector FAILS OPEN or its classification was not exercised",
            2: "gate-probe: could not probe (failing closed)"}[code])
     return code
 

@@ -37,7 +37,8 @@ declares its detectors in `.github/gate-probe.json`:
 {
   "version": 1,
   "detectors": [
-    { "command": ["tools/ci/detect-changes.sh"], "outputs": ["rust"], "controls": [] }
+    { "command": ["tools/ci/detect-changes.sh"], "outputs": ["rust"],
+      "non_code": ["docs/architecture.md"], "controls": [] }
   ]
 }
 ```
@@ -47,14 +48,24 @@ For each control path the probe runs `command` (repo-relative, no shell) with:
 - `GATE_PROBE_FILES`: a file listing the changed paths, one per line. The
   detector must read its changed files from here when the variable is set.
 - `GITHUB_OUTPUT`: a fresh file the detector writes `key=value` lines to.
+- `EVENT_NAME` and `GITHUB_EVENT_NAME`: `pull_request`, as in a real PR.
 - No other environment: no tokens, no secrets.
 
 Every name in `outputs` must come back `true` for the default controls
 (`docs/gate-probe-control.rs`, `supply-chain/gate-probe-control.toml`,
-`gate-probe-new-dir/control.bin`) and for the repo's own `controls`. Exit 0
-means every detector fails closed, 1 means one fails open, and 2 means the
-contract is missing or invalid or a detector did not run. The probe fails
-closed in that case too.
+`gate-probe-new-dir/control.bin`) and for the repo's own `controls`.
+
+A probe that cannot go red proves nothing. A detector that answers `true` for
+everything, for example because it runs every job on an unknown event, would
+pass those controls without classifying a single file. So `non_code` is
+required: a non-empty list of real paths in the repo that the detector must
+classify as not code. Every output must come back `false` for each of them.
+Otherwise the probe reports `VACUOUS` ("classification not exercised") and
+fails.
+
+Exit 0 means every detector fails closed and was exercised. 1 means one fails
+open or was not exercised. 2 means the contract is missing or invalid or a
+detector did not run, and the probe fails closed in that case too.
 
 A workflow that runs it (smithy's runner constraints apply):
 
