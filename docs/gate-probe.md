@@ -38,7 +38,7 @@ declares its detectors in `.github/gate-probe.json`:
   "version": 1,
   "detectors": [
     { "command": ["tools/ci/detect-changes.sh"], "outputs": ["rust"],
-      "non_code": ["docs/architecture.md"], "controls": [] }
+      "negative_controls": ["docs/architecture.md"], "controls": [] }
   ]
 }
 ```
@@ -57,7 +57,7 @@ Every name in `outputs` must come back `true` for the default controls
 
 A probe that cannot go red proves nothing. A detector that answers `true` for
 everything, for example because it runs every job on an unknown event, would
-pass those controls without classifying a single file. So `non_code` is
+pass those controls without classifying a single file. So `negative_controls` is
 required: a non-empty list of real paths in the repo that the detector must
 classify as not code. Every output must come back `false` for each of them.
 Otherwise the probe reports `VACUOUS` ("classification not exercised") and

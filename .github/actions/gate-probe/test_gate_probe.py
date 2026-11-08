@@ -61,7 +61,7 @@ class Repo:
 
 
 def contract(**extra):
-    d = {"command": ["detect.sh"], "outputs": ["rust"], "non_code": ["README.md"]}
+    d = {"command": ["detect.sh"], "outputs": ["rust"], "negative_controls": ["README.md"]}
     d.update(extra)
     return {"version": 1, "detectors": [d]}
 
@@ -119,7 +119,7 @@ class GateProbeTest(unittest.TestCase):
         for bad in ["{", {"version": 2, "detectors": []}, {"version": 1, "detectors": []},
                     contract(command=[]), contract(outputs=[]), contract(command=["/bin/sh"]),
                     contract(command=["../x.sh"]), contract(controls="docs/x.rs"),
-                    contract(non_code=[]), contract(non_code="README.md"),
+                    contract(negative_controls=[]), contract(negative_controls="README.md"),
                     {"version": 1, "detectors": [{"command": ["detect.sh"], "outputs": ["rust"]}]}]:
             with Repo(DENYLIST, bad) as root:
                 self.assertEqual(gate_probe.probe(root)[0], 2, bad)

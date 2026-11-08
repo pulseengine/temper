@@ -10,7 +10,7 @@ The repo declares its detectors in .github/gate-probe.json:
     {"version": 1,
      "detectors": [{"command": ["tools/ci/detect-changes.sh"],
                     "outputs": ["rust"],
-                    "non_code": ["docs/architecture.md"],
+                    "negative_controls": ["docs/architecture.md"],
                     "controls": ["optional/extra/path.rs"]}]}
 
 For each control path (the defaults below, plus the detector's own), the probe
@@ -22,7 +22,7 @@ docs/ or a file in a new top-level directory fails open.
 A probe that cannot go red proves nothing: a detector that answers "true" for
 everything (for example because it runs all jobs on an unknown event) would
 pass the controls without classifying a single file. So every detector also
-names `non_code` paths, and must answer "false" for each of them; otherwise
+names `negative_controls` paths, and must answer "false" for each of them; otherwise
 its classification was not exercised and the probe fails. The detector sees
 EVENT_NAME=GITHUB_EVENT_NAME=pull_request, as in a real PR.
 
@@ -64,7 +64,7 @@ def load_contract(root):
         cmd = d.get("command") if isinstance(d, dict) else None
         outs = d.get("outputs") if isinstance(d, dict) else None
         ctl = d.get("controls", []) if isinstance(d, dict) else None
-        nc = d.get("non_code") if isinstance(d, dict) else None
+        nc = d.get("negative_controls") if isinstance(d, dict) else None
         if not (isinstance(cmd, list) and cmd and all(isinstance(c, str) and c for c in cmd)):
             raise ValueError("detectors[%d].command must be a non-empty list of strings" % i)
         exe = os.path.normpath(cmd[0])
@@ -75,7 +75,7 @@ def load_contract(root):
         if not (isinstance(ctl, list) and all(isinstance(c, str) and c for c in ctl)):
             raise ValueError("detectors[%d].controls must be a list of strings" % i)
         if not (isinstance(nc, list) and nc and all(isinstance(c, str) and c for c in nc)):
-            raise ValueError("detectors[%d].non_code must be a non-empty list of paths the detector classifies as not code" % i)
+            raise ValueError("detectors[%d].negative_controls must be a non-empty list of paths the detector classifies as not code" % i)
     return dets
 
 
@@ -136,7 +136,7 @@ def probe(root):
                 worst = max(worst, 1)
             else:
                 lines.append("closed %s on %s" % (name, control))
-        for path in d["non_code"]:
+        for path in d["negative_controls"]:
             try:
                 outs = run_detector(root, d["command"], [path])
             except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
