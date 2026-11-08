@@ -70,6 +70,12 @@ when another file references it (varve treats a `.md` as code if its basename
 appears in `*.rs`, `.github/workflows/*` or `tools/*`), so naming a negative
 control there would silently turn it into code.
 
+The contract file is itself such a reference. A detector that searches the
+tree for references MUST exclude `.github/gate-probe.json` from that search,
+the same way it excludes itself. Otherwise listing a negative control makes
+the detector count it as code, and the probe reports VACUOUS for a detector
+that does discriminate (seen in gale).
+
 Exit 0 means every detector fails closed and was exercised. 1 means one fails
 open or was not exercised. 2 means the contract is missing or invalid or a
 detector did not run, and the probe fails closed in that case too.
