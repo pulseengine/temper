@@ -56,6 +56,16 @@ function errorCode(status) {
 }
 
 /**
+ * warte accepts identifiers of [A-Za-z0-9._-]{1,100}; GitHub branch names may
+ * also contain '/' and more. Map every other character to '_' so one repo's
+ * branch name cannot get the whole report refused. Repo names already fit.
+ */
+export function reportIdent(s) {
+  const out = String(s ?? '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 100);
+  return out || '_';
+}
+
+/**
  * Map one evaluateRepo() result (and its snapshot) to a report repo entry.
  * Returns null for repos outside the report (archived).
  */
@@ -63,7 +73,7 @@ export function repoEntry(snap, evaluation, checkedAt) {
   const status = snap.repo?.status;
   if (status !== 200) {
     return {
-      name: snap.name,
+      name: reportIdent(snap.name),
       checked_at: checkedAt,
       default_branch: 'main',
       checks: [check('protection.present', 'critical', errorCode(status))]
@@ -71,7 +81,7 @@ export function repoEntry(snap, evaluation, checkedAt) {
   }
   if (evaluation.scope === 'archived') return null;
   const st = evaluation.state || deriveState(snap);
-  const base = { name: snap.name, checked_at: checkedAt, default_branch: st.branch };
+  const base = { name: reportIdent(snap.name), checked_at: checkedAt, default_branch: reportIdent(st.branch) };
 
   if (evaluation.scope === 'fork' || evaluation.scope === 'unenforceable') {
     return { ...base, checks: [check('protection.present', 'critical', 'not_applicable')] };

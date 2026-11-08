@@ -5,7 +5,7 @@ import yaml from 'js-yaml';
 import { getStandards, evaluateRepo } from '../../src/standards.js';
 import { validateConfig } from '../../src/schema.js';
 import {
-  validateReport, writeReport, repoEntry, buildReport, summarize, iso, MAX_REPOS, MAX_CHECKS, MAX_BYTES
+  validateReport, writeReport, repoEntry, reportIdent, buildReport, summarize, iso, MAX_REPOS, MAX_CHECKS, MAX_BYTES
 } from '../../src/report.js';
 import {
   countReview, reviewTotals, recordApiResponse, apiSnapshot, trackOctokit, setReviewStatsStore, _resetReportStats
@@ -165,6 +165,18 @@ describe('repoEntry maps standards findings to report checks', () => {
     const e = entry(snap);
     expect(e.checks).toEqual([{ id: 'protection.present', ok: null, severity: 'critical', code: 'error_permission' }]);
     expect(summarize([e])).toEqual({ repos: 1, compliant: 0, noncompliant: 0, unknown: 1 });
+  });
+
+  it('a branch name warte would refuse is mapped, not allowed to sink the report', () => {
+    const snap = compliantSnapshot('slashy');
+    snap.repo.body.default_branch = 'release/1.x';
+    const e = entry(snap);
+    expect(e.default_branch).toBe('release_1.x');
+    const r = warteSample();
+    r.repos.push(e);
+    expect(validateReport(r)).toBeNull();
+    expect(reportIdent('')).toBe('_');
+    expect(reportIdent('a'.repeat(150))).toHaveLength(100);
   });
 
   it('archived repos are left out; forks are not_applicable', () => {
