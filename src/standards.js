@@ -24,6 +24,7 @@
  *   pull_request, merge_queue, merge_methods, auto_merge  supporting settings.
  */
 
+import { analyzeGateSkips, PROBE_CONTRACT } from './gate-skip.js';
 import fs from 'fs';
 import path from 'path';
 import { getLogger } from './logger.js';
@@ -114,6 +115,24 @@ export async function fetchSnapshot(octokit, owner, name) {
     path: '.github/workflows',
     ref: branch
   });
+  // Workflow texts and the probe contract, for the skipped-required-check
+  // analysis (gate-skip.js). Absent from older sweep caches: then that
+  // finding is not evaluated.
+  const workflowTexts = [];
+  if (workflows.status === 200 && Array.isArray(workflows.body)) {
+    for (const f of workflows.body) {
+      if (!/\.ya?ml$/.test(f.name || '')) continue;
+      const file = await getWithStatus(octokit, 'GET /repos/{owner}/{repo}/contents/{path}', {
+        owner, repo: name, path: f.path || `.github/workflows/${f.name}`, ref: branch
+      });
+      if (file.status === 200 && typeof file.body?.content === 'string') {
+        workflowTexts.push({ path: f.path || `.github/workflows/${f.name}`, text: Buffer.from(file.body.content, 'base64').toString('utf8') });
+      }
+    }
+  }
+  const probe = await getWithStatus(octokit, 'GET /repos/{owner}/{repo}/contents/{path}', {
+    owner, repo: name, path: PROBE_CONTRACT, ref: branch
+  });
   return {
     name,
     owner,
@@ -121,7 +140,9 @@ export async function fetchSnapshot(octokit, owner, name) {
     protection,
     branchRules,
     rulesets: { status: list.status, body: list.status === 200 ? undefined : list.body, items },
-    workflows
+    workflows,
+    workflowTexts,
+    probeContract: probe.status === 200
   };
 }
 
@@ -414,6 +435,15 @@ export function evaluateRepo(snap, std) {
     f.push(finding(wf.name, 'stub present and required', `stub ${present ? 'present' : 'absent'}, ${required ? 'required' : 'not required'}`,
       !present || !required, !present && !pinned ? 'blocked' : 'auto',
       !present && !pinned ? `standards.required_workflows "${wf.name}".pin is unset (pin to a merged temper sha)` : ''));
+  }
+
+  // A skipped required check passes: the filters in front of it must fail
+  // closed. Report only; the fix lives in each repo (owner).
+  if (Array.isArray(snap.workflowTexts)) {
+    const hits = analyzeGateSkips(snap.workflowTexts, st.allContexts, { probeContract: snap.probeContract === true });
+    f.push(finding('gate_skip', 'skipped required checks fail closed',
+      hits.length ? hits.map((h) => `${h.rule} ${h.workflow}${h.job ? `#${h.job}` : ''}`).join('; ') : 'none found',
+      hits.length > 0, 'owner', hits.map((h) => h.detail).join('; ')));
   }
 
   if (std.tag_protection.enabled) {

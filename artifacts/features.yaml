@@ -48,3 +48,13 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-030
+
+  - id: FEAT-005
+    type: feature
+    title: Skipped-required-check detection (static rules + behavioural probe)
+    status: implemented
+    release: v1.1.0
+    description: src/gate-skip.js, the gate_skip standards finding, .github/actions/gate-probe, docs/gate-probe.md.
+    links:
+      - type: satisfies
+        target: REQ-031

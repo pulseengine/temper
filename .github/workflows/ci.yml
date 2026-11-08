@@ -101,6 +101,19 @@ jobs:
       - name: Scan this change
         uses: ./.github/actions/hostname-scan
 
+  # The skipped-required-check probe temper distributes (docs/gate-probe.md):
+  # its self-test (a fail-open detector must be caught) and the 3.9 floor.
+  gate-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Probe self-test
+        run: python3 -m unittest discover -s .github/actions/gate-probe -p 'test_*.py' -v
+      - name: Python 3.9 floor
+        run: pipx run --spec vermin==1.9.2 vermin -t=3.9- --no-tips --violations .github/actions/gate-probe/
+
   ci:
     runs-on: ubuntu-latest
     steps:
