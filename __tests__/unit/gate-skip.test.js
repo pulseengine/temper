@@ -181,6 +181,12 @@ ${stepExtra}`);
     routed.text = routed.text.replace('runs-on: [self-hosted, light]',
       `runs-on: \${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","light"]') }}`);
     expect(analyzeGateSkips([routed], [], { publicRepo: true })).toEqual([]);
+    // the four-label form the repos use (spar#615, meld#587, gale#487, rivet#1219)
+    const four = probeWf();
+    four.text = four.text.replace('runs-on: [self-hosted, light]',
+      `runs-on: \${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}`);
+    expect(four.text).toContain('"linux","x64"');
+    expect(analyzeGateSkips([four], [], { publicRepo: true })).toEqual([]);
     // a private repo has no fork PRs from outside: the plain label is fine
     expect(analyzeGateSkips([probeWf()], [], { publicRepo: false })).toEqual([]);
   });
