@@ -101,7 +101,9 @@ permissions:
   contents: read
 jobs:
   gate-probe:
-    runs-on: [self-hosted, light]
+    # Public repos: fork PRs run on GitHub-hosted, never on our hosts.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","light"]') }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@<sha>
         with:
@@ -120,7 +122,16 @@ therefore:
   `continue-on-error`;
 - MUST NOT use `pull_request_target`;
 - MUST pin the action to a full 40-character temper commit sha;
-- MUST run with `permissions: contents: read` on `[self-hosted, light]`.
+- MUST run with `permissions: contents: read` on `[self-hosted, light]`;
+- in a public repo MUST route fork PRs to a GitHub-hosted runner with the
+  `head.repo.fork` expression above. The probe runs the PR's own detector
+  script, and the runner group admits public repos. A fork can edit this
+  line, so this is defence in depth: fork-PR approval
+  (`all_external_contributors`) remains the gate. The job still runs on
+  every PR, so it is never skipped. temper reports a self-hosted `runs-on`
+  without fork routing in a public repo as `probe_workflow_skippable`;
+- SHOULD set `timeout-minutes` so a hung detector cannot hold a required
+  check pending (a timeout is allowed and is not a skip).
 
 temper's `gate_skip` finding reports the first four as
 `probe_workflow_skippable`. The runner and permissions are checked by

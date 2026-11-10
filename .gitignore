@@ -68,3 +68,7 @@ bazel-*
 /bazel-out
 /bazel-testlogs
 /bazel-temper
+
+# Python bytecode (gate-probe and hostname-scan self-tests)
+__pycache__/
+*.pyc

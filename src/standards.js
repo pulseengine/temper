@@ -443,7 +443,7 @@ export function evaluateRepo(snap, std) {
   // A skipped required check passes: the filters in front of it must fail
   // closed. Report only; the fix lives in each repo (owner).
   if (Array.isArray(snap.workflowTexts)) {
-    const hits = analyzeGateSkips(snap.workflowTexts, st.allContexts, { probeContract: snap.probeContract ?? null });
+    const hits = analyzeGateSkips(snap.workflowTexts, st.allContexts, { probeContract: snap.probeContract ?? null, publicRepo: !st.private });
     f.push(finding('gate_skip', 'skipped required checks fail closed',
       hits.length ? hits.map((h) => `${h.rule} ${h.workflow}${h.job ? `#${h.job}` : ''}`).join('; ') : 'none found',
       hits.length > 0, 'owner', hits.map((h) => h.detail).join('; ')));
