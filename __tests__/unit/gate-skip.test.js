@@ -173,6 +173,13 @@ ${stepExtra}`);
     expect(analyzeGateSkips([probeWf()], ['gate-probe'])).toEqual([]);
   });
 
+  it('a job timeout is allowed (gale requires one on every job)', () => {
+    const w = probeWf();
+    w.text = w.text.replace('    runs-on: [self-hosted, light]\n', '    runs-on: [self-hosted, light]\n    timeout-minutes: 10\n');
+    expect(w.text).toContain('timeout-minutes: 10');
+    expect(analyzeGateSkips([w], ['gate-probe'])).toEqual([]);
+  });
+
   it.each([
     ['paths filter', { on: "pull_request:\n    paths: ['src/**']" }, 'pull_request.paths'],
     ['paths-ignore', { on: "pull_request:\n    paths-ignore: ['**/*.md']" }, 'pull_request.paths-ignore'],

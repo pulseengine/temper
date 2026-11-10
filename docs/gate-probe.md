@@ -102,6 +102,7 @@ permissions:
 jobs:
   gate-probe:
     runs-on: [self-hosted, light]
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@<sha>
         with:
@@ -120,7 +121,9 @@ therefore:
   `continue-on-error`;
 - MUST NOT use `pull_request_target`;
 - MUST pin the action to a full 40-character temper commit sha;
-- MUST run with `permissions: contents: read` on `[self-hosted, light]`.
+- MUST run with `permissions: contents: read` on `[self-hosted, light]`;
+- SHOULD set `timeout-minutes` so a hung detector cannot hold a required
+  check pending (a timeout is allowed and is not a skip).
 
 temper's `gate_skip` finding reports the first four as
 `probe_workflow_skippable`. The runner and permissions are checked by
