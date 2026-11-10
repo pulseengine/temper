@@ -24,7 +24,9 @@
  *   probe_workflow_skippable   the workflow that runs the gate-probe action
  *                              can be skipped or weakened: a pull_request
  *                              filter, an `if:`, pull_request_target, or an
- *                              action ref that is not a full commit sha
+ *                              action ref that is not a full commit sha; in
+ *                              a public repo, also a self-hosted runs-on
+ *                              that does not route fork PRs elsewhere
  * Whether a detector itself fails closed is the behavioural probe's job
  * (.github/actions/gate-probe): source text cannot show it.
  */
@@ -111,7 +113,7 @@ export function readProbeContract(text) {
  * @param {{probeContract?: boolean}} [opts]
  * @returns {{rule: string, workflow: string, job?: string, detail: string}[]}
  */
-export function analyzeGateSkips(files, requiredContexts, { probeContract = false } = {}) {
+export function analyzeGateSkips(files, requiredContexts, { probeContract = false, publicRepo = false } = {}) {
   const contract = readProbeContract(probeContract);
   const wfs = parseWorkflows(files);
   const required = new Set(requiredContexts);
@@ -210,14 +212,14 @@ export function analyzeGateSkips(files, requiredContexts, { probeContract = fals
       }
     }
   }
-  hits.push(...probeWorkflowHits(wfs));
+  hits.push(...probeWorkflowHits(wfs, { publicRepo }));
   return hits;
 }
 
 const PROBE_USES = /^pulseengine\/temper\/\.github\/actions\/gate-probe@(.*)$/;
 
 /** A skipped job reports success, so the probe's own workflow must never skip. */
-export function probeWorkflowHits(wfs) {
+export function probeWorkflowHits(wfs, { publicRepo = false } = {}) {
   const hits = [];
   for (const wf of wfs) {
     for (const [id, { job }] of Object.entries(wf.jobs)) {
@@ -239,6 +241,12 @@ export function probeWorkflowHits(wfs) {
         if (!/^[0-9a-f]{40}$/.test(ref)) problems.push('action ref is not a full sha');
       }
       if (job['continue-on-error'] !== undefined) problems.push('job continue-on-error');
+      // The probe runs the PR's own detector: in a public repo a fork PR
+      // must not land on our self-hosted runners (owner decision 2026-11-10).
+      const runsOn = JSON.stringify(job['runs-on'] ?? '');
+      if (publicRepo && runsOn.includes('self-hosted') && !runsOn.includes('head.repo.fork')) {
+        problems.push('self-hosted runs-on without fork routing');
+      }
       if (problems.length) {
         hits.push({ rule: 'probe_workflow_skippable', workflow: wf.path, job: id, detail: problems.join(', ') });
       }

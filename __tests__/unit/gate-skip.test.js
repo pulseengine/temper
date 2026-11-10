@@ -173,6 +173,18 @@ ${stepExtra}`);
     expect(analyzeGateSkips([probeWf()], ['gate-probe'])).toEqual([]);
   });
 
+  it('a public repo must route fork PRs off self-hosted runners', () => {
+    const plain = analyzeGateSkips([probeWf()], [], { publicRepo: true });
+    expect(plain).toHaveLength(1);
+    expect(plain[0].detail).toContain('self-hosted runs-on without fork routing');
+    const routed = probeWf();
+    routed.text = routed.text.replace('runs-on: [self-hosted, light]',
+      `runs-on: \${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","light"]') }}`);
+    expect(analyzeGateSkips([routed], [], { publicRepo: true })).toEqual([]);
+    // a private repo has no fork PRs from outside: the plain label is fine
+    expect(analyzeGateSkips([probeWf()], [], { publicRepo: false })).toEqual([]);
+  });
+
   it('a job timeout is allowed (gale requires one on every job)', () => {
     const w = probeWf();
     w.text = w.text.replace('    runs-on: [self-hosted, light]\n', '    runs-on: [self-hosted, light]\n    timeout-minutes: 10\n');
