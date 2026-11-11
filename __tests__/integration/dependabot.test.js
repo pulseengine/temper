@@ -723,11 +723,24 @@ describe('dependabot', () => {
       expect(result.updates).toEqual([]);
     });
 
-    it('always emits the standard groups so one release lands as one PR', () => {
-      const result = buildDependabotYaml([{ ecosystem: 'cargo', directory: '/' }]);
-      expect(result.groups['wasm-tools-family'].patterns).toContain('wasmparser');
-      expect(result.groups.wasmtime.patterns).toContain('wasmtime-*');
-      expect(result.groups['github-actions-all']['package-ecosystem']).toBe('github-actions');
+    it('puts the standard groups on the entries of their ecosystem, never top-level', () => {
+      const result = buildDependabotYaml([
+        { ecosystem: 'cargo', directory: '/' },
+        { ecosystem: 'github-actions', directory: '/' },
+        { ecosystem: 'npm', directory: '/web' }
+      ]);
+      // dependabot's validator rejects a top-level groups: key
+      expect(result).not.toHaveProperty('groups');
+      const [cargo, actions, npm] = result.updates;
+      expect(cargo.groups['wasm-tools-family'].patterns).toContain('wasmparser');
+      expect(cargo.groups.wasmtime.patterns).toContain('wasmtime-*');
+      expect(cargo.groups).not.toHaveProperty('github-actions-all');
+      // patterns are globs on the dependency name, not regexes
+      expect(actions.groups).toEqual({ 'github-actions-all': { patterns: ['*'] } });
+      expect(npm).not.toHaveProperty('groups');
+      for (const u of result.updates) {
+        for (const g of Object.values(u.groups || {})) expect(g).not.toHaveProperty('package-ecosystem');
+      }
     });
   });
 

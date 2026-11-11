@@ -356,119 +356,127 @@ function registerApp(app, options = {}) {
     const deliveryId = context.id;
     if (deliveryId && isProcessed(deliveryId)) return;
 
-    const { issue, repository, sender } = context.payload;
-    const fullName = repository.full_name;
+    // Bug #6: mark the delivery even when a reply or enqueue throws. A
+    // Probot redelivery would otherwise post the reply or enqueue again.
+    try {
+      const { issue, repository, sender } = context.payload;
+      const fullName = repository.full_name;
 
-    // ChatOps issue forms in the admin repo: a `chatops:<command>` label on
-    // a newly-opened issue triggers the corresponding ChatOps action,
-    // bot replies on the issue, optionally closes it.
-    const chatopsCfg = getChatopsRepoConfig();
-    if (chatopsCfg?.enabled && fullName === chatopsCfg.repo) {
-      const chatopsLabel = (issue.labels || [])
-        .map((l) => l?.name)
-        .find((n) => typeof n === 'string' && n.startsWith('chatops:'));
-      if (chatopsLabel) {
-        await handleChatopsIssue(context, chatopsLabel, sender, issue, repository);
+      // ChatOps issue forms in the admin repo: a `chatops:<command>` label on
+      // a newly-opened issue triggers the corresponding ChatOps action,
+      // bot replies on the issue, optionally closes it.
+      const chatopsCfg = getChatopsRepoConfig();
+      if (chatopsCfg?.enabled && fullName === chatopsCfg.repo) {
+        const chatopsLabel = (issue.labels || [])
+          .map((l) => l?.name)
+          .find((n) => typeof n === 'string' && n.startsWith('chatops:'));
+        if (chatopsLabel) {
+          await handleChatopsIssue(context, chatopsLabel, sender, issue, repository);
+          if (deliveryId) markProcessed(deliveryId);
+          return;
+        }
+      }
+
+      const ctrl = getControllerRepoConfig();
+      if (!ctrl?.enabled) {
         if (deliveryId) markProcessed(deliveryId);
         return;
       }
-    }
 
-    const ctrl = getControllerRepoConfig();
-    if (!ctrl?.enabled) {
-      if (deliveryId) markProcessed(deliveryId);
-      return;
-    }
-
-    if (fullName !== ctrl.repo) {
-      if (deliveryId) markProcessed(deliveryId);
-      return;
-    }
-
-    const expectedLabel = ctrl.label || 'repo-request';
-    const hasLabel = (issue.labels || []).some((l) => l.name === expectedLabel);
-    if (!hasLabel) {
-      if (deliveryId) markProcessed(deliveryId);
-      return;
-    }
-
-    const owner = repository.owner.login;
-    const repo = repository.name;
-    const senderLogin = sender?.login;
-
-    // Auth gate: provisioning a real org repo is a high-trust action.
-    // Comment-driven ChatOps already requires `allowed_command_users` AND
-    // org membership; the issue-form path (Cut A provisioning) had no such
-    // gate before this commit (Bug #4 in `docs/agent-fleet/bugs.md`).
-    // Anyone able to file a labelled issue could trigger repo creation.
-    const config = getConfig();
-    const allowedUsers = config?.allowed_command_users || [];
-    if (allowedUsers.length > 0 && !allowedUsers.includes(senderLogin)) {
-      await issueOps.createComment(context.octokit, {
-        owner, repo, issue_number: issue.number,
-        body: `❌ You are not authorised to provision repos. Allowed users: ${allowedUsers.join(', ')}.`
-      });
-      if (deliveryId) markProcessed(deliveryId);
-      return;
-    }
-    // Defence in depth: also require org membership in the controller repo's
-    // owner org. checkOrganizationMembership returns false on 404 / network
-    // errors — if it can't confirm membership, refuse.
-    if (!(await checkOrganizationMembership(context.octokit, owner, senderLogin))) {
-      await issueOps.createComment(context.octokit, {
-        owner, repo, issue_number: issue.number,
-        body: '❌ You must be a member of the organisation to provision repos.'
-      });
-      if (deliveryId) markProcessed(deliveryId);
-      return;
-    }
-
-    const fields = parseIssueFormBody(issue.body || '');
-    const validation = validateProvisionRequest(fields);
-
-    if (!validation.valid) {
-      await issueOps.createComment(context.octokit,{
-        owner,
-        repo,
-        issue_number: issue.number,
-        body: `❌ Provisioning request rejected: ${validation.error}`
-      });
-      if (deliveryId) markProcessed(deliveryId);
-      return;
-    }
-
-    const enqueueTask = getEnqueueTask();
-    if (!enqueueTask) {
-      getLogger().warn('Task store not initialized — cannot enqueue provision-repo task');
-      await issueOps.createComment(context.octokit,{
-        owner,
-        repo,
-        issue_number: issue.number,
-        body: '⚠️  Provisioning is not currently available (task store offline). Please retry later.'
-      });
-      if (deliveryId) markProcessed(deliveryId);
-      return;
-    }
-
-    enqueueTask(
-      'provision-repo',
-      `provision-repo:${owner}/${repo}#${issue.number}`,
-      {
-        sourceOwner: owner,
-        sourceRepo: repo,
-        sourceIssue: issue.number,
-        params: validation.params
+      if (fullName !== ctrl.repo) {
+        if (deliveryId) markProcessed(deliveryId);
+        return;
       }
-    );
 
-    await issueOps.createComment(context.octokit,{
-      owner,
-      repo,
-      issue_number: issue.number,
-      body: `✅ Request accepted. Provisioning \`${validation.params.name}\` (${validation.params.visibility}) — you'll get a confirmation comment when the repo is ready.`
-    });
+      const expectedLabel = ctrl.label || 'repo-request';
+      const hasLabel = (issue.labels || []).some((l) => l.name === expectedLabel);
+      if (!hasLabel) {
+        if (deliveryId) markProcessed(deliveryId);
+        return;
+      }
 
-    if (deliveryId) markProcessed(deliveryId);
+      const owner = repository.owner.login;
+      const repo = repository.name;
+      const senderLogin = sender?.login;
+
+      // Auth gate: provisioning a real org repo is a high-trust action.
+      // Comment-driven ChatOps already requires `allowed_command_users` AND
+      // org membership; the issue-form path (Cut A provisioning) had no such
+      // gate before this commit (Bug #4 in `docs/agent-fleet/bugs.md`).
+      // Anyone able to file a labelled issue could trigger repo creation.
+      const config = getConfig();
+      const allowedUsers = config?.allowed_command_users || [];
+      if (allowedUsers.length > 0 && !allowedUsers.includes(senderLogin)) {
+        await issueOps.createComment(context.octokit, {
+          owner, repo, issue_number: issue.number,
+          body: `❌ You are not authorised to provision repos. Allowed users: ${allowedUsers.join(', ')}.`
+        });
+        if (deliveryId) markProcessed(deliveryId);
+        return;
+      }
+      // Defence in depth: also require org membership in the controller repo's
+      // owner org. checkOrganizationMembership returns false on 404 / network
+      // errors — if it can't confirm membership, refuse.
+      if (!(await checkOrganizationMembership(context.octokit, owner, senderLogin))) {
+        await issueOps.createComment(context.octokit, {
+          owner, repo, issue_number: issue.number,
+          body: '❌ You must be a member of the organisation to provision repos.'
+        });
+        if (deliveryId) markProcessed(deliveryId);
+        return;
+      }
+
+      const fields = parseIssueFormBody(issue.body || '');
+      const validation = validateProvisionRequest(fields);
+
+      if (!validation.valid) {
+        await issueOps.createComment(context.octokit,{
+          owner,
+          repo,
+          issue_number: issue.number,
+          body: `❌ Provisioning request rejected: ${validation.error}`
+        });
+        if (deliveryId) markProcessed(deliveryId);
+        return;
+      }
+
+      const enqueueTask = getEnqueueTask();
+      if (!enqueueTask) {
+        getLogger().warn('Task store not initialized — cannot enqueue provision-repo task');
+        await issueOps.createComment(context.octokit,{
+          owner,
+          repo,
+          issue_number: issue.number,
+          body: '⚠️  Provisioning is not currently available (task store offline). Please retry later.'
+        });
+        if (deliveryId) markProcessed(deliveryId);
+        return;
+      }
+
+      enqueueTask(
+        'provision-repo',
+        `provision-repo:${owner}/${repo}#${issue.number}`,
+        {
+          sourceOwner: owner,
+          sourceRepo: repo,
+          sourceIssue: issue.number,
+          params: validation.params
+        }
+      );
+
+      await issueOps.createComment(context.octokit,{
+        owner,
+        repo,
+        issue_number: issue.number,
+        body: `✅ Request accepted. Provisioning \`${validation.params.name}\` (${validation.params.visibility}) — you'll get a confirmation comment when the repo is ready.`
+      });
+
+      if (deliveryId) markProcessed(deliveryId);
+    } catch (err) {
+      getLogger().error({ err, deliveryId }, 'issues.opened handler threw');
+    } finally {
+      if (deliveryId) markProcessed(deliveryId);
+    }
   });
 
   app.on('issue_comment.created', async (context) => {
@@ -540,6 +548,7 @@ function registerApp(app, options = {}) {
           issue_number: issueNumber,
           body: '❌ You must be an organization member to use this command.'
         });
+        if (deliveryId) markProcessed(deliveryId);
         return false;
       }
       return true;
@@ -553,6 +562,7 @@ function registerApp(app, options = {}) {
           issue_number: issueNumber,
           body: `❌ You are not authorized to use this command. Allowed users: ${allowedUsers.join(', ')}`
         });
+        if (deliveryId) markProcessed(deliveryId);
         return false;
       }
       return true;
@@ -806,6 +816,7 @@ function registerApp(app, options = {}) {
           issue_number: issueNumber,
           body: '❌ You are not authorized to run this command.'
         });
+        if (deliveryId) markProcessed(deliveryId);
         return;
       }
 
@@ -860,6 +871,7 @@ function registerApp(app, options = {}) {
           issue_number: issueNumber,
           body: '❌ `/review-pr` can only be used on pull requests, not issues.'
         });
+        if (deliveryId) markProcessed(deliveryId);
         return;
       }
 
@@ -1016,15 +1028,28 @@ function registerApp(app, options = {}) {
     }
   }
 
-  app.on('pull_request.opened', (context) => handlePullRequestOpenedOrReopened(context, 'opened'));
-  app.on('pull_request.reopened', (context) => handlePullRequestOpenedOrReopened(context, 'reopened'));
+  // Bug #13: a Probot redelivery (~5 retries on 5xx/timeout) must not re-run
+  // auto-merge enable, the AI review or the dependabot enqueue. The delivery is
+  // marked only after the handler returns, so a delivery that threw is retried.
+  const dedupeDelivery = (handler) => async (context) => {
+    const deliveryId = context.id;
+    if (deliveryId && isProcessed(deliveryId)) {
+      getLogger().info({ deliveryId }, 'Skipping duplicate webhook delivery');
+      return;
+    }
+    await handler(context);
+    if (deliveryId) markProcessed(deliveryId);
+  };
+
+  app.on('pull_request.opened', dedupeDelivery((context) => handlePullRequestOpenedOrReopened(context, 'opened')));
+  app.on('pull_request.reopened', dedupeDelivery((context) => handlePullRequestOpenedOrReopened(context, 'reopened')));
 
   // Re-review on force-push / new commits. supersedePreviousReviews inside
   // reviewPullRequest hides the previous bot comment so the PR shows only
   // the latest review. We deliberately skip the auto-merge and dependabot
   // checks — those decisions don't change when the diff is updated, only
   // when the PR is created or revived.
-  app.on('pull_request.synchronize', async (context) => {
+  app.on('pull_request.synchronize', dedupeDelivery(async (context) => {
     if (context.log) setLogger(context.log);
     const config = getConfig();
     const pr = context.payload.pull_request;
@@ -1051,7 +1076,7 @@ function registerApp(app, options = {}) {
     } catch (err) {
       getLogger().warn({ pr: pr.number, err: err.message }, 'Re-review failed after synchronize');
     }
-  });
+  }));
 
   app.on('pull_request.closed', async (context) => {
     if (context.log) setLogger(context.log);
