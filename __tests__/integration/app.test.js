@@ -513,6 +513,21 @@ describe('app', () => {
       expect(body).toMatch(/task store offline/i);
     });
 
+    // Bug #6: a reply that throws must still mark the delivery, or a Probot
+    // redelivery posts it again.
+    it('marks the delivery processed even when a reply throws', async () => {
+      _setConfigForTesting({
+        controller_repo: { enabled: true, repo: 'pulseengine/repo-requests', label: 'repo-request' }
+      });
+      const { handlers } = setupApp();
+      const context = createIssueOpenedContext();
+      context.octokit.issues.createComment.mockRejectedValue(new Error('GitHub 503'));
+      context.octokit.request.mockRejectedValue(new Error('GitHub 503'));
+
+      await expect(handlers['issues.opened'](context)).resolves.toBeUndefined();
+      expect(markProcessed).toHaveBeenCalledWith('delivery-issues-1');
+    });
+
     // Bug #4 — auth gate before provisioning
     it('rejects sender not in allowed_command_users with a comment', async () => {
       _setConfigForTesting({
@@ -815,6 +830,36 @@ describe('app', () => {
 
       expect(reviewPullRequest).toHaveBeenCalledWith(octokit, 'pulseengine', 'rivet', 99);
     });
+
+    // Bug #13: a redelivered PR event must not re-run auto-merge, the AI
+    // review or the dependabot enqueue.
+    it.each(['pull_request.opened', 'pull_request.reopened', 'pull_request.synchronize'])(
+      '%s skips a duplicate delivery and marks a completed one', async (event) => {
+        _setConfigForTesting({ ai_review: { enabled: true } });
+        reviewPullRequest.mockClear();
+        reviewPullRequest.mockResolvedValue({ success: true });
+        const { handlers } = setupApp();
+        const context = (id) => ({
+          id,
+          log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+          octokit: createMockOctokit(),
+          payload: {
+            pull_request: { number: 7, node_id: 'PR_7', user: { login: 'human' } },
+            repository: { name: 'rivet', owner: { login: 'pulseengine' }, default_branch: 'main' },
+            sender: { login: 'human' }
+          }
+        });
+
+        isProcessed.mockReturnValue(true);
+        await handlers[event](context('delivery-dup'));
+        expect(reviewPullRequest).not.toHaveBeenCalled();
+        expect(markProcessed).not.toHaveBeenCalled();
+
+        isProcessed.mockReturnValue(false);
+        await handlers[event](context('delivery-new'));
+        expect(reviewPullRequest).toHaveBeenCalledTimes(1);
+        expect(markProcessed).toHaveBeenCalledWith('delivery-new');
+      });
 
     it('pull_request.synchronize skips review for bot-authored PRs', async () => {
       _setConfigForTesting({ ai_review: { enabled: true } });
@@ -1342,6 +1387,28 @@ describe('app', () => {
 
         const body = context.octokit.issues.createComment.mock.calls[0][0].body;
         expect(body).toContain('Configuration failed: Permission denied');
+      });
+
+      // Bug #6: an auth-failure reply marks the delivery, so a redelivery
+      // does not post the same rejection again.
+      it('marks processed when rejected for non-membership', async () => {
+        checkOrganizationMembership.mockResolvedValue(false);
+        const { handlers } = setupApp();
+        const context = createIssueCommentContext('/configure-repo');
+        await handlers['issue_comment.created'](context);
+
+        expect(configureRepository).not.toHaveBeenCalled();
+        expect(markProcessed).toHaveBeenCalledWith('delivery-2');
+      });
+
+      it('marks processed when rejected for not being an allowed user', async () => {
+        _setConfigForTesting({ allowed_command_users: ['someone-else'] });
+        const { handlers } = setupApp();
+        const context = createIssueCommentContext('/configure-repo');
+        await handlers['issue_comment.created'](context);
+
+        expect(configureRepository).not.toHaveBeenCalled();
+        expect(markProcessed).toHaveBeenCalledWith('delivery-2');
       });
 
       it('does not mark processed when deliveryId is absent', async () => {
@@ -1925,6 +1992,7 @@ describe('app', () => {
         const body = context.octokit.issues.createComment.mock.calls[0][0].body;
         expect(body).toContain('can only be used on pull requests');
         expect(reviewPullRequest).not.toHaveBeenCalled();
+        expect(markProcessed).toHaveBeenCalledWith('delivery-2');
       });
 
       it('posts working comment, reviews PR, and deletes working comment on success', async () => {

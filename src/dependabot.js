@@ -292,35 +292,44 @@ function buildDependabotYaml(ecosystems, genConfig = {}) {
   const schedule = genConfig.default_schedule || 'weekly';
   const labels = genConfig.default_labels || ['dependencies'];
 
-  const updates = ecosystems.map(({ ecosystem, directory }) => ({
-    'package-ecosystem': ecosystem,
-    directory,
-    schedule: { interval: schedule },
-    labels
-  }));
-
-  // One PR per logical release across all directories. Version-locked families
-  // (wasm-tools, wasmtime) and all github-actions pins in / must not split into
-  // one PR per directory — on loom/witness/mcp/relay/rules_wasm_component a single
-  // upstream release arrived as 4-8 PRs because each directory got its own.
-  const groups = {
-    'wasm-tools-family': {
-      patterns: [
-        'wasmparser',
-        'wasm-encoder',
-        'wasmprinter',
-        'wit-component',
-        'wit-parser',
-        'wasm-metadata',
-        'wat',
-        'walrus'
-      ]
+  // dependabot.yml has no top-level groups: (its validator rejects it); groups
+  // is a per-entry key, and its patterns are globs on the dependency name. So
+  // each standard group rides on the entries of the ecosystem it belongs to.
+  // Version-locked families (wasm-tools, wasmtime) and the action pins each
+  // land as one PR per entry instead of one PR per dependency.
+  const groupsByEcosystem = {
+    cargo: {
+      'wasm-tools-family': {
+        patterns: [
+          'wasmparser',
+          'wasm-encoder',
+          'wasmprinter',
+          'wit-component',
+          'wit-parser',
+          'wasm-metadata',
+          'wat',
+          'walrus'
+        ]
+      },
+      wasmtime: { patterns: ['wasmtime', 'wasmtime-*'] }
     },
-    wasmtime: { patterns: ['wasmtime', 'wasmtime-*'] },
-    'github-actions-all': { 'package-ecosystem': 'github-actions', patterns: ['*'] }
+    'github-actions': {
+      'github-actions-all': { patterns: ['*'] }
+    }
   };
 
-  return { version: 2, groups, updates };
+  const updates = ecosystems.map(({ ecosystem, directory }) => {
+    const entry = {
+      'package-ecosystem': ecosystem,
+      directory,
+      schedule: { interval: schedule },
+      labels
+    };
+    if (groupsByEcosystem[ecosystem]) entry.groups = groupsByEcosystem[ecosystem];
+    return entry;
+  });
+
+  return { version: 2, updates };
 }
 
 /**
