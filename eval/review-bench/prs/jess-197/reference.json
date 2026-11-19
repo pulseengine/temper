@@ -1,0 +1,36 @@
+{
+ "pr": "jess#197",
+ "reviewer": "opus",
+ "findings": [
+  {
+   "file": "tools/timer-probe/run.sh",
+   "line": 31,
+   "quoted_line": "wasm-tools component new \"$TICK\" -o \"$OUT/hal-tick.wasm\"",
+   "class": "error-handling",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "medium",
+   "claim": "Script runs with `set -uo pipefail` (no -e) and this line has no `|| fail`. If componentizing the tick HAL fails, compose silently reuses a hal-tick.wasm left in the persistent $OUT from an earlier run: the same stale-artifact failure this PR claims to close."
+  },
+  {
+   "file": "tools/timer-probe/run.sh",
+   "line": 59,
+   "quoted_line": "    print(f\"  -> the wake FIRED after {elapsed} poll(s) — the timer path WORKS end to end\")",
+   "class": "logic",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "low",
+   "claim": "The 'timer path WORKS end to end' verdict is printed whenever elapsed != 0, without checking bits 0-5. It prints even if the negative control (bit4) or spawn/armed bits FAIL, and the script exits 0 either way, so a broken run can still report success."
+  },
+  {
+   "file": "tools/timer-probe/run.sh",
+   "line": 30,
+   "quoted_line": "[ -e \"$stale\" ] && fail \"stale stub artifact in the tick crate's target dir: $stale — remove it\"",
+   "class": "test-gap",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "low",
+   "claim": "AFD-049 says this refusal is negative-controlled (rc=1 with the stale file, rc=0 without), but the PR adds no test or CI step that exercises it. That control was a manual one-off and nothing re-proves it."
+  }
+ ]
+}

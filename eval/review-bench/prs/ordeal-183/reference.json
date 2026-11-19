@@ -1,0 +1,46 @@
+{
+ "pr": "ordeal#183",
+ "reviewer": "opus",
+ "findings": [
+  {
+   "file": "crates/ordeal/src/smtlib.rs",
+   "line": 910,
+   "quoted_line": "            // width 5: rotate_right by k >= 2^w is k mod w (9 mod 5 = 4)",
+   "class": "test-gap",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "medium",
+   "claim": "Case claims k >= 2^w but k=9 < 2^5=32, so 9 mod 32 = 9 and Rotr reduces to 4 anyway; the new `k % w` reduction in rotate_right/rotate_left is exercised by no test (k>=32 at w=5, e.g. 33, would be needed)."
+  },
+  {
+   "file": "crates/ordeal/src/smtlib.rs",
+   "line": 927,
+   "quoted_line": "            \"(declare-const x (_ BitVec 5))(declare-const b (_ BitVec 5))(assert (distinct ((_ rotate_left 2) ((_ rotate_right 2) x)) x))(check-sat)\",",
+   "class": "test-gap",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "low",
+   "claim": "Doc says rotl undoes rotr for a VARIABLE amount, but the query uses constant indices 2 and the declared `b` is unused; the non-pow2 bvrotl Urem(Sub(w, Urem(b,w)),w) path with a symbolic amount is never blasted and solved, only evaluated."
+  },
+  {
+   "file": "crates/ordeal/tests/fixtures/differential/sat_lshr_nonpow2_w24.smt2",
+   "line": 2,
+   "quoted_line": "; soundness regression (0.22.1): non-power-of-two widths must not come back unsat",
+   "class": "vacuous-check",
+   "net_class": "vacuous-gate",
+   "cwe": null,
+   "severity": "medium",
+   "claim": "The only consumer of fixtures/differential is wasm_native_differential.sh, which checks native==wasm output, not the verdict. A regression answering unsat in both builds passes, so these fixtures cannot catch the soundness bug they are labelled as regressions for."
+  },
+  {
+   "file": "crates/ordeal/src/oracle.rs",
+   "line": 650,
+   "quoted_line": "const WIDTHS: [u32; 7] = [3, 5, 8, 12, 24, 32, 64];",
+   "class": "config-ci",
+   "net_class": "skipped-or-non-required-check",
+   "cwe": null,
+   "severity": "medium",
+   "claim": "TR-049 relies on the widened Z3 differential so the bug 'cannot recur silently', but it runs only in ci.yml's `oracle` job with continue-on-error: true. A recurrence that only the differential sees would leave the merge gate green."
+  }
+ ]
+}

@@ -1,0 +1,11 @@
+[package]
+name = "revmatch"
+version = "0.1.0"
+edition = "2021"
+description = "Match AI-review findings against a reference by file, line and class (temper#92)"
+license = "MIT"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -1,0 +1,1053 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 6837d2b..833b501 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -103,6 +103,40 @@ jobs:
+         working-directory: jess
+         run: tools/rivet/snapshot.sh | tee -a "$GITHUB_STEP_SUMMARY"
+ 
++  # The shared-bench claim (AFD-081, DD-027) is the one BINARY jess ships, and gale runs it
++  # on the same bench. A lock that silently fails to exclude is worse than no lock: both
++  # agents then believe they hold the probe. So the tool's own `--self-test` is a CI gate,
++  # not a thing someone remembers to run — it asserts exclusion under contention, release on
++  # crash, refusal of an unregistered name, and the opposite-order pair completing without
++  # deadlock. Negative-controlled: see the module header in src/main.rs for which mechanism
++  # that last check actually discriminates on (it is hold-and-wait, not the sort).
++  bench-tool:
++    name: with-device (shared-bench claim)
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - name: build + self-test
++        working-directory: tools/bench/with-device
++        run: |
++          set -euo pipefail
++          cargo build --release
++          B=target/release/with-device
++          # CLI baseline (pulseengine-cli-conventions): --version/-V and --help exit 0,
++          # an unknown flag exits 2 with usage on stderr.
++          test "$($B --version)" = "with-device $(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
++          $B --help >/dev/null
++          $B -V >/dev/null
++          # `rc=0; cmd || rc=$?` and NOT `cmd; rc=$?` — under `set -e` the latter aborts the
++          # step on the very failure it is trying to measure, so the assertion never runs.
++          rc=0; $B --no-such-flag -- true 2>/dev/null || rc=$?
++          test "$rc" = 2 || { echo "unknown flag rc=$rc, want 2"; exit 1; }
++          $B --self-test
++      - name: clippy + fmt
++        working-directory: tools/bench/with-device
++        run: |
++          cargo fmt --check
++          cargo clippy --release -- -D warnings
++
+   # The spar/AADL model of the Phase-2 platform must stay parseable + instantiable.
+   spar-model:
+     name: spar model (Pixhawk 6X-RT)
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+new file mode 100644
+index 0000000..9cde2b6
+--- /dev/null
++++ b/.github/workflows/release.yml
+@@ -0,0 +1,110 @@
++name: Release
++
++# Cuts the release assets for jess's own shipped binary: `with-device`, the shared-bench
++# claim (AFD-081, DD-027). Until now jess cut releases by hand and shipped no binary, so
++# `with-device` existed only as a file in this repo — gale could read it but not RUN it, and
++# varve could not carry it (varve#130 needs a signed release asset with a digest, not a path).
++#
++# Asset naming follows the convention every other PulseEngine repo publishes and that
++# tools/deps/fetch.sh already parses:
++#     with-device-<version>-<target-triple>.tar.gz   +   SHA256SUMS.txt
++# so a consumer pins it exactly like synth or meld:
++#     release:pulseengine/jess@vX.Y.Z!with-device-<v>-<triple>.tar.gz!with-device
++
++on:
++  push:
++    tags: ['v*']
++  workflow_dispatch:
++    inputs:
++      tag:
++        description: 'Existing tag to build and attach assets to'
++        required: true
++
++permissions:
++  contents: write
++
++jobs:
++  build:
++    name: build ${{ matrix.target }}
++    runs-on: ${{ matrix.os }}
++    strategy:
++      fail-fast: false
++      matrix:
++        include:
++          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
++          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu }
++          - { os: macos-14,      target: aarch64-apple-darwin }
++          - { os: macos-14,      target: x86_64-apple-darwin }
++    steps:
++      - uses: actions/checkout@v4
++      - name: rust target
++        run: rustup target add ${{ matrix.target }}
++      # The crate has zero dependencies and calls flock(2) via a bare `extern "C"`, so a
++      # cross build needs only a linker — no sysroot, no `cross`, no container.
++      - name: aarch64 linux cross-linker
++        if: matrix.target == 'aarch64-unknown-linux-gnu'
++        run: |
++          sudo apt-get update -qq
++          sudo apt-get install -y -qq gcc-aarch64-linux-gnu
++          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
++      - name: build
++        working-directory: tools/bench/with-device
++        run: cargo build --release --target ${{ matrix.target }}
++      # Self-test only where the binary can actually execute. A cross-built artifact is
++      # shipped UNTESTED unless its host runs it; say so rather than implying coverage.
++      # x86_64-apple-darwin runs under Rosetta on macos-14, so it is exercised too.
++      - name: self-test (native + rosetta targets only)
++        if: matrix.target != 'aarch64-unknown-linux-gnu'
++        working-directory: tools/bench/with-device
++        run: |
++          BIN=target/${{ matrix.target }}/release/with-device
++          "$BIN" --version
++          "$BIN" --self-test
++      - name: package
++        working-directory: tools/bench/with-device
++        run: |
++          set -euo pipefail
++          # Read the version from Cargo.toml, not from `--version`: the aarch64-linux
++          # artifact is cross-built and cannot be executed on this runner.
++          VER=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
++          test -n "$VER"
++          NAME="with-device-${VER}-${{ matrix.target }}"
++          mkdir -p "/tmp/pkg/$NAME"
++          cp "target/${{ matrix.target }}/release/with-device" "/tmp/pkg/$NAME/"
++          cp ../devices.yaml "/tmp/pkg/$NAME/devices.yaml.example"
++          tar czf "/tmp/${NAME}.tar.gz" -C /tmp/pkg "$NAME"
++          ls -l "/tmp/${NAME}.tar.gz"
++      - uses: actions/upload-artifact@v4
++        with:
++          name: pkg-${{ matrix.target }}
++          path: /tmp/with-device-*.tar.gz
++          if-no-files-found: error
++
++  publish:
++    name: attach assets to the release
++    needs: build
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/download-artifact@v4
++        with: { path: /tmp/assets, merge-multiple: true }
++      - name: SHA256SUMS.txt
++        working-directory: /tmp/assets
++        run: |
++          set -euo pipefail
++          ls -1 *.tar.gz
++          sha256sum *.tar.gz > SHA256SUMS.txt
++          cat SHA256SUMS.txt
++      - name: upload
++        working-directory: /tmp/assets
++        env:
++          GH_TOKEN: ${{ github.token }}
++          TAG: ${{ github.event.inputs.tag || github.ref_name }}
++        run: |
++          set -euo pipefail
++          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
++            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes
++          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber *.tar.gz SHA256SUMS.txt
++          echo "attached to $TAG:"
++          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
++            --jq '.assets[].name'
+diff --git a/artifacts/findings.yaml b/artifacts/findings.yaml
+index b507a13..818c981 100644
+--- a/artifacts/findings.yaml
++++ b/artifacts/findings.yaml
+@@ -4314,3 +4314,74 @@ artifacts:
+       created-by: ai
+       model: claude-opus-4-8
+       timestamp: 2026-09-05T10:49:09Z
++
++  - id: AFD-083
++    type: ai-found-defect
++    title: "my own deadlock rationale failed its negative control: the self-test passes with the sort REMOVED — what prevents deadlock is no-hold-and-wait, not the ordering (with-device ported to Rust, released, CI-gated)"
++    status: open
++    description: |-
++      2026-09-05. Board attached; Track A. User set three requirements for the shared-bench claim tool:
++      deadlock-free under multi-device claims, shipped in the GitHub release, and Rust mandatory.
++      All three are met. But the load-bearing result of this tick is a negative control that
++      CONTRADICTED THE DESIGN RATIONALE I HAD ALREADY WRITTEN INTO THE CODE.
++
++      *** THE PORT (requirement 3) ***: tools/bench/with-device is now a Rust crate, replacing the
++      Python script at the same path (v0.1.0 -> v0.2.0). ZERO dependencies: flock(2) is declared with a
++      bare `extern "C"`, so the crate that will sit in a signed varve layer has nothing to vendor and
++      nothing to audit but itself. clippy -D warnings + cargo fmt --check clean.
++
++      *** THE FINDING: MY OWN DEADLOCK ARGUMENT DID NOT SURVIVE ITS NEGATIVE CONTROL ***
++      I designed sorted acquisition (Dijkstra's resource hierarchy: all claimants take locks in one
++      global order, so no cycle can form) and wrote in the module header that `--self-test` PROVES it,
++      by racing two processes that request the same two devices in OPPOSITE order. The self-test went
++      green on the first run. Reporting it there would have been a confident wrong claim.
++
++      Then I removed the sort and re-ran. Measured on this binary:
++        as shipped                        opposite-order pair -> 0,0 in 2.1 s   PASS
++        sort REMOVED, everything else     opposite-order pair -> 0,0 in 2.1 s   PASS  <-- test blind
++        sort removed AND hold-and-wait    opposite-order pair -> 3,3 in 15.1 s  FAIL  <-- real cycle,
++                                          restored                                    broken only by the
++                                                                                      --wait deadline
++
++      So the mechanism that actually prevents deadlock here is NO HOLD-AND-WAIT: on contention the
++      claimant DROPS every lock it already holds before retrying, which breaks Coffman's hold-and-wait
++      condition outright. The sort is real and kept as defence in depth (it is what would still hold if
++      --wait ever grew a blocking flock(LOCK_EX) path, where drop-and-retry is unavailable), but the
++      self-test does not discriminate on it. The 3,3-in-15.1s control is what makes the test non-vacuous
++      at all: without it, a test that passes on EVERY variant is a test that measures nothing.
++
++      This is the AFD-048 failure mode - a vacuous negative control - caught at authoring time instead
++      of by a clean-room pass, and caught in the rationale rather than the code. The code was correct;
++      the STATED REASON it was correct was wrong. Module header now carries the table above and says
++      plainly which mechanism the test sees. Generalised lesson: "I designed property P and the test
++      passes" is not evidence for P. Break P and confirm the test goes red. Design intent is the thing
++      least likely to be independently checked later, because it reads as explanation, not as a claim.
++
++      *** THE RELEASE (requirement 2) ***: jess had NO release workflow - v0.6.0 was cut by hand and jess
++      shipped no binary at all, which is why with-device existed only as a file gale could read but not
++      run, and why varve#130 had nothing to pin (a varve layer needs a signed release asset with a
++      digest, not a repo path). .github/workflows/release.yml now builds 4 targets
++      (x86_64/aarch64-unknown-linux-gnu, aarch64/x86_64-apple-darwin) on tag push, emits
++      with-device-<ver>-<triple>.tar.gz + SHA256SUMS.txt in the same shape every other PulseEngine repo
++      publishes and tools/deps/fetch.sh already parses, so a consumer pins it exactly like synth or meld.
++      HONEST SCOPE: aarch64-unknown-linux-gnu is CROSS-BUILT and its self-test is SKIPPED - that asset
++      ships unexecuted, and the workflow says so at the step rather than implying coverage. It is the
++      target the Pi will use, so it needs a real run before anyone trusts it there.
++
++      *** CI GATE ***: new `bench-tool` job runs build + the CLI baseline + --self-test on every PR. The
++      tool's own exclusion property is now gated rather than remembered. NOT YET EXECUTED IN CI at the
++      time of writing - this AFD is authored pre-merge; the verdict is the PR's.
++    tags: [bench, with-device, rust, deadlock, negative-control, self-correction, release, varve, afd-048, afd-081]
++    fields:
++      detected-by: jess negative-controlling its own deadlock claim before reporting it, 2026-09-05
++      severity: major
++      triage-status: confirmed
++    provenance:
++      created-by: ai
++      model: claude-opus-4-8
++      timestamp: 2026-09-05T11:04:49Z
++    links:
++      - type: traces-to
++        target: DD-027
++      - type: corrects
++        target: AFD-081
+diff --git a/tools/bench/with-device b/tools/bench/with-device
+deleted file mode 100755
+index 46dfe28..0000000
+--- a/tools/bench/with-device
++++ /dev/null
+@@ -1,207 +0,0 @@
+-#!/usr/bin/env python3
+-"""Run a command while holding an exclusive claim on a shared bench device.
+-
+-    with-device <device> <purpose> -- <command...>
+-    with-device --status
+-    with-device --self-test
+-
+-WHY IT IS SHAPED THIS WAY. Two agents (jess and gale) share one physical bench. The failure
+-mode that matters is not "two agents both want it" — it is "one agent crashed while holding
+-it and now nobody can use it". So the claim is held by an OS-level flock on an open fd for
+-exactly the lifetime of the wrapped command: when the process dies, for any reason, the
+-kernel drops the lock. There is no release step to forget and no stale-lock cleanup to write.
+-
+-Machine-local on purpose: a probe can only be driven from the host it is plugged into, so
+-two agents can only collide on the same machine. That makes a server, a GitHub-issue mutex
+-or a git-CAS lease all unnecessary complexity.
+-
+-Exit codes: the command's own, or 3 if the device is already claimed, 4 on usage error.
+-"""
+-import fcntl, json, os, sys, time, subprocess, datetime
+-
+-__version__ = "0.1.0"
+-PROG = "with-device"
+-
+-LOCKDIR = os.environ.get("BENCH_LOCKDIR", "/var/tmp/pulseengine-bench")
+-
+-
+-def _known_devices():
+-    """Device names from the registry. Parsed without a yaml dependency: the file is a fixed
+-    two-level shape, and adding a dep to a lock tool is a poor trade."""
+-    reg = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devices.yaml")
+-    names, in_devices = set(), False
+-    try:
+-        for line in open(reg):
+-            if line.startswith("devices:"):
+-                in_devices = True; continue
+-            if in_devices:
+-                if line.strip() and not line.startswith(("  ", "\t")):
+-                    break
+-                if line.startswith("  ") and not line.startswith("    ") and line.rstrip().endswith(":"):
+-                    names.add(line.strip()[:-1])
+-    except OSError:
+-        return set()          # no registry -> do not block anyone
+-    return names
+-
+-
+-def _paths(dev):
+-    return os.path.join(LOCKDIR, dev + ".lock"), os.path.join(LOCKDIR, dev + ".holder")
+-
+-
+-def status(json_out=False):
+-    if not os.path.isdir(LOCKDIR):
+-        print(json.dumps({"devices": []}) if json_out else "  no claims (no lock dir yet)")
+-        return 0
+-    any_held = False; rows = []
+-    for f in sorted(os.listdir(LOCKDIR)):
+-        if not f.endswith(".lock"):
+-            continue
+-        dev = f[:-5]
+-        lock, holder = _paths(dev)
+-        fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o666)
+-        try:
+-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+-            fcntl.flock(fd, fcntl.LOCK_UN)
+-            rows.append({"device": dev, "state": "free"})
+-            if not json_out: print(f"  {dev:<16} free")
+-        except OSError:
+-            any_held = True
+-            info = {}
+-            try:
+-                info = json.load(open(holder))
+-            except Exception:
+-                pass
+-            held = info.get("since", "?")
+-            rows.append({"device": dev, "state": "claimed", "who": info.get("who"),
+-                         "pid": info.get("pid"), "since": info.get("since"),
+-                         "purpose": info.get("purpose")})
+-            if not json_out:
+-                print(f"  {dev:<16} CLAIMED by {info.get('who','?')} pid={info.get('pid','?')} "
+-                      f"since {held} — {info.get('purpose','?')}")
+-        finally:
+-            os.close(fd)
+-    if json_out: print(json.dumps({"devices": rows}, indent=2))
+-    return 0
+-
+-
+-def self_test():
+-    """A lock that does not exclude is worse than none. Prove the failing case is reachable."""
+-    dev = "selftest-device"
+-    lock, _ = _paths(dev)
+-    os.makedirs(LOCKDIR, exist_ok=True)
+-    me = sys.argv[0]
+-    # hold it in a child for 3s, then try to claim it here and require refusal
+-    child = subprocess.Popen([sys.executable, me, dev, "selftest-holder", "--",
+-                              "python3", "-c", "import time;time.sleep(3)"])
+-    time.sleep(1.0)
+-    r = subprocess.run([sys.executable, me, dev, "selftest-contender", "--", "true"],
+-                       capture_output=True, text=True)
+-    ok_refused = (r.returncode == 3)
+-    print(f"  contender while held : rc={r.returncode} (expect 3)  {'OK' if ok_refused else 'FAIL'}")
+-    child.wait()
+-    r2 = subprocess.run([sys.executable, me, dev, "selftest-after", "--", "true"],
+-                        capture_output=True, text=True)
+-    ok_free = (r2.returncode == 0)
+-    print(f"  contender after release: rc={r2.returncode} (expect 0)  {'OK' if ok_free else 'FAIL'}")
+-    # a crashed holder must NOT wedge the device
+-    c2 = subprocess.Popen([sys.executable, me, dev, "selftest-crasher", "--",
+-                           "python3", "-c", "import os;os._exit(1)"])
+-    c2.wait(); time.sleep(0.3)
+-    r3 = subprocess.run([sys.executable, me, dev, "selftest-after-crash", "--", "true"],
+-                        capture_output=True, text=True)
+-    ok_crash = (r3.returncode == 0)
+-    print(f"  after holder CRASHED  : rc={r3.returncode} (expect 0)  {'OK' if ok_crash else 'FAIL'}")
+-    good = ok_refused and ok_free and ok_crash
+-    print("  self-test:", "PASS" if good else "FAIL")
+-    return 0 if good else 1
+-
+-
+-USAGE = f"""{PROG} — hold an exclusive claim on a shared bench device while a command runs.
+-
+-usage:
+-  {PROG} <device> <purpose> -- <command...>   run <command> holding the claim
+-  {PROG} --status [--format json]             what is claimed right now
+-  {PROG} --self-test                          prove the lock excludes, and survives a crash
+-  {PROG} --version | -V                       print version and exit
+-  {PROG} --help | -h                          this text
+-
+-exit codes:
+-  0   the wrapped command's status (or success for --status/--self-test)
+-  2   usage error: unknown flag, bad arguments, or an unregistered device name
+-  3   the device is already claimed by someone else; nothing was run
+-NOTE: the wrapped command's own exit status is passed through unchanged, so a 2 or 3 may
+-come from it rather than from {PROG}. Where that matters, check --status separately.
+-"""
+-
+-
+-def main():
+-    argv = sys.argv[1:]
+-    if "--help" in argv or "-h" in argv:
+-        sys.stdout.write(USAGE); return 0
+-    if "--version" in argv or "-V" in argv:
+-        print(f"{PROG} {__version__}"); return 0
+-    if "--status" in argv:
+-        return status(json_out=("json" in argv))
+-    if "--self-test" in argv:
+-        return self_test()
+-    # An unknown leading flag is a usage error, not a device name.
+-    if argv and argv[0].startswith("-"):
+-        sys.stderr.write(f"{PROG}: unknown option '{argv[0]}'\n\n" + USAGE); return 2
+-    if "--" not in sys.argv or len(sys.argv) < 5:
+-        sys.stderr.write(USAGE); return 2
+-    sep = sys.argv.index("--")
+-    if sep < 3:
+-        sys.stderr.write(USAGE); return 2
+-    dev, purpose, cmd = sys.argv[1], " ".join(sys.argv[2:sep]), sys.argv[sep + 1:]
+-    if not cmd:
+-        sys.stderr.write(f"{PROG}: no command given after --\n\n" + USAGE); return 2
+-
+-    # REFUSE AN UNKNOWN DEVICE NAME. Without this, `with-device stlnk-v3 ...` (a typo)
+-    # silently creates a DIFFERENT lock file and excludes nobody — the holder of the real
+-    # device keeps working and both agents believe they hold it. A lock that can be bypassed
+-    # by a typo is the vacuous-gate failure in lock form, and this tool had it: a stray
+-    # `stlink-003B001A...` lock appeared next to `stlink-v3` from exactly that mistake.
+-    known = _known_devices()
+-    if known and dev not in known:
+-        sys.stderr.write(
+-            f"UNKNOWN DEVICE '{dev}'. Known: {', '.join(sorted(known))}\n"
+-            f"Refusing: an unregistered name would create its own lock and exclude nobody.\n"
+-            f"Add it to tools/bench/devices.yaml if it is real.\n")
+-        return 2
+-
+-    os.makedirs(LOCKDIR, exist_ok=True)
+-    lock, holder = _paths(dev)
+-    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o666)
+-    try:
+-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+-    except OSError:
+-        info = {}
+-        try:
+-            info = json.load(open(holder))
+-        except Exception:
+-            pass
+-        sys.stderr.write(
+-            f"DEVICE BUSY: '{dev}' is claimed by {info.get('who','?')} "
+-            f"(pid {info.get('pid','?')}) since {info.get('since','?')} for: "
+-            f"{info.get('purpose','?')}\nNothing was run.\n")
+-        os.close(fd); return 3
+-
+-    with open(holder, "w") as h:
+-        json.dump({"who": os.environ.get("BENCH_WHO", "jess"),
+-                   "pid": os.getpid(),
+-                   "since": datetime.datetime.now().isoformat(timespec="seconds"),
+-                   "purpose": purpose,
+-                   "cmd": cmd}, h)
+-    try:
+-        return subprocess.call(cmd)
+-    finally:
+-        # the flock drops when fd closes / the process dies — this is only tidying
+-        try:
+-            os.unlink(holder)
+-        except OSError:
+-            pass
+-        os.close(fd)
+-
+-
+-if __name__ == "__main__":
+-    sys.exit(main())
+diff --git a/tools/bench/with-device/.gitignore b/tools/bench/with-device/.gitignore
+new file mode 100644
+index 0000000..2f7896d
+--- /dev/null
++++ b/tools/bench/with-device/.gitignore
+@@ -0,0 +1 @@
++target/
+diff --git a/tools/bench/with-device/Cargo.lock b/tools/bench/with-device/Cargo.lock
+new file mode 100644
+index 0000000..2a02d98
+--- /dev/null
++++ b/tools/bench/with-device/Cargo.lock
+@@ -0,0 +1,7 @@
++# This file is automatically @generated by Cargo.
++# It is not intended for manual editing.
++version = 4
++
++[[package]]
++name = "with-device"
++version = "0.2.0"
+diff --git a/tools/bench/with-device/Cargo.toml b/tools/bench/with-device/Cargo.toml
+new file mode 100644
+index 0000000..e92d39e
+--- /dev/null
++++ b/tools/bench/with-device/Cargo.toml
+@@ -0,0 +1,20 @@
++[package]
++name = "with-device"
++version = "0.2.0"
++edition = "2021"
++description = "Hold exclusive claims on shared bench hardware for the lifetime of a command"
++license = "Apache-2.0"
++publish = false
++
++[[bin]]
++name = "with-device"
++path = "src/main.rs"
++
++# NO DEPENDENCIES, deliberately. flock(2) is declared directly in main.rs. A tool that ships
++# in a signed toolchain layer should have nothing to vendor and nothing to audit but itself.
++[dependencies]
++
++[profile.release]
++opt-level = "z"
++lto = true
++strip = true
+diff --git a/tools/bench/with-device/src/main.rs b/tools/bench/with-device/src/main.rs
+new file mode 100644
+index 0000000..7f36682
+--- /dev/null
++++ b/tools/bench/with-device/src/main.rs
+@@ -0,0 +1,548 @@
++//! with-device — hold exclusive claims on shared bench hardware while a command runs.
++//!
++//! WHY IT EXISTS. Two agents (jess and gale) share one physical bench. The failure that
++//! matters is not "both want it" — it is a SILENT collision: two processes driving one debug
++//! probe, or two readers on one tty each receiving a SUBSET of the stream with no error on
++//! either side. Measured on a real Pixhawk: one reader 66,872 B in 5 s; two readers together
++//! 37,787 + 40,053 = 77,840 B, i.e. each got about half and neither noticed. That is
++//! indistinguishable from a flaky USB link, which makes it the worst kind of evidence to
++//! have in a safety campaign.
++//!
++//! WHY A LOCK AND NOT A RESERVATION RECORD. The claim is an OS flock(2) on an open fd, held
++//! for exactly the lifetime of the wrapped command. When the holder dies — crash, kill,
++//! panic — the kernel drops it. There is no release step to forget, no stale-lock reaper.
++//!
++//! HOW DEADLOCK IS PREVENTED — two independent mechanisms, and it is worth being precise
++//! about which one carries the weight, because they are not equally load-bearing.
++//!
++//!   (a) NO HOLD-AND-WAIT. On contention, every lock acquired so far is DROPPED before
++//!       retrying. Coffman's hold-and-wait condition is broken, so no cycle can exist at
++//!       all. This also means a blocked claimant never pins a device it is not using.
++//!   (b) SORTED ACQUISITION. Names are sorted before acquisition, so all claimants take
++//!       locks in one global order (Dijkstra's resource hierarchy). This makes the fast
++//!       path cycle-free without relying on (a) at all.
++//!
++//! MEASURED, not asserted. `--self-test` races two processes asking for the same two devices
++//! in OPPOSITE order. Negative controls run against this binary:
++//!
++//! | variant                       | opposite-order pair | reading                          |
++//! |-------------------------------|---------------------|----------------------------------|
++//! | as shipped                    | 0,0 in 2.1 s        | pass                             |
++//! | sort removed, (a) intact      | 0,0 in 2.1 s        | test does NOT see the sort go    |
++//! | sort removed AND (a) removed  | 3,3 in 15.1 s       | real cycle; only --wait broke it |
++//!
++//! So the self-test discriminates on (a), NOT on (b). Do not read a green self-test as
++//! evidence that the sort works; it is evidence that hold-and-wait is absent. (b) is kept
++//! as defence in depth and is what would still hold if `--wait` ever grew a blocking
++//! flock(LOCK_EX) path, where dropping-and-retrying is no longer available.
++
++use std::collections::BTreeSet;
++use std::fs::{create_dir_all, File, OpenOptions};
++use std::io::{Read, Write};
++use std::os::unix::io::AsRawFd;
++use std::path::{Path, PathBuf};
++use std::process::{Command, Stdio};
++
++const VERSION: &str = env!("CARGO_PKG_VERSION");
++const PROG: &str = "with-device";
++
++// flock(2) — same on macOS and Linux. Declared here so the crate has zero dependencies.
++extern "C" {
++    fn flock(fd: i32, operation: i32) -> i32;
++}
++const LOCK_EX: i32 = 2;
++const LOCK_NB: i32 = 4;
++
++const USAGE: &str = "\
++with-device — hold exclusive claims on shared bench hardware while a command runs.
++
++usage:
++  with-device <device>... [--purpose <text>] [--wait <s>] -- <command>...
++  with-device --status [--format json]
++  with-device --self-test
++  with-device --version | -V
++  with-device --help | -h
++
++options:
++  --purpose <text>   why you are claiming it (shown to whoever gets refused)
++  --wait <seconds>   block up to N seconds instead of failing fast (deadlock-free)
++  --registry <path>  device registry (default: $BENCH_REGISTRY, then standard paths)
++  --format json      machine-readable output for --status
++
++environment:
++  BENCH_WHO          name recorded as the holder (e.g. jess, gale)
++  BENCH_LOCKDIR      lock directory (default /var/tmp/pulseengine-bench)
++  BENCH_REGISTRY     device registry path
++
++exit codes:
++  0   the wrapped command's status, or success for --status/--self-test
++  2   usage error: unknown flag, bad arguments, or an unregistered device name
++  3   a device is already claimed; NOTHING was run
++NOTE: the wrapped command's status passes through unchanged, so a 2 or 3 may come from it.
++
++Several devices are claimed in sorted order, and a blocked claimant releases what it already
++holds rather than waiting on it. Deadlock is impossible regardless of the order you list them.
++";
++
++struct Claim {
++    _file: File, // holding the fd holds the lock; dropping it releases
++    device: String,
++}
++
++fn lockdir() -> PathBuf {
++    std::env::var("BENCH_LOCKDIR")
++        .unwrap_or_else(|_| "/var/tmp/pulseengine-bench".to_string())
++        .into()
++}
++
++/// Device names from the registry. FAIL-CLOSED: with no registry we refuse rather than
++/// accept any name, because an unregistered name creates its own lock file and excludes
++/// nobody. A lock a typo can bypass is worse than no lock: both agents then believe they
++/// hold the device.
++fn registry(explicit: Option<&str>) -> Result<BTreeSet<String>, String> {
++    let mut candidates: Vec<PathBuf> = Vec::new();
++    if let Some(p) = explicit {
++        candidates.push(p.into());
++    } else if let Ok(p) = std::env::var("BENCH_REGISTRY") {
++        candidates.push(p.into());
++    } else {
++        candidates.push("bench-devices.yaml".into());
++        candidates.push("tools/bench/devices.yaml".into());
++        if let Ok(home) = std::env::var("HOME") {
++            candidates.push(Path::new(&home).join(".config/pulseengine/bench-devices.yaml"));
++        }
++    }
++    for c in &candidates {
++        if let Ok(mut f) = File::open(c) {
++            let mut s = String::new();
++            if f.read_to_string(&mut s).is_err() {
++                continue;
++            }
++            let mut names = BTreeSet::new();
++            let mut in_devices = false;
++            for line in s.lines() {
++                if line.starts_with("devices:") {
++                    in_devices = true;
++                    continue;
++                }
++                if in_devices {
++                    if !line.trim().is_empty() && !line.starts_with(' ') && !line.starts_with('\t')
++                    {
++                        break;
++                    }
++                    let t = line.trim_end();
++                    if t.starts_with("  ") && !t.starts_with("    ") && t.ends_with(':') {
++                        names.insert(t.trim().trim_end_matches(':').to_string());
++                    }
++                }
++            }
++            if !names.is_empty() {
++                return Ok(names);
++            }
++        }
++    }
++    Err(format!(
++        "no device registry found (looked at: {}). Create one or pass --registry. Refusing \
++to accept an unvalidated device name: it would create its own lock and exclude nobody.",
++        candidates
++            .iter()
++            .map(|p| p.display().to_string())
++            .collect::<Vec<_>>()
++            .join(", ")
++    ))
++}
++
++fn try_claim(dev: &str, purpose: &str, who: &str) -> Result<Claim, ()> {
++    let dir = lockdir();
++    let _ = create_dir_all(&dir);
++    let file = OpenOptions::new()
++        .read(true)
++        .write(true)
++        .create(true)
++        // truncate(false) is deliberate, not an oversight clippy talked us out of: the lock
++        // file is a rendezvous point other processes may already hold open. Truncating it on
++        // every claim would be a pointless write race against them. Its CONTENT is unused —
++        // the lock lives on the fd, via flock(2).
++        .truncate(false)
++        .open(dir.join(format!("{dev}.lock")))
++        .map_err(|_| ())?;
++    if unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) } != 0 {
++        return Err(());
++    }
++    if let Ok(mut h) = File::create(dir.join(format!("{dev}.holder"))) {
++        let _ = write!(
++            h,
++            "{{\"who\":\"{}\",\"pid\":{},\"purpose\":\"{}\"}}",
++            who.replace('"', "'"),
++            std::process::id(),
++            purpose.replace('"', "'")
++        );
++    }
++    Ok(Claim {
++        _file: file,
++        device: dev.to_string(),
++    })
++}
++
++fn read_holder(dev: &str) -> String {
++    std::fs::read_to_string(lockdir().join(format!("{dev}.holder"))).unwrap_or_else(|_| "{}".into())
++}
++
++/// Acquire every device. Deadlock-free by (a) dropping the partial set rather than waiting
++/// on it, and (b) acquiring in sorted order. See the module header for which one the
++/// self-test actually measures.
++fn claim_all(devs: &[String], purpose: &str, who: &str, wait_s: u64) -> Result<Vec<Claim>, String> {
++    let mut sorted: Vec<String> = devs.to_vec();
++    sorted.sort();
++    sorted.dedup();
++    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(wait_s);
++    loop {
++        let mut held: Vec<Claim> = Vec::new();
++        let mut blocked = None;
++        for d in &sorted {
++            match try_claim(d, purpose, who) {
++                Ok(c) => held.push(c),
++                Err(_) => {
++                    blocked = Some(d.clone());
++                    break;
++                }
++            }
++        }
++        match blocked {
++            None => return Ok(held),
++            Some(d) => {
++                drop(held); // never hold a partial set while waiting
++                if wait_s == 0 || std::time::Instant::now() >= deadline {
++                    return Err(format!(
++                        "DEVICE BUSY: '{}' is claimed — {}\nNothing was run.",
++                        d,
++                        read_holder(&d)
++                    ));
++                }
++                std::thread::sleep(std::time::Duration::from_millis(150));
++            }
++        }
++    }
++}
++
++fn status(json: bool) -> i32 {
++    let dir = lockdir();
++    let mut rows: Vec<(String, bool, String)> = Vec::new();
++    if let Ok(rd) = std::fs::read_dir(&dir) {
++        let mut names: Vec<String> = rd
++            .filter_map(|e| e.ok())
++            .filter_map(|e| e.file_name().into_string().ok())
++            .filter(|n| n.ends_with(".lock"))
++            .map(|n| n.trim_end_matches(".lock").to_string())
++            .collect();
++        names.sort();
++        for dev in names {
++            let free = try_claim(&dev, "status probe", "status").is_ok();
++            rows.push((dev.clone(), free, read_holder(&dev)));
++        }
++    }
++    if json {
++        let body: Vec<String> = rows
++            .iter()
++            .map(|(d, free, h)| {
++                format!(
++                    "{{\"device\":\"{}\",\"state\":\"{}\",\"holder\":{}}}",
++                    d,
++                    if *free { "free" } else { "claimed" },
++                    if *free { "null".to_string() } else { h.clone() }
++                )
++            })
++            .collect();
++        println!("{{\"devices\":[{}]}}", body.join(","));
++    } else if rows.is_empty() {
++        println!("  no claims");
++    } else {
++        for (d, free, h) in &rows {
++            if *free {
++                println!("  {d:<18} free");
++            } else {
++                println!("  {d:<18} CLAIMED {h}");
++            }
++        }
++    }
++    0
++}
++
++/// Prove the properties that matter. A lock that does not exclude is worse than none: it
++/// gives two agents false confidence while they corrupt each other's session.
++fn self_test() -> i32 {
++    let me = std::env::current_exe().unwrap();
++    let reg = std::env::temp_dir().join("with-device-selftest.yaml");
++    std::fs::write(
++        &reg,
++        "devices:\n  selftest-a:\n    what: synthetic\n  selftest-b:\n    what: synthetic\n",
++    )
++    .unwrap();
++    let r = reg.display().to_string();
++    let run = |args: Vec<&str>| -> i32 {
++        Command::new(&me)
++            .args(&args)
++            .stdout(Stdio::null())
++            .stderr(Stdio::null())
++            .status()
++            .map(|s| s.code().unwrap_or(-1))
++            .unwrap_or(-1)
++    };
++    // Returns the verdict rather than capturing `ok`, so the deadlock check below can also
++    // fold into the same accumulator without fighting the borrow checker.
++    let check = |label: &str, got: i32, want: i32| -> bool {
++        let good = got == want;
++        println!(
++            "  {label:<28} rc={got} (expect {want}) {}",
++            if good { "OK" } else { "FAIL" }
++        );
++        good
++    };
++    let mut ok = true;
++
++    let mut holder = Command::new(&me)
++        .args([
++            "selftest-a",
++            "--registry",
++            &r,
++            "--purpose",
++            "hold",
++            "--",
++            "sleep",
++            "3",
++        ])
++        .stdout(Stdio::null())
++        .stderr(Stdio::null())
++        .spawn()
++        .unwrap();
++    std::thread::sleep(std::time::Duration::from_millis(700));
++    ok &= check(
++        "contender while held",
++        run(vec![
++            "selftest-a",
++            "--registry",
++            &r,
++            "--purpose",
++            "c",
++            "--",
++            "true",
++        ]),
++        3,
++    );
++    let _ = holder.wait();
++    ok &= check(
++        "after release",
++        run(vec![
++            "selftest-a",
++            "--registry",
++            &r,
++            "--purpose",
++            "c",
++            "--",
++            "true",
++        ]),
++        0,
++    );
++
++    let mut crasher = Command::new(&me)
++        .args([
++            "selftest-a",
++            "--registry",
++            &r,
++            "--purpose",
++            "crash",
++            "--",
++            "sh",
++            "-c",
++            "kill -9 $$",
++        ])
++        .stdout(Stdio::null())
++        .stderr(Stdio::null())
++        .spawn()
++        .unwrap();
++    let _ = crasher.wait();
++    std::thread::sleep(std::time::Duration::from_millis(200));
++    ok &= check(
++        "after holder CRASHED",
++        run(vec![
++            "selftest-a",
++            "--registry",
++            &r,
++            "--purpose",
++            "c",
++            "--",
++            "true",
++        ]),
++        0,
++    );
++
++    // THE DEADLOCK TEST: same two devices, OPPOSITE order. Textbook cycle without ordering.
++    let t0 = std::time::Instant::now();
++    let mut p1 = Command::new(&me)
++        .args([
++            "selftest-a",
++            "selftest-b",
++            "--registry",
++            &r,
++            "--wait",
++            "15",
++            "--purpose",
++            "ab",
++            "--",
++            "sleep",
++            "1",
++        ])
++        .stdout(Stdio::null())
++        .stderr(Stdio::null())
++        .spawn()
++        .unwrap();
++    let mut p2 = Command::new(&me)
++        .args([
++            "selftest-b",
++            "selftest-a",
++            "--registry",
++            &r,
++            "--wait",
++            "15",
++            "--purpose",
++            "ba",
++            "--",
++            "sleep",
++            "1",
++        ])
++        .stdout(Stdio::null())
++        .stderr(Stdio::null())
++        .spawn()
++        .unwrap();
++    let c1 = p1.wait().map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
++    let c2 = p2.wait().map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
++    let secs = t0.elapsed().as_secs_f32();
++    let dl = c1 == 0 && c2 == 0 && secs < 12.0;
++    ok &= dl;
++    println!(
++        "  opposite-order pair          rc={c1},{c2} in {secs:.1}s (expect 0,0 fast) {}",
++        if dl { "OK — no deadlock" } else { "FAIL" }
++    );
++
++    ok &= check(
++        "unregistered device",
++        run(vec![
++            "selftest-typo",
++            "--registry",
++            &r,
++            "--purpose",
++            "c",
++            "--",
++            "true",
++        ]),
++        2,
++    );
++    println!("  self-test: {}", if ok { "PASS" } else { "FAIL" });
++    if ok {
++        0
++    } else {
++        1
++    }
++}
++
++fn main() {
++    let argv: Vec<String> = std::env::args().skip(1).collect();
++    if argv.iter().any(|a| a == "--help" || a == "-h") {
++        print!("{USAGE}");
++        std::process::exit(0);
++    }
++    if argv.iter().any(|a| a == "--version" || a == "-V") {
++        println!("{PROG} {VERSION}");
++        std::process::exit(0);
++    }
++    if argv.iter().any(|a| a == "--self-test") {
++        std::process::exit(self_test());
++    }
++    if argv.iter().any(|a| a == "--status") {
++        let json = argv
++            .windows(2)
++            .any(|w| w[0] == "--format" && w[1] == "json");
++        std::process::exit(status(json));
++    }
++    let sep = match argv.iter().position(|a| a == "--") {
++        Some(i) => i,
++        None => {
++            eprint!("{PROG}: missing `--` before the command\n\n{USAGE}");
++            std::process::exit(2);
++        }
++    };
++    let (head, tail) = argv.split_at(sep);
++    let cmd = &tail[1..];
++    if cmd.is_empty() {
++        eprint!("{PROG}: no command after `--`\n\n{USAGE}");
++        std::process::exit(2);
++    }
++
++    let (mut devices, mut purpose, mut wait_s, mut reg_path) =
++        (Vec::new(), String::from("(unstated)"), 0u64, None::<String>);
++    let mut i = 0;
++    while i < head.len() {
++        match head[i].as_str() {
++            "--purpose" => {
++                i += 1;
++                purpose = head.get(i).cloned().unwrap_or_default();
++            }
++            "--wait" => {
++                i += 1;
++                wait_s = head.get(i).and_then(|s| s.parse().ok()).unwrap_or(0);
++            }
++            "--registry" => {
++                i += 1;
++                reg_path = head.get(i).cloned();
++            }
++            "--format" => {
++                i += 1;
++            }
++            a if a.starts_with('-') => {
++                eprint!("{PROG}: unknown option '{a}'\n\n{USAGE}");
++                std::process::exit(2);
++            }
++            a => devices.push(a.to_string()),
++        }
++        i += 1;
++    }
++    if devices.is_empty() {
++        eprint!("{PROG}: no device named\n\n{USAGE}");
++        std::process::exit(2);
++    }
++
++    let known = match registry(reg_path.as_deref()) {
++        Ok(k) => k,
++        Err(e) => {
++            eprintln!("{PROG}: {e}");
++            std::process::exit(2);
++        }
++    };
++    for d in &devices {
++        if !known.contains(d) {
++            eprintln!("{PROG}: UNKNOWN DEVICE '{}'. Known: {}\nRefusing: an unregistered name would create its own lock and exclude nobody.",
++                      d, known.iter().cloned().collect::<Vec<_>>().join(", "));
++            std::process::exit(2);
++        }
++    }
++    let who = std::env::var("BENCH_WHO").unwrap_or_else(|_| "unknown".into());
++    let claims = match claim_all(&devices, &purpose, &who, wait_s) {
++        Ok(c) => c,
++        Err(msg) => {
++            eprintln!("{msg}");
++            std::process::exit(3);
++        }
++    };
++    let code = Command::new(&cmd[0])
++        .args(&cmd[1..])
++        .status()
++        .map(|s| s.code().unwrap_or(1))
++        .unwrap_or_else(|e| {
++            eprintln!("{PROG}: {e}");
++            1
++        });
++    for c in &claims {
++        let _ = std::fs::remove_file(lockdir().join(format!("{}.holder", c.device)));
++    }
++    std::process::exit(code);
++}

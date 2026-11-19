@@ -75,3 +75,5 @@ __pycache__/
 
 # Rust
 triage/target/
+eval/review-bench/runs/
+eval/review-bench/revmatch/target/

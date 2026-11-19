@@ -149,6 +149,47 @@ jobs:
           set +e; $b --no-such-flag 2>/dev/null; rc=$?; set -e
           test "$rc" -eq 2
 
+  # The review benchmark (eval/review-bench, temper#92): the matcher's tests,
+  # every reference/known file anchored on its diff, and the reference
+  # scoring 1.0 against itself (fails closed if data or matcher drift).
+  review-bench:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: eval/review-bench/revmatch
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable, 2026-11-15
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+      - name: Format and clippy
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+      - name: Matcher tests
+        run: cargo test --locked --no-fail-fast
+      - name: Every reference and known finding quotes an added line
+        run: |
+          set -euo pipefail
+          cargo build --locked --release
+          n=0
+          for d in ../prs/*/; do
+            target/release/revmatch validate "$d/diff.patch" "$d/reference.json"
+            target/release/revmatch validate "$d/diff.patch" "$d/known.json"
+            n=$((n + 1))
+          done
+          test "$n" -ge 9
+      - name: The reference scores 1.0 against itself
+        run: |
+          set -euo pipefail
+          out=$(target/release/revmatch score --prs ../prs --reference --format json)
+          echo "$out" | jq '{reference_findings, recall_primary, false_findings}'
+          echo "$out" | jq -e '.recall_primary == 1' > /dev/null
+          echo "$out" | jq -e '.reference_findings >= 33' > /dev/null
+
   ci:
     runs-on: ubuntu-latest
     steps:

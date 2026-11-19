@@ -1,0 +1,6 @@
+{
+ "pr": "rivet#899",
+ "fixed_by": "rivet#908",
+ "defects": [],
+ "note": "The fixing PR repairs two other papercuts from #887 (next-id stripping hyphens from a literal prefix, add --field misfiling base fields) in code the escape PR did not add; the escape PR only shipped part 1 (add --id) and the fix does not change its lines."
+}

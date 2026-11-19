@@ -1,0 +1,434 @@
+diff --git a/artifacts/sw-architecture.yaml b/artifacts/sw-architecture.yaml
+index 83078ba..c89b188 100644
+--- a/artifacts/sw-architecture.yaml
++++ b/artifacts/sw-architecture.yaml
+@@ -103,6 +103,8 @@ artifacts:
+         target: FEAT-008
+       - type: allocated-from
+         target: FEAT-012
++      - type: allocated-from
++        target: TR-049
+   - id: ARC-004
+     type: sw-arch-component
+     title: ordeal-cnf (Tseitin CNF encoder)
+diff --git a/artifacts/technical-requirements.yaml b/artifacts/technical-requirements.yaml
+index 6262f06..23c4e74 100644
+--- a/artifacts/technical-requirements.yaml
++++ b/artifacts/technical-requirements.yaml
+@@ -1395,3 +1395,20 @@ artifacts:
+         target: TR-038
+       - type: traces-to
+         target: TR-030
++
++  - id: TR-049
++    type: sw-req
++    title: "Shift and rotate encodings are exact at every bit-width 1..=128 (soundness, #182)"
++    status: verified
++    release: v0.22.1
++    description: "Soundness defect #182 (found 2026-09-30 by the claims-vs-tests audit). The barrel shifter computed its stage count as w.trailing_zeros() with a release-erased debug_assert(w.is_power_of_two()), so at non-power-of-two widths release builds encoded shifts and rotates wrongly and a satisfiable query could return a certified unsat (the checker correctly certified the wrong CNF). lowering::bvrotl applied the power-of-two-only rotr(a, 0 - b) identity at every width, and SMT-LIB rotate constants were truncated mod 2^w instead of reduced mod w. Affected: CLI v0.8.0..v0.22.0, API since v0.2.0; power-of-two widths unaffected. The requirement: the encodings are exact at every accepted width, and the independent-solver differential covers non-power-of-two widths so this class cannot recur silently."
++    tags: [soundness, blaster, shift, rotate, defect]
++    fields:
++      priority: must
++      req-type: safety
++      verification-criteria: "For every width 1..=7 exhaustively and every width 9..=128 by seeded sampling, the shl/lshr/ashr/rotr blasters agree with the evaluator on all sampled (a, b) including out-of-range amounts; bvrotl agrees with a direct left rotation at every width 1..=10 exhaustively; the Z3 differential corpus includes non-power-of-two widths and agrees with Z3; the reported satisfiable queries return sat and valid non-power-of-two identities stay certified unsat; power-of-two encodings are byte-identical to v0.22.0. Negative control: restoring the pre-fix stage count makes the exhaustive test and the Z3 differential fail."
++    links:
++      - type: derives-from
++        target: SYS-001
++      - type: traces-to
++        target: TR-001
+diff --git a/artifacts/verification-results.yaml b/artifacts/verification-results.yaml
+index 8d693a8..bed180f 100644
+--- a/artifacts/verification-results.yaml
++++ b/artifacts/verification-results.yaml
+@@ -1562,7 +1562,7 @@ artifacts:
+     type: verification-verdict
+     title: VER-006 pass — every operator's blast rule proven against BitVec semantics (Lean, unbounded width)
+     status: implemented
+-    description: "Executed pass, and stronger than the 2026-07 criterion (widths 8/32/64): the Lean proofs hold at every width (the shift family at every power-of-two width, which covers 8/32/64 — non-power-of-two shift widths are covered by the Kani/unit/differential layers, not by this proof). Discharged by the Lean route that replaced the Kani P4 plan as the primary evidence; the Kani harnesses remain the independent width-8 witness."
++    description: "Executed pass, and stronger than the 2026-07 criterion (widths 8/32/64): the Lean proofs hold at every width (the shift family at every power-of-two width, which covers 8/32/64 — CORRECTED 2026-09-30: this verdict originally claimed non-power-of-two shift widths were covered by the Kani/unit/differential layers; none of them exercised such widths, and the shipped shifter was in fact wrong there (#182, fixed by TR-049 in v0.22.1). The Lean proofs also cover the blast_kernel mirror, linked to the shipped blaster by a width-8 differential). Discharged by the Lean route that replaced the Kani P4 plan as the primary evidence; the Kani harnesses remain the independent width-8 witness."
+     fields:
+       evidence: "job 107662741351: Blaster*.lean build success; 28 blast_*_bitvec theorems covering all 17 BV operators and all 10 comparisons of term.rs; axiom-pinned; shifts proven at widths 2^stages (8/32/64 included)"
+       verdict: pass
+@@ -1572,6 +1572,8 @@ artifacts:
+       - type: part-of-execution
+         target: VE-029
+ 
++      - type: traces-to
++        target: TR-049
+   - id: VE-030
+     type: verification-execution
+     title: Local re-execution of the TR-014/015/016 and SYS-006 evidence (VER-044..046, VER-004)
+@@ -2001,3 +2003,28 @@ artifacts:
+         target: VER-048
+       - type: part-of-execution
+         target: VE-035
++
++  - id: VE-036
++    type: verification-execution
++    title: Non-power-of-two shift/rotate soundness fix verified, with negative controls (VER-049)
++    status: implemented
++    description: "Reproduced first on the published v0.22.0 binary: width-3 shl and width-24 lshr pinned queries returned unsat, Z3 sat; published CLIs v0.8.0..v0.21.0 give the same wrong answer. With the fix: blast::shift tests 6 passed (exhaustive w=1..7, seeded w=9..128), bvrotl exhaustive w=1..10 passed, smtlib non-power-of-two tests 2 passed (6 sat cases and 3 certified-unsat identities, each expectation confirmed against Z3), Z3 differential over the widened corpus (widths 3,5,8,12,24,32,64) 12 oracle tests passed; workspace 229 tests passed; native-vs-wasm differential 21 invocations byte-identical including the two new fixtures; power-of-two encodings byte-identical to published v0.22.0 on all 22 existing fixture invocations (text and JSON, certificates included). Negative controls with the pre-fix stage count: the exhaustive test fails at shl w=3 a=1 b=1 (release build) and the Z3 differential reports corpus query 125 as engine unsat / Z3 sat."
++    fields:
++      environment: "note: macOS arm64, rustc 1.98.1, Z3 5.1.0 via Homebrew; fix branch on main @ 1a6275e"
++      executor: local
++      timestamp: 2026-09-30T06:45:00Z
++      version: 1a6275e
++
++  - id: VV-080
++    type: verification-verdict
++    title: VER-049 pass — shifts and rotates exact at every width; the independent-solver differential now sees non-power-of-two widths
++    status: implemented
++    description: Executed pass as recorded in the linked execution.
++    fields:
++      evidence: "see the linked execution: all layers pass; both negative controls fail as designed"
++      verdict: pass
++    links:
++      - type: result-of
++        target: VER-049
++      - type: part-of-execution
++        target: VE-036
+diff --git a/artifacts/verification.yaml b/artifacts/verification.yaml
+index eb889b2..e1c760e 100644
+--- a/artifacts/verification.yaml
++++ b/artifacts/verification.yaml
+@@ -1212,3 +1212,18 @@ artifacts:
+     links:
+       - type: verifies
+         target: TR-048
++
++  - id: VER-049
++    type: sw-verification
++    title: Shift/rotate exact at every width; Z3 differential covers non-power-of-two widths (TR-049)
++    status: verified
++    release: v0.22.1
++    description: "Confirms TR-049 at every layer that missed the defect: the unit tests (now every width), the solver level (the exact reported queries, plus certified-unsat identities so the fix does not trade false unsat for false sat), and the independent-solver differential (widened corpus). The negative control is recorded: with the old stage count the exhaustive test fails at shl w=3 a=1 b=1 and the Z3 differential reports corpus query 125 as an ordeal-unsat / Z3-sat disagreement."
++    tags: [soundness, shift, rotate, negative-control]
++    fields:
++      coverage: blaster vs evaluator exhaustive w=1..7 and seeded w=9..128; bvrotl exhaustive w=1..10; solver-level sat and certified-unsat cases confirmed against Z3; Z3 differential over widths 3,5,8,12,24,32,64; negative control against the pre-fix stage count
++      method: automated-test
++      steps: "run: cargo test -p ordeal --lib -- blast::shift lowering::tests::bvrotl smtlib::tests::non_power && cargo test -p ordeal --features oracle --release --lib -- oracle::tests::differential_ordeal_vs_z3_on_corpus"
++    links:
++      - type: verifies
++        target: TR-049
+diff --git a/crates/ordeal/src/blast/shift.rs b/crates/ordeal/src/blast/shift.rs
+index a8ab85c..5198a57 100644
+--- a/crates/ordeal/src/blast/shift.rs
++++ b/crates/ordeal/src/blast/shift.rs
+@@ -1,20 +1,33 @@
+ //! Shifts and rotate (DES-007): barrel shifter with SMT-LIB out-of-range
+-//! semantics; bvrotr rotates by amount mod width.
+-
+-use crate::aig::{Aig, Lit, Word};
+-
+-/// Number of barrel stages (`log2 w`), checking the shared preconditions:
+-/// both operands have the same width `w`, and `w` is a power of two.
++//! semantics; bvrotr rotates by amount mod width. Correct at EVERY width
++//! 1..=128 — see the soundness note on [`stage_count`].
++
++use crate::aig::{Aig, Lit, Word, word_const};
++use crate::blast::muldiv::blast_urem;
++
++/// Number of barrel stages: the amount bits needed to express every
++/// in-range shift `0..w`, i.e. `ceil(log2 w)` (0 for `w = 1`). Stage `k`
++/// shifts by `2^k`, and `2^(stages-1) < w`, so no single stage exceeds the
++/// width; any combined amount `>= w` shifts every bit out (fill), which is
++/// exactly SMT-LIB's out-of-range result. For a power-of-two width this is
++/// `log2 w`, so those circuits are unchanged.
++///
++/// SOUNDNESS (fixed 0.22.1): this used to be `w.trailing_zeros()`, guarded
++/// only by a `debug_assert!(w.is_power_of_two())`. Release builds therefore
++/// built too few stages at non-power-of-two widths (zero at w = 3) and a
++/// wrong out-of-range test, so e.g. `(bvshl #b001 #b001)` at width 3 was
++/// encoded as 0 and a satisfiable query came back `unsat` — with a VALID
++/// certificate, because the checker certifies the CNF it is given.
+ fn stage_count(a: &Word, b: &Word) -> usize {
+     let w = a.len();
+     debug_assert_eq!(w, b.len(), "shift operands must share a width");
+-    debug_assert!(w.is_power_of_two(), "shift width must be a power of two");
+-    w.trailing_zeros() as usize
++    assert!(w > 0, "shift operands must be non-empty");
++    (usize::BITS - (w - 1).leading_zeros()) as usize
+ }
+ 
+-/// `amount >= width`: OR of the amount bits above the barrel stages. Because
+-/// the width is a power of two, an amount is in range iff every bit at
+-/// position `log2 w` and above is clear.
++/// `amount >= 2^stages`: OR of the amount bits above the barrel stages.
++/// Together with the barrel itself (which shifts everything out for any
++/// combined amount in `w..2^stages`) this realises `amount >= w`.
+ fn out_of_range(aig: &mut Aig, b: &Word, stages: usize) -> Lit {
+     b[stages..]
+         .iter()
+@@ -71,13 +84,23 @@ pub fn blast_ashr(aig: &mut Aig, a: &Word, b: &Word) -> Word {
+     barrel_right(aig, a, b, sign)
+ }
+ 
+-/// `bvrotr` — rotate right by amount mod width. Only the low `log2 w` amount
+-/// bits matter: the width is a power of two, so higher bits vanish mod `w`.
++/// `bvrotr` — rotate right by amount mod width. For a power-of-two width only
++/// the low `log2 w` amount bits matter (higher bits vanish mod `w`). For any
++/// other width the amount is first reduced `mod w` with the (untrusted,
++/// separately tested) unsigned-remainder blaster; each stage then rotates by
++/// `2^k mod w`, and the selected stages sum to the reduced amount `< w`.
+ pub fn blast_rotr(aig: &mut Aig, a: &Word, b: &Word) -> Word {
+     let w = a.len();
+     let stages = stage_count(a, b);
++    let reduced;
++    let amount: &Word = if w.is_power_of_two() {
++        b
++    } else {
++        reduced = blast_urem(aig, b, &word_const(w as u128, w as u32));
++        &reduced
++    };
+     let mut cur = a.clone();
+-    for (k, &sel) in b.iter().enumerate().take(stages) {
++    for (k, &sel) in amount.iter().enumerate().take(stages) {
+         let s = 1usize << k;
+         cur = (0..w)
+             .map(|i| aig.mux(sel, cur[(i + s) % w], cur[i]))
+@@ -168,7 +191,11 @@ mod tests {
+     /// amounts, exactly-`w`, and huge (far out-of-range) amounts.
+     fn randomized(w: u32, seed: u64) {
+         let (aig, ops) = blast_all(w);
+-        let mask = (1u128 << w) - 1;
++        let mask = if w == 128 {
++            u128::MAX
++        } else {
++            (1u128 << w) - 1
++        };
+         let mut rng = XorShift64(seed);
+         for case in 0..200u32 {
+             let a = rng.next_u128() & mask;
+@@ -194,4 +221,31 @@ mod tests {
+     fn randomized_width_64() {
+         randomized(64, 0xDE50_0702);
+     }
++
++    // rivet: verifies VER-049
++    /// Soundness regression (0.22.1): EXHAUSTIVE at every width 1..=7 —
++    /// all `(a, b)` pairs, including every out-of-range amount. Before the
++    /// fix, release builds encoded non-power-of-two widths wrongly (zero
++    /// barrel stages at w = 3); the existing tests only ever tried 8/32/64.
++    #[test]
++    fn exhaustive_every_width_1_to_7() {
++        for w in 1u32..=7 {
++            let (aig, ops) = blast_all(w);
++            for a in 0u128..(1 << w) {
++                for b in 0u128..(1 << w) {
++                    check(&aig, &ops, a, b, w);
++                }
++            }
++        }
++    }
++
++    /// Soundness regression (0.22.1): 200 seeded cases per op at EVERY
++    /// width 9..=128 (power-of-two or not), mixing in-range, exactly-`w`
++    /// and far out-of-range amounts.
++    #[test]
++    fn randomized_every_width_9_to_128() {
++        for w in 9u32..=128 {
++            randomized(w, 0xDE50_0800 ^ u64::from(w));
++        }
++    }
+ }
+diff --git a/crates/ordeal/src/lowering.rs b/crates/ordeal/src/lowering.rs
+index 38c0be7..be54517 100644
+--- a/crates/ordeal/src/lowering.rs
++++ b/crates/ordeal/src/lowering.rs
+@@ -108,18 +108,24 @@ pub fn bvneg(x: BvTerm, width: u32) -> BvTerm {
+     BvTerm::Sub(Box::new(const_bv(0, width)), Box::new(x))
+ }
+ 
+-/// Rotate-left (`bvrotl`) by a variable amount: `rotr(a, 0 - b)`.
++/// Rotate-left (`bvrotl`) by a variable amount, exact at every width.
+ ///
+-/// Rotating left by `b` equals rotating right by `-b` (mod `width`). The core
+-/// [`BvTerm::Rotr`] rotates by its amount taken modulo the width, and the
+-/// negation `0 - b` is `2^width - b` (mod `2^width`). This is exact precisely
+-/// when `2^width ≡ 0 (mod width)`, i.e. when `width` is a power of two — which
+-/// holds for every target width (8, 32, 64). For a non-power-of-two `width`
+-/// the reduction of the rotate amount would differ and this identity would not
+-/// hold; such widths are outside the validated fragment.
++/// For a power-of-two `width`, rotating left by `b` equals rotating right by
++/// `0 - b`: the core [`BvTerm::Rotr`] reduces its amount mod `width`, and
++/// `2^width ≡ 0 (mod width)`, so `(0 - b) mod width = (width - b mod width)
++/// mod width`. That identity FAILS for any other width (fixed 0.22.1: the
++/// SMT-LIB front end applied it at every width), so there the amount is
++/// computed explicitly as `(width - b mod width) mod width` — both operands
++/// of the subtraction are `<= width`, so it never wraps.
+ pub fn bvrotl(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
+-    let neg_b = BvTerm::Sub(Box::new(const_bv(0, width)), Box::new(b));
+-    BvTerm::Rotr(Box::new(a), Box::new(neg_b))
++    let amount = if width.is_power_of_two() {
++        BvTerm::Sub(Box::new(const_bv(0, width)), Box::new(b))
++    } else {
++        let w = || Box::new(const_bv(width as u128, width));
++        let b_mod_w = BvTerm::Urem(Box::new(b), w());
++        BvTerm::Urem(Box::new(BvTerm::Sub(w(), Box::new(b_mod_w))), w())
++    };
++    BvTerm::Rotr(Box::new(a), Box::new(amount))
+ }
+ 
+ /// Unsigned remainder (`bvurem`) — the native fragment op.
+@@ -205,6 +211,31 @@ pub fn bvsrem(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++
++    /// Soundness regression (0.22.1): `bvrotl` equals the SMT-LIB
++    /// rotate-left (evaluated directly as a left rotation by `b mod w`) at
++    /// EVERY width 1..=10, exhaustively; before the fix the `rotr(a, 0 - b)`
++    /// identity was applied at non-power-of-two widths where it is false.
++    #[test]
++    fn bvrotl_exact_at_every_width() {
++        use crate::eval::{Env, eval_bv};
++        for w in 1u32..=10 {
++            let m = (1u128 << w) - 1;
++            for a in 0u128..(1 << w) {
++                for b in 0u128..(1 << w) {
++                    let got = eval_bv(&bvrotl(const_bv(a, w), const_bv(b, w), w), &Env::new())
++                        .expect("eval");
++                    let r = (b % w as u128) as u32;
++                    let want = if r == 0 {
++                        a
++                    } else {
++                        ((a << r) | (a >> (w - r))) & m
++                    };
++                    assert_eq!(got, want, "rotl w={w} a={a:#x} b={b:#x}");
++                }
++            }
++        }
++    }
+     use crate::eval::{Env, bv_sort, eval_bv};
+ 
+     /// A Z3-free reference for the SMT-LIB div/rem family, computed directly on
+diff --git a/crates/ordeal/src/oracle.rs b/crates/ordeal/src/oracle.rs
+index 8bc1e37..c1e328a 100644
+--- a/crates/ordeal/src/oracle.rs
++++ b/crates/ordeal/src/oracle.rs
+@@ -642,8 +642,12 @@ pub fn ordeal_engine(assertions: &[BoolTerm]) -> EngineVerdict {
+ 
+ // ─── Seeded corpus generation ────────────────────────────────────────────────
+ 
+-/// The variable widths the loom/synth fragment declares.
+-const WIDTHS: [u32; 3] = [8, 32, 64];
++/// Variable widths for the corpus: the loom/synth fragment's 8/32/64 PLUS
++/// non-power-of-two widths. Until 0.22.1 this was `[8, 32, 64]` only, which
++/// is why the Z3 differential — the one semantic cross-check of the encoding
++/// against an independent solver — could not see the non-power-of-two
++/// shift/rotate soundness bug. Model extraction supports widths <= 64.
++const WIDTHS: [u32; 7] = [3, 5, 8, 12, 24, 32, 64];
+ 
+ /// Maximum term depth for generated queries.
+ const MAX_DEPTH: u32 = 5;
+diff --git a/crates/ordeal/src/smtlib.rs b/crates/ordeal/src/smtlib.rs
+index fd70237..f2e29fb 100644
+--- a/crates/ordeal/src/smtlib.rs
++++ b/crates/ordeal/src/smtlib.rs
+@@ -424,19 +424,24 @@ impl Ctx {
+             }),
+             "rotate_right" => {
+                 // SMT-LIB's amount is a CONSTANT k; the core Rotr rotates by a
+-                // term, so materialize k as a same-width constant.
++                // term, so materialize it as a same-width constant — reduced
++                // mod w FIRST: a k >= 2^w would otherwise be truncated to
++                // k mod 2^w, which differs from k mod w at non-power-of-two
++                // widths (fixed 0.22.1).
+                 let k = idx(2)?;
+                 let x = arg(self)?;
+                 let w = Self::width_of(&x)?;
+-                Ok(BvTerm::Rotr(Box::new(x), Box::new(const_bv(k as u128, w))))
++                let k = (k as u128) % w as u128;
++                Ok(BvTerm::Rotr(Box::new(x), Box::new(const_bv(k, w))))
+             }
+             "rotate_left" => {
+-                // rotate_left k == rotr by (-k); lowering::bvrotl builds exactly
+-                // that (exact for the power-of-two widths 8/32/64).
++                // rotate_left k: reduce k mod w (see rotate_right), then
++                // lowering::bvrotl, which is exact at every width.
+                 let k = idx(2)?;
+                 let x = arg(self)?;
+                 let w = Self::width_of(&x)?;
+-                Ok(lowering::bvrotl(x, const_bv(k as u128, w), w))
++                let k = (k as u128) % w as u128;
++                Ok(lowering::bvrotl(x, const_bv(k, w), w))
+             }
+             other => Err(SmtError::Unsupported(format!("indexed operator '{other}'"))),
+         }
+@@ -884,6 +889,53 @@ mod tests {
+         assert!(super::solve_str(ok).is_ok());
+     }
+ 
++    // rivet: verifies VER-049
++    /// Soundness regression (0.22.1): satisfiable shift/rotate queries at
++    /// NON-power-of-two widths. Each pins the operands to concrete values, so
++    /// `sat` is certain; 0.22.0 release builds answered `unsat` (with a valid
++    /// certificate for a wrongly encoded CNF).
++    #[test]
++    fn non_power_of_two_shifts_and_rotates_are_not_falsely_unsat() {
++        let cases = [
++            // width 3: 1 << 1 = 2
++            "(declare-const y (_ BitVec 3))(assert (= y #b001))(assert (distinct (bvshl y #b001) #b000))(check-sat)",
++            // width 24: 0x100 >> 8 = 1
++            "(declare-const y (_ BitVec 24))(assert (= y #x000100))(assert (= (bvlshr y #x000008) #x000001))(check-sat)",
++            // width 6: ashr of a negative value keeps the sign fill
++            "(declare-const y (_ BitVec 6))(assert (= y #b100000))(assert (= (bvashr y #b000010) #b111000))(check-sat)",
++            // width 6: rotate_right 2 of 1 = 0b010000
++            "(declare-const y (_ BitVec 6))(assert (= y #b000001))(assert (= ((_ rotate_right 2) y) #b010000))(check-sat)",
++            // width 6: rotate_left 1 of 0b100000 wraps to 1
++            "(declare-const y (_ BitVec 6))(assert (= y #b100000))(assert (= ((_ rotate_left 1) y) #b000001))(check-sat)",
++            // width 5: rotate_right by k >= 2^w is k mod w (9 mod 5 = 4)
++            "(declare-const y (_ BitVec 5))(assert (= y #b00001))(assert (= ((_ rotate_right 9) y) #b00010))(check-sat)",
++        ];
++        for src in cases {
++            assert!(
++                matches!(verdict(src), CheckResult::Sat(_)),
++                "expected sat: {src}"
++            );
++        }
++    }
++
++    /// The other direction: valid identities at non-power-of-two widths stay
++    /// certified UNSAT after the fix (rotl undoes rotr for a VARIABLE amount;
++    /// a shift by exactly the width is zero).
++    #[test]
++    fn non_power_of_two_identities_stay_certified_unsat() {
++        let cases = [
++            "(declare-const x (_ BitVec 5))(declare-const b (_ BitVec 5))(assert (distinct ((_ rotate_left 2) ((_ rotate_right 2) x)) x))(check-sat)",
++            "(declare-const x (_ BitVec 12))(assert (distinct (bvshl x #x00c) #x000))(check-sat)",
++            "(declare-const x (_ BitVec 7))(declare-const b (_ BitVec 7))(assert (bvult b #b0000111))(assert (distinct (bvlshr (bvshl x b) b) (bvand x (bvlshr #b1111111 b))))(check-sat)",
++        ];
++        for src in cases {
++            match verdict(src) {
++                CheckResult::Unsat(cert) => cert.recheck().expect("certificate re-checks"),
++                other => panic!("expected certified unsat for {src}, got {other:?}"),
++            }
++        }
++    }
++
+     #[test]
+     fn declare_const_with_trailing_garbage_is_an_error() {
+         let s = "(set-logic QF_BV)\n(declare-const b (_ BitVec 32) junk)\n(assert (= b #x00000000))\n(check-sat)\n";
+diff --git a/crates/ordeal/tests/fixtures/differential/sat_lshr_nonpow2_w24.smt2 b/crates/ordeal/tests/fixtures/differential/sat_lshr_nonpow2_w24.smt2
+new file mode 100644
+index 0000000..4e071ca
+--- /dev/null
++++ b/crates/ordeal/tests/fixtures/differential/sat_lshr_nonpow2_w24.smt2
+@@ -0,0 +1,6 @@
++(set-logic QF_BV)
++; soundness regression (0.22.1): non-power-of-two widths must not come back unsat
++(declare-const y (_ BitVec 24))
++(assert (= y #x000100))
++(assert (= (bvlshr y #x000008) #x000001))
++(check-sat)
+diff --git a/crates/ordeal/tests/fixtures/differential/unsat_rotate_roundtrip_w5.smt2 b/crates/ordeal/tests/fixtures/differential/unsat_rotate_roundtrip_w5.smt2
+new file mode 100644
+index 0000000..1d0de56
+--- /dev/null
++++ b/crates/ordeal/tests/fixtures/differential/unsat_rotate_roundtrip_w5.smt2
+@@ -0,0 +1,5 @@
++(set-logic QF_BV)
++; soundness regression (0.22.1): a valid identity at a non-power-of-two width stays certified unsat
++(declare-const x (_ BitVec 5))
++(assert (distinct ((_ rotate_left 2) ((_ rotate_right 2) x)) x))
++(check-sat)

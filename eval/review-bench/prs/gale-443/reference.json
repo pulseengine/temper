@@ -1,0 +1,66 @@
+{
+ "pr": "gale#443",
+ "reviewer": "opus",
+ "findings": [
+  {
+   "file": "tools/xtask/src/gates/aadl_parse.rs",
+   "line": 112,
+   "quoted_line": "    if !out.status.success() || !first.starts_with(\"spar \") {",
+   "class": "logic",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "medium",
+   "claim": "The probe accepts any binary printing `spar <anything>` with exit 0 and never compares against the pinned 0.40.0. A stale spar that does follow the --version convention passes, so the 'measuring with the wrong binary' trap the gate claims to close stays open."
+  },
+  {
+   "file": "tools/xtask/src/gates/aadl_parse.rs",
+   "line": 274,
+   "quoted_line": "        broken_now.iter().filter(|b| !ledger.contains(b)).count() == 1,",
+   "class": "vacuous-check",
+   "net_class": "vacuous-gate",
+   "cwe": null,
+   "severity": "medium",
+   "claim": "Self-test 'ledger arithmetic' re-implements the filter on local literals rather than calling run()'s ledger code, so it cannot fail if run()'s newly/fixed/vanished logic regresses. The vanished-entry direction has no test at all."
+  },
+  {
+   "file": ".github/workflows/kill-criteria.yml",
+   "line": 623,
+   "quoted_line": "          if cargo xtask check aadl-parse --module safety/aadl/semaphore.aadl; then",
+   "class": "vacuous-check",
+   "net_class": "vacuous-gate",
+   "cwe": null,
+   "severity": "low",
+   "claim": "Negative control passes on any non-zero exit: REFUSED (3), usage (2) or a cargo build failure (101) all count as 'the gate rejects the model'. It should require exit 1 (Fail); xtask has distinct exit codes precisely for this."
+  },
+  {
+   "file": ".github/workflows/kill-criteria.yml",
+   "line": 594,
+   "quoted_line": "               https://raw.githubusercontent.com/pulseengine/varve/main/install.sh",
+   "class": "security",
+   "net_class": "unclassified",
+   "cwe": "CWE-494",
+   "severity": "medium",
+   "claim": "The job that claims to measure with the PINNED spar bootstraps from an installer fetched from the mutable varve main branch and runs it with sh on a self-hosted runner, with no tag, commit pin, checksum or signature check."
+  },
+  {
+   "file": "tools/xtask/src/gates/aadl_parse.rs",
+   "line": 132,
+   "quoted_line": "    Ok(out.status.success())",
+   "class": "logic",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "low",
+   "claim": "Any non-zero spar exit (crash, unknown subcommand, missing file, I/O error) becomes 'PARSE FAILS', yet the summary says 'A PARSE FAILS row is always real'. A ledgered model that hits a spar error looks still-broken, and a mistyped --module path reads as 'rejected'."
+  },
+  {
+   "file": ".github/workflows/kill-criteria.yml",
+   "line": 574,
+   "quoted_line": "  # gale#441. Both safety/aadl models are non-conformant AADL and nothing ran",
+   "class": "docs-mismatch",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "low",
+   "claim": "The new job is inserted between wcet-sidecar's description comment ('It gates three things itself: the sidecar's bounds...') and the wcet-sidecar job. That comment now heads the aadl-parse job, which it does not describe."
+  }
+ ]
+}

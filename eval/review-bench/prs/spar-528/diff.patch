@@ -1,0 +1,514 @@
+diff --git a/artifacts/requirements.yaml b/artifacts/requirements.yaml
+index 7fd2435e..a72db40f 100644
+--- a/artifacts/requirements.yaml
++++ b/artifacts/requirements.yaml
+@@ -7623,3 +7623,19 @@ artifacts:
+     links:
+       - type: refines
+         target: REQ-AADL-BINDING-CONSUMERS-001
++  - id: REQ-RTA-PRIORITY-ORDER-001
++    type: requirement
++    title: The higher AADL Priority value shall be the higher priority in every fixed-priority analysis
++    status: implemented
++    description: "Refs #526. Thread_Properties::Priority in the predeclared property set (osate2 @ 87468992ee0d4c4cc856a72bd542899953f088f3, Predeclared_Property_Sets/Thread_Properties.aadl lines 41-44) says: 'A larger value represents a higher priority.' rta and arinc653_supply_rta sorted a LOWER number first, so a thread its author made the most important was analysed as the least important: a false deadline miss on it, and a missed one on the thread that really is lowest. Both passes now order threads through one comparator, rta::dispatch_order: an explicit Priority ranks by value, the larger first; a thread that declares Priority ranks above one that does not; with neither, rate-monotonic (shorter period first). Only the both-declared arm changed. ORACLES: four CLI tests (crates/spar-cli/tests/rta_priority_order.rs) on inline two-thread models, two red before the fix: hi/lo where the inverted order makes hi miss, and a Priority that overrides rate-monotonic, which separates the AADL order from Priority being ignored; plus a rate-monotonic control with no Priority and a mixed declared/undeclared case. Unit tests: the comparator arm by arm, and arinc_supply on the #331 golden model with Priority 1/2/3 (t3 highest, R = 1550/1570/1570 us), red before the fix. Deliberately updated tests that encoded the old order: rta explicit_priority_overrides_period_ordering (values swapped, response times now asserted), the arinc_supply #331 golden model (Priority 1/2/3 to 3/2/1, pinned numbers unchanged), and the jittered_chain RTA fixture (1/2 to 2/1, expected output unchanged). CORPUS: spar analyze over every tracked .aadl directory, old vs new, full sorted output: 319 runs in directories that declare Priority, 4 of which reach rta, and 3 change (jittered_chain, osate issue251 ravenscar, avionics-display Priority_Inversion), each checked by hand against the recurrence; 1230 runs elsewhere, identical. NOT CLAIMED: a qualified Thread_Properties::Priority is not read at all (get_priority reads Deployment_Properties::Priority or the bare name), so a model that qualifies it falls back to rate-monotonic; that is a separate gap."
++    tags: [rta, arinc653, scheduling, aadl, bug]
++    links:
++      - type: traces-to
++        target: REQ-RTA-001
++      - type: traces-to
++        target: REQ-RTA-ARINC-SUPPLY-001
++    provenance:
++      created-by: ai-assisted
++      model: claude-opus-5-5
++      timestamp: 2026-10-27T20:05:59Z
++    release: v0.47.1
+diff --git a/crates/spar-analysis/src/arinc_supply.rs b/crates/spar-analysis/src/arinc_supply.rs
+index d37db18b..3cb15f71 100644
+--- a/crates/spar-analysis/src/arinc_supply.rs
++++ b/crates/spar-analysis/src/arinc_supply.rs
+@@ -371,13 +371,10 @@ impl Analysis for Arinc653SupplyRtaAnalysis {
+                 continue; // no partition budget → not an analyzable Γ
+             };
+ 
+-            // Priority order: explicit priority (lower = higher), then RM
+-            // (shorter period first) — same ordering as RtaAnalysis.
+-            tasks.sort_by(|a, b| match (a.priority, b.priority) {
+-                (Some(pa), Some(pb)) => pa.cmp(&pb),
+-                (Some(_), None) => std::cmp::Ordering::Less,
+-                (None, Some(_)) => std::cmp::Ordering::Greater,
+-                (None, None) => a.period.cmp(&b.period),
++            // Priority order: explicit Priority (a LARGER value is the higher
++            // priority, #526), then RM: the comparator RtaAnalysis uses.
++            tasks.sort_by(|a, b| {
++                crate::rta::dispatch_order(a.priority, a.period, b.priority, b.period)
+             });
+ 
+             for i in 0..tasks.len() {
+@@ -521,7 +518,7 @@ mod tests {
+     // ── Pure core: the #331 golden worked example ────────────────────
+     //
+     // Γ = (Π = 1000 µs, Θ = 300 µs); blackout 2(Π−Θ) = 1400 µs.
+-    // Three inner tasks (D_i = T_i, priority 1 highest), B = 100/100/0.
++    // Three inner tasks (D_i = T_i, τ1 highest priority), B = 100/100/0.
+     // NUMBERS ARE THE BUSY-WINDOW w-FORM (R = 2(Π−Θ) + w), pinned as such
+     // per issue #331's form note — they coincide with the engine R-form on
+     // THIS set but differ in general; do not "fix" a future mismatch by
+@@ -749,7 +746,16 @@ mod tests {
+     }
+ 
+     /// The #331 golden two-level partition model as an instance.
++    ///
++    /// τ1 is the highest priority, so under AADL's order (a LARGER `Priority`
++    /// value is the higher priority, #526) it carries the largest value:
++    /// 3 / 2 / 1 on t1 / t2 / t3. Before #526 this read 1 / 2 / 3.
+     fn golden_instance() -> SystemInstance {
++        golden_instance_with_priorities(["3", "2", "1"])
++    }
++
++    /// The #331 golden model with the `Priority` values of t1/t2/t3 given.
++    fn golden_instance_with_priorities(prios: [&str; 3]) -> SystemInstance {
+         let mut b = TB::new();
+         let root = b.add("root", ComponentCategory::System, None);
+         let cpu = b.add("cpu1", ComponentCategory::Processor, Some(root));
+@@ -768,9 +774,9 @@ mod tests {
+         // Inner tasks — NO Actual_Processor_Binding (so RtaAnalysis skips
+         // them; the supply pass is the sole analyzer). D_i = T_i.
+         for (t, prio, c, period) in [
+-            (t1, "1", "20 us", "5000 us"),
+-            (t2, "2", "50 us", "10000 us"),
+-            (t3, "3", "100 us", "20000 us"),
++            (t1, prios[0], "20 us", "5000 us"),
++            (t2, prios[1], "50 us", "10000 us"),
++            (t3, prios[2], "100 us", "20000 us"),
+         ] {
+             b.prop(t, "Deployment_Properties", "Priority", prio);
+             b.prop(t, "Timing_Properties", "Compute_Execution_Time", c);
+@@ -807,6 +813,40 @@ mod tests {
+         );
+     }
+ 
++    // rivet: verifies REQ-RTA-PRIORITY-ORDER-001
++    #[test]
++    fn integration_larger_priority_value_is_higher_priority() {
++        // The golden model with Priority 1 / 2 / 3 on t1 / t2 / t3. Under
++        // AADL (a LARGER value is the higher priority, #526) t3 is highest
++        // and t1 lowest, the reverse of rate-monotonic. Γ = (1000, 300),
++        // blackout J = 2(Π−Θ) = 1400 µs; w = C + B + Σ ceil((w+J)/T_j)·C_j,
++        // R = 1400 + w, B = max segment (= C) of the lower-priority tasks.
++        //   t3: C=100, B = max(50, 20) = 50, no hp. w = 150.        R = 1550.
++        //   t2: C=50,  B = 20, hp = t3. w = 70 + ceil(1470/20000)·100 = 170;
++        //       ceil(1570/20000) = 1, fixed at 170.                 R = 1570.
++        //   t1: C=20,  B = 0, hp = t3, t2. w = 20 + 100 + 50 = 170;
++        //       ceil(1570/20000) = ceil(1570/10000) = 1, fixed.     R = 1570.
++        // The inverted order puts t1 first (B = 100) and gives t1 = 1520,
++        // t3 = 1570: the #331 golden numbers on the wrong threads.
++        let inst = golden_instance_with_priorities(["1", "2", "3"]);
++        let diags = Arinc653SupplyRtaAnalysis.analyze(&inst);
++        assert_eq!(diags.len(), 3, "one bound per inner thread: {diags:#?}");
++        assert!(diags.iter().all(|d| d.severity == Severity::Info));
++        let find = |name: &str| {
++            diags
++                .iter()
++                .find(|d| d.message.contains(&format!("'{name}'")))
++                .unwrap_or_else(|| panic!("no diagnostic for {name}: {diags:#?}"))
++                .message
++                .clone()
++        };
++        let (t1, t2, t3) = (find("t1"), find("t2"), find("t3"));
++        assert!(t3.contains(&format!("{}", 1550 * US)), "t3 highest: {t3}");
++        assert!(t2.contains(&format!("{}", 1570 * US)), "t2: {t2}");
++        assert!(t1.contains(&format!("{}", 1570 * US)), "t1 lowest: {t1}");
++        assert!(!t1.contains(&format!("{}", 1520 * US)), "t1 lowest: {t1}");
++    }
++
+     #[test]
+     fn integration_no_double_analysis_from_rta() {
+         // The critical reconciliation: because the inner threads carry no
+diff --git a/crates/spar-analysis/src/rta.rs b/crates/spar-analysis/src/rta.rs
+index 67bed7de..661cc9de 100644
+--- a/crates/spar-analysis/src/rta.rs
++++ b/crates/spar-analysis/src/rta.rs
+@@ -388,14 +388,10 @@ impl Analysis for RtaAnalysis {
+                 continue;
+             }
+ 
+-            // Sort by priority: explicit priority first (lower number = higher
+-            // priority), then by shorter period (Rate Monotonic ordering).
+-            threads.sort_by(|a, b| match (a.priority, b.priority) {
+-                (Some(pa), Some(pb)) => pa.cmp(&pb),
+-                (Some(_), None) => std::cmp::Ordering::Less,
+-                (None, Some(_)) => std::cmp::Ordering::Greater,
+-                (None, None) => a.period_ps.cmp(&b.period_ps),
+-            });
++            // Sort highest priority first: explicit Priority (a LARGER value
++            // is the higher priority, #526), then Rate Monotonic.
++            threads
++                .sort_by(|a, b| dispatch_order(a.priority, a.period_ps, b.priority, b.period_ps));
+ 
+             // ISR interference terms for threads on this CPU.
+             let isr_interference: Vec<(u64, u64)> = processor_isrs
+@@ -587,7 +583,8 @@ struct RtaThreadInfo {
+     /// `Compute_Execution_Time` was not a range.
+     exec_bcet_ps: Option<u64>,
+     deadline_ps: u64,
+-    /// Explicit priority (lower = higher priority). `None` means unset.
++    /// Explicit AADL `Priority` (a LARGER value is the higher priority,
++    /// #526). `None` means unset.
+     priority: Option<u64>,
+     /// `Timing_Properties::Dispatch_Jitter` in picoseconds (0 if unset).
+     jitter_ps: u64,
+@@ -628,6 +625,33 @@ struct IrqChainSource {
+     event_port: String,
+ }
+ 
++/// Fixed-priority dispatch order: `Less` means `a` is analysed BEFORE `b`,
++/// i.e. `a` is the higher priority and pre-empts `b`.
++///
++/// 1. An explicit `Priority` ranks by value, and a LARGER value is the
++///    HIGHER priority. AADL's `Thread_Properties::Priority`: "A larger value
++///    represents a higher priority" (osate2 @
++///    87468992ee0d4c4cc856a72bd542899953f088f3, `Thread_Properties.aadl`
++///    lines 41-44). Until #526 spar sorted a lower number first.
++/// 2. A thread that declares `Priority` ranks above one that does not.
++/// 3. Neither declares it: rate-monotonic, the shorter period first.
++///
++/// Shared by [`RtaAnalysis`] and `Arinc653SupplyRtaAnalysis`, so the two
++/// passes cannot disagree on the order.
++pub(crate) fn dispatch_order(
++    a_priority: Option<u64>,
++    a_period: u64,
++    b_priority: Option<u64>,
++    b_period: u64,
++) -> std::cmp::Ordering {
++    match (a_priority, b_priority) {
++        (Some(pa), Some(pb)) => pb.cmp(&pa),
++        (Some(_), None) => std::cmp::Ordering::Less,
++        (None, Some(_)) => std::cmp::Ordering::Greater,
++        (None, None) => a_period.cmp(&b_period),
++    }
++}
++
+ /// Read the `Deployment_Properties::Priority` value.
+ pub(crate) fn get_priority(props: &spar_hir_def::properties::PropertyMap) -> Option<u64> {
+     // Typed path
+@@ -966,16 +990,57 @@ mod tests {
+         );
+         b.set_children(proc, vec![t1, t2]);
+ 
++        // #526: a LARGER Priority value is the higher priority, so t_long
++        // (Priority 2) pre-empts t_short (Priority 1) against RM. Before
++        // #526 this test set t_long = 1, t_short = 2 and asserted only "no
++        // error", which also holds under plain RM, so it could not tell an
++        // override from no override.
+         bind_thread(&mut b, t1, "100 ms", "5 ms", None);
+-        b.set_property(t1, "Deployment_Properties", "Priority", "1");
++        b.set_property(t1, "Deployment_Properties", "Priority", "2");
+ 
+         bind_thread(&mut b, t2, "10 ms", "2 ms", None);
+-        b.set_property(t2, "Deployment_Properties", "Priority", "2");
++        b.set_property(t2, "Deployment_Properties", "Priority", "1");
+ 
+         let inst = b.build(root);
+         let diags = RtaAnalysis.analyze(&inst);
+ 
+         assert!(diags.iter().all(|d| d.severity != Severity::Error));
++        // R_long = 5 ms (no hp). R_short: 2 → 2 + ceil(2/100)·5 = 7 → 7 ms.
++        // Under RM they would be 2 ms and 5 + ceil(5/10)·2 = 7 ms instead.
++        let msg = |name: &str| {
++            diags
++                .iter()
++                .find(|d| d.message.contains(&format!("thread '{name}'")))
++                .unwrap_or_else(|| panic!("no diagnostic for {name}: {diags:#?}"))
++                .message
++                .clone()
++        };
++        assert!(
++            msg("t_long").contains("response time 5.00 ms"),
++            "{diags:#?}"
++        );
++        assert!(
++            msg("t_short").contains("response time 7.00 ms"),
++            "{diags:#?}"
++        );
++    }
++
++    // ── #526: the dispatch-order comparator, arm by arm ─────────────
++    // rivet: verifies REQ-RTA-PRIORITY-ORDER-001
++    #[test]
++    fn dispatch_order_larger_priority_first_then_declared_then_rm() {
++        use std::cmp::Ordering::{Equal, Greater, Less};
++        // Both declared: the LARGER value goes first, period ignored.
++        assert_eq!(dispatch_order(Some(10), 100, Some(1), 10), Less);
++        assert_eq!(dispatch_order(Some(1), 10, Some(10), 100), Greater);
++        assert_eq!(dispatch_order(Some(5), 10, Some(5), 100), Equal);
++        // Declared outranks undeclared, whatever the periods.
++        assert_eq!(dispatch_order(Some(0), 100, None, 10), Less);
++        assert_eq!(dispatch_order(None, 10, Some(0), 100), Greater);
++        // Neither declared: rate-monotonic.
++        assert_eq!(dispatch_order(None, 10, None, 100), Less);
++        assert_eq!(dispatch_order(None, 100, None, 10), Greater);
++        assert_eq!(dispatch_order(None, 10, None, 10), Equal);
+     }
+ 
+     // ── Test 7: Boundary deadline ───────────────────────────────────
+@@ -2112,8 +2177,8 @@ mod tests {
+     fn isr_priority_above_all_tasks() {
+         // An ISR with priority 1 (a low numeric value, but ANY
+         // ISR_Priority at all causes ISR-tier interference) still
+-        // preempts a task whose Deployment_Properties::Priority is 0
+-        // (the highest numeric task priority).
++        // preempts a task whatever its Deployment_Properties::Priority
++        // (here 0; the task tier's order does not reach the ISR tier).
+         let (mut b, root, proc) = make_base();
+         let dev = add_isr_device(&mut b, root, "irq1", "1 ms", "50 us", 1);
+         let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+diff --git a/crates/spar-analysis/tests/fixtures/rta/jittered_chain.aadl b/crates/spar-analysis/tests/fixtures/rta/jittered_chain.aadl
+index c91d7492..9b40ecfb 100644
+--- a/crates/spar-analysis/tests/fixtures/rta/jittered_chain.aadl
++++ b/crates/spar-analysis/tests/fixtures/rta/jittered_chain.aadl
+@@ -3,6 +3,10 @@
+ -- threads share one CPU. Both deadlines are met; the lower-priority
+ -- thread's response time reflects the higher-priority thread's
+ -- jitter inside the fixed-point recurrence.
++--
++-- t_hi is the higher priority, so it carries the LARGER Priority value
++-- (AADL: "A larger value represents a higher priority"; #526). Before
++-- #526 spar read a lower number as higher, and this fixture said 1 / 2.
+ 
+ package Jittered
+ public
+@@ -19,7 +23,7 @@ public
+       Timing_Properties::Deadline          => 10 ms;
+       Timing_Properties::Compute_Execution_Time => 1 ms;
+       Timing_Properties::Dispatch_Jitter   => 2 ms;
+-      Deployment_Properties::Priority      => 1;
++      Deployment_Properties::Priority      => 2;
+       Deployment_Properties::Actual_Processor_Binding => (reference (cpu1));
+   end th;
+   thread implementation th.impl
+@@ -31,7 +35,7 @@ public
+       Timing_Properties::Period            => 100 ms;
+       Timing_Properties::Deadline          => 100 ms;
+       Timing_Properties::Compute_Execution_Time => 10 ms;
+-      Deployment_Properties::Priority      => 2;
++      Deployment_Properties::Priority      => 1;
+       Deployment_Properties::Actual_Processor_Binding => (reference (cpu1));
+   end tl;
+   thread implementation tl.impl
+diff --git a/crates/spar-cli/tests/rta_priority_order.rs b/crates/spar-cli/tests/rta_priority_order.rs
+new file mode 100644
+index 00000000..300d5835
+--- /dev/null
++++ b/crates/spar-cli/tests/rta_priority_order.rs
+@@ -0,0 +1,211 @@
++//! REQ-RTA-PRIORITY-ORDER-001 (#526) — under AADL, a LARGER `Priority` value
++//! is the HIGHER priority.
++//!
++//! `Thread_Properties::Priority` in the predeclared property set (osate2 @
++//! 87468992ee0d4c4cc856a72bd542899953f088f3,
++//! `core/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/Thread_Properties.aadl`,
++//! lines 41-44): "A larger value represents a higher priority."
++//!
++//! spar's `rta` pass sorted a lower number first, so a thread the author made
++//! the most important was analysed as the least important.
++//!
++//! Every response time below is hand-computed with the standard recurrence
++//! R = C + Σ_{j ∈ hp} ceil(R / T_j) · C_j, iterated from R = C to a fixed
++//! point (no jitter, no blocking, no ISRs). spar stops iterating once R
++//! passes the deadline, so a miss prints "response time exceeds deadline D"
++//! rather than the fixed point.
++//!
++//! NON-VACUITY: each test first asserts that the `rta` pass ran and printed a
++//! response time for every thread, so "no error lines" can never pass on an
++//! empty run. `priority_overrides_rate_monotonic` is the case that separates
++//! "AADL order" from "Priority ignored": there the two disagree.
++
++use std::fs;
++use std::path::PathBuf;
++use std::process::Command;
++
++/// Build a two-thread model on one processor. Each thread is
++/// `(name, priority, period, wcet, deadline)`; `priority = None` omits the
++/// property.
++fn model(pkg: &str, threads: &[(&str, Option<u32>, &str, &str, &str)]) -> String {
++    let mut types = String::new();
++    let mut subs = String::new();
++    let mut binds = String::new();
++    for (name, prio, period, wcet, deadline) in threads {
++        let prio_line = prio
++            .map(|p| format!("      Priority => {p};\n"))
++            .unwrap_or_default();
++        types.push_str(&format!(
++            "  thread T_{name}\n    properties\n      Dispatch_Protocol => Periodic;\n      \
++             Period => {period};\n      Compute_Execution_Time => {wcet} .. {wcet};\n      \
++             Deadline => {deadline};\n{prio_line}  end T_{name};\n"
++        ));
++        subs.push_str(&format!("      {name} : thread T_{name};\n"));
++        binds.push_str(&format!(
++            "      Actual_Processor_Binding => (reference (cpu)) applies to app.{name};\n"
++        ));
++    }
++    format!(
++        "package {pkg}\npublic\n  processor Cpu\n  end Cpu;\n{types}  process P\n  end P;\n  \
++         process implementation P.impl\n    subcomponents\n{subs}  end P.impl;\n  \
++         system Top\n  end Top;\n  system implementation Top.impl\n    subcomponents\n      \
++         cpu : processor Cpu;\n      app : process P.impl;\n    properties\n{binds}  \
++         end Top.impl;\nend {pkg};\n"
++    )
++}
++
++/// Run `spar analyze` and return the `rta` lines that name a thread.
++fn rta_lines(pkg: &str, src: &str) -> Vec<String> {
++    let dir = std::env::temp_dir().join(format!("spar-rta-prio-{}", std::process::id()));
++    fs::create_dir_all(&dir).unwrap();
++    let file: PathBuf = dir.join(format!("{pkg}.aadl"));
++    fs::write(&file, src).unwrap();
++    let out = Command::new(env!("CARGO_BIN_EXE_spar"))
++        .args([
++            "analyze",
++            "--root",
++            &format!("{pkg}::Top.impl"),
++            file.to_str().unwrap(),
++        ])
++        .output()
++        .expect("spar binary runs");
++    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
++    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
++    let lines: Vec<String> = stdout
++        .lines()
++        .chain(stderr.lines())
++        .filter(|l| l.contains("rta") && l.contains("thread '") && l.contains("response time"))
++        .map(str::to_string)
++        .collect();
++    // Non-vacuity: the rta pass ran and computed a response time per thread.
++    assert_eq!(
++        lines.len(),
++        2,
++        "rta must print one response-time line per thread on {pkg}:\n{stdout}{stderr}"
++    );
++    lines
++}
++
++fn line_for<'a>(lines: &'a [String], thread: &str) -> &'a str {
++    lines
++        .iter()
++        .find(|l| l.contains(&format!("thread '{thread}'")))
++        .unwrap_or_else(|| panic!("no rta line for '{thread}': {lines:#?}"))
++}
++
++// rivet: verifies REQ-RTA-PRIORITY-ORDER-001
++#[test]
++fn larger_priority_value_preempts() {
++    // hi: Priority 10, T = 10 ms, C = 2 ms, D = 10 ms.
++    // lo: Priority 1,  T = 100 ms, C = 20 ms, D = 30 ms.
++    //
++    // AADL order (hi pre-empts lo):
++    //   R_hi = 2 ms (no hp).
++    //   R_lo: 20 → 20 + ceil(20/10)·2 = 24 → 20 + ceil(24/10)·2 = 26
++    //         → 20 + ceil(26/10)·2 = 26. R_lo = 26 ms <= 30 ms.
++    // Inverted order (lo pre-empts hi):
++    //   R_lo = 20 ms.
++    //   R_hi: 2 → 2 + ceil(2/100)·20 = 22 → 22. R_hi = 22 ms > 10 ms: MISS.
++    let src = model(
++        "PrioOrder",
++        &[
++            ("hi", Some(10), "10 ms", "2 ms", "10 ms"),
++            ("lo", Some(1), "100 ms", "20 ms", "30 ms"),
++        ],
++    );
++    let lines = rta_lines("PrioOrder", &src);
++    let hi = line_for(&lines, "hi");
++    let lo = line_for(&lines, "lo");
++    assert!(
++        !hi.contains("misses deadline")
++            && hi.contains("response time 2.00 ms <= deadline 10.00 ms"),
++        "hi (Priority 10) must pre-empt lo and meet its deadline: {hi}"
++    );
++    assert!(
++        !lo.contains("misses deadline")
++            && lo.contains("response time 26.00 ms <= deadline 30.00 ms"),
++        "lo (Priority 1) must be pre-empted by hi: {lo}"
++    );
++}
++
++// rivet: verifies REQ-RTA-PRIORITY-ORDER-001
++#[test]
++fn priority_overrides_rate_monotonic() {
++    // urgent: Priority 10, T = 100 ms, C = 20 ms, D = 100 ms.
++    // fast:   Priority 1,  T = 10 ms,  C = 2 ms,  D = 10 ms.
++    //
++    // AADL order (urgent pre-empts fast, against RM):
++    //   R_urgent = 20 ms <= 100 ms.
++    //   R_fast: 2 → 2 + ceil(2/100)·20 = 22 → 22. R_fast = 22 ms > 10 ms: MISS.
++    // Inverted order, and Priority ignored (RM), both put fast first:
++    //   R_fast = 2 ms; R_urgent: 20 → 24 → 26 → 26 = 26 ms. No miss.
++    let src = model(
++        "PrioOverRm",
++        &[
++            ("urgent", Some(10), "100 ms", "20 ms", "100 ms"),
++            ("fast", Some(1), "10 ms", "2 ms", "10 ms"),
++        ],
++    );
++    let lines = rta_lines("PrioOverRm", &src);
++    let urgent = line_for(&lines, "urgent");
++    let fast = line_for(&lines, "fast");
++    assert!(
++        urgent.contains("response time 20.00 ms <= deadline 100.00 ms"),
++        "urgent (Priority 10) must be analysed with no interference: {urgent}"
++    );
++    assert!(
++        fast.contains("misses deadline: response time exceeds deadline 10.00 ms"),
++        "fast (Priority 1) must be pre-empted by urgent and miss: {fast}"
++    );
++}
++
++// rivet: verifies REQ-RTA-PRIORITY-ORDER-001
++#[test]
++fn rate_monotonic_control_without_priority_is_unchanged() {
++    // The hi/lo model with NO Priority: rate-monotonic puts the 10 ms
++    // thread first, so the numbers are those of the AADL-order case above:
++    // R_hi = 2 ms, R_lo = 26 ms. This verdict holds before and after #526.
++    let src = model(
++        "RmControl",
++        &[
++            ("hi", None, "10 ms", "2 ms", "10 ms"),
++            ("lo", None, "100 ms", "20 ms", "30 ms"),
++        ],
++    );
++    let lines = rta_lines("RmControl", &src);
++    assert!(
++        line_for(&lines, "hi").contains("response time 2.00 ms <= deadline 10.00 ms"),
++        "{lines:#?}"
++    );
++    assert!(
++        line_for(&lines, "lo").contains("response time 26.00 ms <= deadline 30.00 ms"),
++        "{lines:#?}"
++    );
++}
++
++// rivet: verifies REQ-RTA-PRIORITY-ORDER-001
++#[test]
++fn a_declared_priority_outranks_an_undeclared_one() {
++    // Mixed: only the long-period thread declares Priority. A declared
++    // priority ranks above an undeclared one (unchanged by #526), so it is
++    // analysed first, against RM:
++    //   R_slow = 20 ms <= 100 ms.
++    //   R_fast: 2 → 22 → 22 ms > 10 ms: MISS.
++    let src = model(
++        "PrioMixed",
++        &[
++            ("slow", Some(1), "100 ms", "20 ms", "100 ms"),
++            ("fast", None, "10 ms", "2 ms", "10 ms"),
++        ],
++    );
++    let lines = rta_lines("PrioMixed", &src);
++    assert!(
++        line_for(&lines, "slow").contains("response time 20.00 ms <= deadline 100.00 ms"),
++        "{lines:#?}"
++    );
++    assert!(
++        line_for(&lines, "fast")
++            .contains("misses deadline: response time exceeds deadline 10.00 ms"),
++        "{lines:#?}"
++    );
++}

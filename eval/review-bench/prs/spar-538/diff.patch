@@ -1,0 +1,445 @@
+diff --git a/artifacts/requirements.yaml b/artifacts/requirements.yaml
+index 1cb2b1cc..24066ec9 100644
+--- a/artifacts/requirements.yaml
++++ b/artifacts/requirements.yaml
+@@ -7535,8 +7535,8 @@ artifacts:
+   - id: REQ-WRPC-BINDING-MEMORY-001
+     type: requirement
+     title: wrpc-binding shall accept a memory (shared-memory seam) as a connection's transport, as AS5506 permits
+-    status: proposed
+-    description: "#515, second point. Deployment_Properties.aadl:96-97 (osate2 @ 87468992) declares Actual_Connection_Binding as a list of reference (processor, virtual processor, bus, virtual bus, device, memory, system, abstract). wrpc-binding warns \"which is a memory — not a bus or virtual bus\" on a legal binding. Shared on-chip RAM is the real inter-core transport on dual-core MCUs (relay#587, i.MX RT1176). This needs a decision: accept memory as a transport (Info), or keep a Warning only for target categories that cannot carry data at all. Proposed; not scheduled into v0.47.0."
++    status: implemented
++    description: "#515, second point. Deployment_Properties.aadl:96-97 (osate2 @ 87468992) declares Actual_Connection_Binding as a list of reference (processor, virtual processor, bus, virtual bus, device, memory, system, abstract). wrpc-binding warns \"which is a memory — not a bus or virtual bus\" on a legal binding. Shared on-chip RAM is the real inter-core transport on dual-core MCUs (relay#587, i.MX RT1176). This needs a decision: accept memory as a transport (Info), or keep a Warning only for target categories that cannot carry data at all. Proposed; not scheduled into v0.47.0. IMPLEMENTED (v0.48.0), decision: accept memory as a transport, at Info. wrpc-binding resolves an Actual_Connection_Binding reference BY IDENTITY from the component its association was declared on (connection_reference_context for a connection-own value, reference_context for the owner value), replacing the model-wide unique-name search. A memory target yields Info \"... through shared memory: Actual_Connection_Binding to memory <name>\"; a bus or virtual bus stays silent; every other resolved category still warns (\"not a bus, virtual bus or memory\"). Evidence: crates/spar-cli/tests/wrpc_binding_memory.rs, 5 tests (memory gives exactly one INFO line and no \"not a bus\" or \"no binding\" line; inline and applies-to forms agree; negative controls: an unbound crossing still warns \"has no Actual_Connection_Binding\", a binding to a process still warns; a memory on a non-crossing connection is silent), plus 4 unit tests in crates/spar-analysis/src/wrpc_binding.rs. Red on origin/main 15645a8: the memory test failed on \"[WARNING] wrpc-binding: connection nav in S.impl is bound via Actual_Connection_Binding to shared_mem, which is a memory — not a bus or virtual bus\". Corpus (2091 tracked .aadl, 1554 runs, 1514 instantiated): 1 run differs by 3 lines, wording only (\"not a bus or virtual bus\" becomes \"not a bus, virtual bus or memory\", system target EB in test-data/interop/aadlib/examples/multicore/avionicsbusmanagers.aadl). Open: processor, virtual processor, device, system and abstract are also legal targets and still warn; whether they are transports is a separate decision."
+     tags: [wrpc, analysis, binding]
+     provenance:
+       created-by: ai-assisted
+diff --git a/crates/spar-analysis/src/wrpc_binding.rs b/crates/spar-analysis/src/wrpc_binding.rs
+index b06dfd23..93326ab8 100644
+--- a/crates/spar-analysis/src/wrpc_binding.rs
++++ b/crates/spar-analysis/src/wrpc_binding.rs
+@@ -1,12 +1,17 @@
+ //! wRPC binding validation analysis.
+ //!
+ //! Checks that connections between components bound to different processors
+-//! have an `Actual_Connection_Binding` property pointing to a bus.
++//! have an `Actual_Connection_Binding` property pointing to a transport: a
++//! bus, a virtual bus, or a memory.
+ //!
+ //! In AADL, when two communicating components are deployed to different
+ //! processors, the connection between them must be bound to a bus (or
+-//! virtual bus) to model the transport. This analysis warns when such
+-//! a binding is missing, which helps catch incomplete deployment models.
++//! virtual bus) to model the transport — or to a memory, the shared-memory
++//! seam between the cores of a multi-core MCU (Deployment_Properties.aadl:
++//! 96-97 lists `memory` among the targets, REQ-WRPC-BINDING-MEMORY-001).
++//! This analysis warns when such a binding is missing or names a component
++//! of another category, which helps catch incomplete deployment models, and
++//! reports a memory binding at Info.
+ 
+ use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
+ use spar_hir_def::item_tree::ComponentCategory;
+@@ -31,7 +36,11 @@ impl Analysis for WrpcBindingAnalysis {
+     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+         let mut groups = crate::property_accessors::ProcessorGroups::default();
+         // Severity rationale (STPA-REQ-016):
+-        //   Warning — cross-processor connection missing Actual_Connection_Binding to a bus
++        //   Warning — cross-processor connection missing Actual_Connection_Binding
++        //             to a bus, or bound to a component that is not a bus,
++        //             virtual bus or memory
++        //   Info    — cross-processor connection bound to a memory (shared-memory
++        //             seam, REQ-WRPC-BINDING-MEMORY-001)
+         let mut diagnostics = Vec::new();
+ 
+         // Only run if the model has multiple processors — otherwise cross-processor
+@@ -101,14 +110,33 @@ impl Analysis for WrpcBindingAnalysis {
+             let owner_props = instance.properties_for(owner);
+             // Capture the binding VALUE (not just presence) — prefer the
+             // per-connection property map (the #281 `applies to <conn>` idiom),
+-            // then the owning component's flat map.
+-            let binding_value = conn_props
+-                .get("Deployment_Properties", "Actual_Connection_Binding")
+-                .or_else(|| conn_props.get("", "Actual_Connection_Binding"))
+-                .or_else(|| owner_props.get("Deployment_Properties", "Actual_Connection_Binding"))
+-                .or_else(|| owner_props.get("", "Actual_Connection_Binding"));
+-
+-            let Some(binding_value) = binding_value else {
++            // then the owning component's flat map — together with the
++            // component its `reference (...)` resolves from, which depends on
++            // the map the value came from (REQ-AADL-REF-CONTEXT-001).
++            const ACB: &str = "Actual_Connection_Binding";
++            let binding = conn_props
++                .get("Deployment_Properties", ACB)
++                .or_else(|| conn_props.get("", ACB))
++                .map(|v| {
++                    let ctx = instance.connection_reference_context(
++                        conn_idx,
++                        "Deployment_Properties",
++                        ACB,
++                    );
++                    (v, ctx)
++                })
++                .or_else(|| {
++                    owner_props
++                        .get("Deployment_Properties", ACB)
++                        .or_else(|| owner_props.get("", ACB))
++                        .map(|v| {
++                            let ctx =
++                                instance.reference_context(owner, "Deployment_Properties", ACB);
++                            (v, ctx)
++                        })
++                });
++
++            let Some((binding_value, ctx)) = binding else {
+                 // REQ-WRPC-BINDING-002: no binding at all on a cross-processor
+                 // connection → warn (missing transport).
+                 let path = component_path(instance, owner);
+@@ -139,25 +167,58 @@ impl Analysis for WrpcBindingAnalysis {
+             };
+ 
+             // REQ-WRPC-BINDING-003: the binding is present — verify its
+-            // `reference (...)` target is a bus / virtual bus. Warn ONLY when
+-            // the reference resolves UNAMBIGUOUSLY to a non-bus component;
+-            // accept a bus, an unresolvable name, a dotted/multi-level path, or
+-            // a multi-reference list (the sound rule that avoids new
++            // `reference (...)` target. The reference resolves BY IDENTITY from
++            // the component its association was declared on (#498), never by
++            // a model-wide name search. Accept a bus, a virtual bus, an
++            // unresolvable name, a dotted/multi-level path, or a
++            // multi-reference list (the sound rule that avoids new
+             // false-positives, per the requirement).
+-            if let Some(target) = extract_simple_reference_name(binding_value)
+-                && let Some(category) = unambiguous_non_bus_category(instance, &target)
+-            {
+-                let path = component_path(instance, owner);
+-                diagnostics.push(AnalysisDiagnostic {
++            //
++            // REQ-WRPC-BINDING-MEMORY-001 (#515): a memory is a legal target
++            // too — Deployment_Properties.aadl:96-97 lists it — and shared RAM
++            // is the real inter-core transport on a multi-core MCU. Report the
++            // shared-memory seam at Info; warn on any other category.
++            let Some(target) = extract_simple_reference_name(binding_value) else {
++                continue;
++            };
++            let Some(target_idx) = instance.resolve_reference(ctx, &target) else {
++                continue;
++            };
++            let path = component_path(instance, owner);
++            match instance.component(target_idx).category {
++                ComponentCategory::Bus | ComponentCategory::VirtualBus => {}
++                ComponentCategory::Memory => diagnostics.push(AnalysisDiagnostic {
++                    severity: Severity::Info,
++                    message: format!(
++                        "connection '{}' in '{}' crosses processor boundary \
++                         (source bound to {}, destination bound to {}) \
++                         through shared memory: Actual_Connection_Binding \
++                         to memory '{}'",
++                        conn.name,
++                        owner_comp.name,
++                        src_binding
++                            .as_ref()
++                            .map(|(_, raw)| raw.as_str())
++                            .unwrap_or("?"),
++                        dst_binding
++                            .as_ref()
++                            .map(|(_, raw)| raw.as_str())
++                            .unwrap_or("?"),
++                        target,
++                    ),
++                    path,
++                    analysis: "wrpc-binding".to_string(),
++                }),
++                category => diagnostics.push(AnalysisDiagnostic {
+                     severity: Severity::Warning,
+                     message: format!(
+                         "connection '{}' in '{}' is bound via Actual_Connection_Binding \
+-                         to '{}', which is a {} — not a bus or virtual bus",
++                         to '{}', which is a {} — not a bus, virtual bus or memory",
+                         conn.name, owner_comp.name, target, category,
+                     ),
+                     path,
+                     analysis: "wrpc-binding".to_string(),
+-                });
++                }),
+             }
+         }
+ 
+@@ -238,25 +299,6 @@ fn extract_simple_reference_name(value: &str) -> Option<String> {
+     Some(name.to_string())
+ }
+ 
+-/// If `name` resolves to EXACTLY ONE component and that component is not a
+-/// `bus` / `virtual bus`, return its category (for the diagnostic). A bus,
+-/// zero matches, or multiple matches all return `None` — accept, no warning.
+-fn unambiguous_non_bus_category(
+-    instance: &SystemInstance,
+-    name: &str,
+-) -> Option<ComponentCategory> {
+-    let mut matches = instance
+-        .all_components()
+-        .filter(|(_, c)| c.name.as_str().eq_ignore_ascii_case(name));
+-    match (matches.next(), matches.next()) {
+-        (Some((_, comp)), None) => match comp.category {
+-            ComponentCategory::Bus | ComponentCategory::VirtualBus => None,
+-            other => Some(other),
+-        },
+-        _ => None,
+-    }
+-}
+-
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -755,9 +797,10 @@ mod tests {
+         let cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+         let can_bus = b.add_component("can_bus", ComponentCategory::Bus, Some(root));
+         let vbus = b.add_component("ip_vbus", ComponentCategory::VirtualBus, Some(root));
++        let ram = b.add_component("shared_ram", ComponentCategory::Memory, Some(root));
+         let sender = b.add_component("sender", ComponentCategory::Process, Some(root));
+         let receiver = b.add_component("receiver", ComponentCategory::Process, Some(root));
+-        b.set_children(root, vec![cpu1, cpu2, can_bus, vbus, sender, receiver]);
++        b.set_children(root, vec![cpu1, cpu2, can_bus, vbus, ram, sender, receiver]);
+         b.set_property(
+             sender,
+             "Deployment_Properties",
+@@ -837,6 +880,81 @@ mod tests {
+         );
+     }
+ 
++    // ---- REQ-WRPC-BINDING-MEMORY-001: a memory is a legal transport ----
++
++    fn assert_memory_info(diags: &[AnalysisDiagnostic]) {
++        assert_eq!(diags.len(), 1, "one diagnostic: {diags:?}");
++        assert_eq!(diags[0].severity, Severity::Info, "{diags:?}");
++        assert!(
++            diags[0].message.contains("connection 'c1'")
++                && diags[0].message.contains("memory 'shared_ram'")
++                && diags[0].message.contains("reference (cpu1)")
++                && diags[0].message.contains("reference (cpu2)"),
++            "{}",
++            diags[0].message
++        );
++        assert_eq!(diags[0].analysis, "wrpc-binding");
++        assert_eq!(diags[0].path, vec!["top".to_string()]);
++    }
++
++    // rivet: verifies REQ-WRPC-BINDING-MEMORY-001
++    #[test]
++    fn binding_to_memory_on_the_owner_is_reported_at_info() {
++        assert_memory_info(&analyze_with_binding("reference (shared_ram)"));
++    }
++
++    // rivet: verifies REQ-WRPC-BINDING-MEMORY-001
++    #[test]
++    fn binding_to_memory_on_the_connection_is_reported_at_info() {
++        let (mut b, root) = two_proc_base();
++        let conn = b.components[root].connections[0];
++        b.set_connection_property(
++            conn,
++            "Deployment_Properties",
++            "Actual_Connection_Binding",
++            "(reference (shared_ram))",
++        );
++        assert_memory_info(&WrpcBindingAnalysis.analyze(&b.build(root)));
++    }
++
++    // rivet: verifies REQ-WRPC-BINDING-MEMORY-001
++    #[test]
++    fn binding_to_a_process_warns() {
++        let diags = analyze_with_binding("reference (receiver)");
++        assert_eq!(diags.len(), 1, "{diags:?}");
++        assert_eq!(diags[0].severity, Severity::Warning);
++        assert!(
++            diags[0].message.contains("'receiver', which is a process")
++                && diags[0]
++                    .message
++                    .contains("not a bus, virtual bus or memory"),
++            "{}",
++            diags[0].message
++        );
++    }
++
++    // rivet: verifies REQ-WRPC-BINDING-MEMORY-001
++    #[test]
++    fn binding_target_resolves_from_its_declarer_not_by_name_search() {
++        // A processor named `deep_cpu` exists, but under `node`, not under the
++        // declaring `top`: `reference (deep_cpu)` does not resolve from `top`,
++        // so it is accepted unresolved (no diagnostic). A model-wide name
++        // search would have found it.
++        let (mut b, root) = two_proc_base();
++        let node = b.add_component("node", ComponentCategory::System, Some(root));
++        let deep = b.add_component("deep_cpu", ComponentCategory::Processor, Some(node));
++        b.set_children(node, vec![deep]);
++        b.components[root].children.push(node);
++        b.set_property(
++            root,
++            "Deployment_Properties",
++            "Actual_Connection_Binding",
++            "reference (deep_cpu)",
++        );
++        let diags = WrpcBindingAnalysis.analyze(&b.build(root));
++        assert!(diags.is_empty(), "{diags:?}");
++    }
++
+     #[test]
+     fn reference_name_extraction_is_conservative() {
+         assert_eq!(
+diff --git a/crates/spar-cli/tests/wrpc_binding_memory.rs b/crates/spar-cli/tests/wrpc_binding_memory.rs
+new file mode 100644
+index 00000000..ab000f86
+--- /dev/null
++++ b/crates/spar-cli/tests/wrpc_binding_memory.rs
+@@ -0,0 +1,154 @@
++//! #515 point 2, REQ-WRPC-BINDING-MEMORY-001 — a memory is a legal
++//! `Actual_Connection_Binding` target. Deployment_Properties.aadl:96-97
++//! (osate2 @ 87468992) declares the property as `list of reference
++//! (processor, virtual processor, bus, virtual bus, device, memory, system,
++//! abstract)`. Shared on-chip RAM is the transport between the cores of a
++//! dual-core MCU.
++//!
++//! Two processes on two processors, connected by `nav`, which is bound to
++//! the memory `shared_mem`. Before the fix, wrpc-binding warned that `nav`
++//! "is bound via Actual_Connection_Binding to 'shared_mem', which is a memory
++//! — not a bus or virtual bus". Now it reports the memory as the transport,
++//! at Info severity.
++
++use std::process::Command;
++
++const MODEL: &str = r#"package WM515
++public
++  processor Cpu
++  end Cpu;
++  memory Ram
++  end Ram;
++  process Pr
++    features
++      o : out data port;
++      i : in data port;
++  end Pr;
++  system S
++  end S;
++  system implementation S.impl
++    subcomponents
++      m7 : processor Cpu;
++      m4 : processor Cpu;
++      shared_mem : memory Ram;
++      logger : process Pr;
++      est : process Pr;
++      cas : process Pr;
++    connections
++      nav : port est.o -> cas.i { Actual_Connection_Binding => (reference (shared_mem)); };
++    properties
++      Actual_Processor_Binding => (reference (m4)) applies to est;
++      Actual_Processor_Binding => (reference (m7)) applies to cas;
++  end S.impl;
++end WM515;
++"#;
++
++const BINDING: &str = "{ Actual_Connection_Binding => (reference (shared_mem)); }";
++
++/// The `wrpc-binding:` lines `spar analyze` prints for `src`.
++fn wrpc_lines(name: &str, src: &str) -> Vec<String> {
++    let dir = std::env::temp_dir().join(format!("spar-515-mem-{}", std::process::id()));
++    std::fs::create_dir_all(&dir).unwrap();
++    let path = dir.join(name);
++    std::fs::write(&path, src).unwrap();
++    let out = Command::new(env!("CARGO_BIN_EXE_spar"))
++        .args(["analyze", "--root", "WM515::S.impl", path.to_str().unwrap()])
++        .output()
++        .expect("spar binary runs");
++    let text =
++        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
++    assert!(
++        text.contains("Instantiated "),
++        "the model must instantiate: {text}"
++    );
++    text.lines()
++        .filter(|l| l.contains("wrpc-binding:"))
++        .map(str::to_string)
++        .collect()
++}
++
++fn with(from: &str, to: &str) -> String {
++    let s = MODEL.replace(from, to);
++    assert_ne!(s, MODEL, "the edit `{from}` must apply");
++    s
++}
++
++// rivet: verifies REQ-WRPC-BINDING-MEMORY-001
++#[test]
++fn a_connection_bound_to_a_memory_reports_the_memory_as_its_transport() {
++    let lines = wrpc_lines("memory.aadl", MODEL);
++    assert!(
++        !lines
++            .iter()
++            .any(|l| l.contains("has no Actual_Connection_Binding")),
++        "the memory binding must be seen: {lines:#?}"
++    );
++    assert!(
++        !lines.iter().any(|l| l.contains("not a bus")),
++        "a memory is a legal connection binding target: {lines:#?}"
++    );
++    assert_eq!(lines.len(), 1, "exactly one wrpc-binding line: {lines:#?}");
++    assert!(
++        lines[0].contains("[INFO]")
++            && lines[0].contains("connection 'nav'")
++            && lines[0].contains("memory 'shared_mem'"),
++        "the memory is reported as the binding, at Info: {lines:#?}"
++    );
++}
++
++// rivet: verifies REQ-WRPC-BINDING-MEMORY-001
++#[test]
++fn the_applies_to_form_reports_the_memory_too() {
++    let src = with(BINDING, "").replace(
++        "applies to cas;",
++        "applies to cas;\n      Actual_Connection_Binding => (reference (shared_mem)) applies to nav;",
++    );
++    assert_eq!(
++        wrpc_lines("applies.aadl", &src),
++        wrpc_lines("memory.aadl", MODEL),
++        "the inline and `applies to` forms agree"
++    );
++}
++
++// rivet: verifies REQ-WRPC-BINDING-MEMORY-001
++#[test]
++fn an_unbound_crossing_still_warns() {
++    // Negative control: drop the binding. The crossing has no transport.
++    let lines = wrpc_lines("unbound.aadl", &with(BINDING, ""));
++    assert_eq!(lines.len(), 1, "{lines:#?}");
++    assert!(
++        lines[0].contains("[WARNING]")
++            && lines[0].contains("connection 'nav'")
++            && lines[0].contains("has no Actual_Connection_Binding"),
++        "{lines:#?}"
++    );
++}
++
++// rivet: verifies REQ-WRPC-BINDING-MEMORY-001
++#[test]
++fn a_binding_to_a_process_still_warns() {
++    // Negative control: a process is not among the categories
++    // Actual_Connection_Binding may reference, so the binding is still wrong.
++    let lines = wrpc_lines(
++        "process.aadl",
++        &with("(reference (shared_mem))", "(reference (logger))"),
++    );
++    assert_eq!(lines.len(), 1, "{lines:#?}");
++    assert!(
++        lines[0].contains("[WARNING]")
++            && lines[0].contains("connection 'nav'")
++            && lines[0].contains("'logger', which is a process"),
++        "{lines:#?}"
++    );
++}
++
++// rivet: verifies REQ-WRPC-BINDING-MEMORY-001
++#[test]
++fn a_memory_on_a_connection_that_stays_on_one_processor_is_silent() {
++    // Both ends on m4: no crossing, so wrpc-binding says nothing about it.
++    let src = with(
++        "(reference (m7)) applies to cas",
++        "(reference (m4)) applies to cas",
++    );
++    assert!(wrpc_lines("same.aadl", &src).is_empty());
++}
