@@ -1,0 +1,27 @@
+[package]
+name = "temper-triage"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "First replies for warte's issue queue, posted as the temper GitHub App"
+license = "MIT"
+repository = "https://github.com/pulseengine/temper"
+publish = false
+
+[[bin]]
+name = "temper-triage"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.22"
+fancy-regex = "0.14"
+ring = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+ureq = { version = "2", features = ["json"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

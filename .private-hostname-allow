@@ -1,0 +1,2 @@
+# Fixtures for temper-triage's outgoing check: host-shaped values on purpose.
+file:triage/tests/fixtures/*

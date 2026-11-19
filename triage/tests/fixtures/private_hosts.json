@@ -1,0 +1,590 @@
+[
+ {
+  "text": "see buildbox.local for logs",
+  "home": "",
+  "hits": [
+   [
+    "mdns/lan",
+    "buildbox.local"
+   ]
+  ]
+ },
+ {
+  "text": "see buildbox.local for logs",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "mdns/lan",
+    "buildbox.local"
+   ]
+  ]
+ },
+ {
+  "text": "settings.local.json",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "settings.local.json",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "edit .env.local",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "edit .env.local",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "match *.local",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "match *.local",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "ci.home.arpa",
+  "home": "",
+  "hits": [
+   [
+    "mdns/lan",
+    "ci.home.arpa"
+   ]
+  ]
+ },
+ {
+  "text": "ci.home.arpa",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "mdns/lan",
+    "ci.home.arpa"
+   ]
+  ]
+ },
+ {
+  "text": "node.tail1234.ts.net",
+  "home": "",
+  "hits": [
+   [
+    "mdns/lan",
+    "node.tail1234.ts.net"
+   ]
+  ]
+ },
+ {
+  "text": "node.tail1234.ts.net",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "mdns/lan",
+    "node.tail1234.ts.net"
+   ]
+  ]
+ },
+ {
+  "text": "printer.lan.",
+  "home": "",
+  "hits": [
+   [
+    "mdns/lan",
+    "printer.lan"
+   ]
+  ]
+ },
+ {
+  "text": "printer.lan.",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "mdns/lan",
+    "printer.lan"
+   ]
+  ]
+ },
+ {
+  "text": "BUILD.LOCAL",
+  "home": "",
+  "hits": [
+   [
+    "mdns/lan",
+    "BUILD.LOCAL"
+   ]
+  ]
+ },
+ {
+  "text": "BUILD.LOCAL",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "mdns/lan",
+    "BUILD.LOCAL"
+   ]
+  ]
+ },
+ {
+  "text": "a.local and a.local",
+  "home": "",
+  "hits": [
+   [
+    "mdns/lan",
+    "a.local"
+   ]
+  ]
+ },
+ {
+  "text": "a.local and a.local",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "mdns/lan",
+    "a.local"
+   ]
+  ]
+ },
+ {
+  "text": "x.local-y",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "x.local-y",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "x.local.example",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "x.local.example",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "10.0.0.1",
+  "home": "",
+  "hits": [
+   [
+    "ipv4",
+    "10.0.0.1"
+   ]
+  ]
+ },
+ {
+  "text": "10.0.0.1",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "ipv4",
+    "10.0.0.1"
+   ]
+  ]
+ },
+ {
+  "text": "172.16.5.4",
+  "home": "",
+  "hits": [
+   [
+    "ipv4",
+    "172.16.5.4"
+   ]
+  ]
+ },
+ {
+  "text": "172.16.5.4",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "ipv4",
+    "172.16.5.4"
+   ]
+  ]
+ },
+ {
+  "text": "172.32.0.1",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "172.32.0.1",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "192.168.1.10",
+  "home": "",
+  "hits": [
+   [
+    "ipv4",
+    "192.168.1.10"
+   ]
+  ]
+ },
+ {
+  "text": "192.168.1.10",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "ipv4",
+    "192.168.1.10"
+   ]
+  ]
+ },
+ {
+  "text": "100.64.0.1",
+  "home": "",
+  "hits": [
+   [
+    "ipv4",
+    "100.64.0.1"
+   ]
+  ]
+ },
+ {
+  "text": "100.64.0.1",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "ipv4",
+    "100.64.0.1"
+   ]
+  ]
+ },
+ {
+  "text": "100.128.0.1",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "100.128.0.1",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "10.0.0.1.2",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "10.0.0.1.2",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "1.10.0.0.1",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "1.10.0.0.1",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "10.0.0.1.",
+  "home": "",
+  "hits": [
+   [
+    "ipv4",
+    "10.0.0.1"
+   ]
+  ]
+ },
+ {
+  "text": "10.0.0.1.",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "ipv4",
+    "10.0.0.1"
+   ]
+  ]
+ },
+ {
+  "text": "v10.0.0.1",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "v10.0.0.1",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "ip=10.20.30.40;",
+  "home": "",
+  "hits": [
+   [
+    "ipv4",
+    "10.20.30.40"
+   ]
+  ]
+ },
+ {
+  "text": "ip=10.20.30.40;",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "ipv4",
+    "10.20.30.40"
+   ]
+  ]
+ },
+ {
+  "text": "fd12:3456::1",
+  "home": "",
+  "hits": [
+   [
+    "ula",
+    "fd12:3456::1"
+   ]
+  ]
+ },
+ {
+  "text": "fd12:3456::1",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "ula",
+    "fd12:3456::1"
+   ]
+  ]
+ },
+ {
+  "text": "FC00:1::",
+  "home": "",
+  "hits": [
+   [
+    "ula",
+    "FC00:1::"
+   ]
+  ]
+ },
+ {
+  "text": "FC00:1::",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "ula",
+    "FC00:1::"
+   ]
+  ]
+ },
+ {
+  "text": "fe80::1",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "fe80::1",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "fd12:",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "fd12:",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "fd12:3456:789a:1::",
+  "home": "",
+  "hits": [
+   [
+    "ula",
+    "fd12:3456:789a:1::"
+   ]
+  ]
+ },
+ {
+  "text": "fd12:3456:789a:1::",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "ula",
+    "fd12:3456:789a:1::"
+   ]
+  ]
+ },
+ {
+  "text": "/Volumes/Home/git/x",
+  "home": "",
+  "hits": [
+   [
+    "volumes",
+    "/Volumes/Home/git/x"
+   ]
+  ]
+ },
+ {
+  "text": "/Volumes/Home/git/x",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "volumes",
+    "/Volumes/Home/git/x"
+   ]
+  ]
+ },
+ {
+  "text": "/Volumes/",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "/Volumes/",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "path /Volumes/Data, more",
+  "home": "",
+  "hits": [
+   [
+    "volumes",
+    "/Volumes/Data"
+   ]
+  ]
+ },
+ {
+  "text": "path /Volumes/Data, more",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "volumes",
+    "/Volumes/Data"
+   ]
+  ]
+ },
+ {
+  "text": "/home/svc/data",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "/home/svc/data",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "home",
+    "/home/svc"
+   ]
+  ]
+ },
+ {
+  "text": "/home/svcx",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "/home/svcx",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "/home/svc",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "/home/svc",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "home",
+    "/home/svc"
+   ]
+  ]
+ },
+ {
+  "text": "https://pulseengine.eu/docs",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "https://pulseengine.eu/docs",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "the 2.5 release",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "the 2.5 release",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "plain text, nothing here",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "plain text, nothing here",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "unicode ü.local",
+  "home": "",
+  "hits": []
+ },
+ {
+  "text": "unicode ü.local",
+  "home": "/home/svc",
+  "hits": []
+ },
+ {
+  "text": "runner-07 on 192.168.0.2 and gpu.lan",
+  "home": "",
+  "hits": [
+   [
+    "mdns/lan",
+    "gpu.lan"
+   ],
+   [
+    "ipv4",
+    "192.168.0.2"
+   ]
+  ]
+ },
+ {
+  "text": "runner-07 on 192.168.0.2 and gpu.lan",
+  "home": "/home/svc",
+  "hits": [
+   [
+    "mdns/lan",
+    "gpu.lan"
+   ],
+   [
+    "ipv4",
+    "192.168.0.2"
+   ]
+  ]
+ }
+]
