@@ -299,21 +299,9 @@ fn classifier_and_marker() {
 #[test]
 fn docs_url_must_name_a_public_host() {
     // the hosts the fresh-context review found passing the plugin's patterns
-    for u in [
-        "https://localhost/",
-        "https://127.0.0.1/",
-        "https://169.254.169.254/",
-        "https://[fe80::1]/",
-        "https://[::1]/",
-        "https://build.corp/",
-        "https://nas.internal/",
-        "https://x.localdomain/",
-        "https://runner01/",
-        "https://0xC0A80105/",
-        "https://3232235777/",
-        "https://docs.example.com:8443/",
-        "https://user@nas.internal/",
-    ] {
+    let rejects = include_str!("fixtures/docs_url_rejects.txt");
+    assert!(rejects.lines().count() >= 13);
+    for u in rejects.lines() {
         let r = Config::parse(&format!(
             "org = \"pulseengine\"\nwarte_url = \"https://w.example.com\"\napp_id = 1\nrepos = [\"*\"]\ndocs_url = \"{u}\""
         ));
