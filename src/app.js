@@ -22,7 +22,7 @@ import {
 } from './dependabot.js';
 import { ensureLabelsExist } from './labels.js';
 import { handleSignedCommitMerge, checkPRMergeStrategy } from './merge-strategy.js';
-import { reviewPullRequest, updateReviewStatus, setRateLimitStore } from './ai-review.js';
+import { reviewPullRequest, isReviewEnabled, updateReviewStatus, setRateLimitStore } from './ai-review.js';
 import { isProcessed, markProcessed, setIdempotencyStore } from './idempotency.js';
 import { triggerSelfUpdate } from './self-update.js';
 import { defaultQueue } from './queue.js';
@@ -988,7 +988,7 @@ function registerApp(app, options = {}) {
         bot => sender === bot || sender === bot + "[bot]"
       );
 
-    if (config?.ai_review?.enabled && !isBotPR) {
+    if (isReviewEnabled(config) && !isBotPR) {
       try {
         const result = await reviewPullRequest(context.octokit, owner, repo, pr.number);
         if (result.success) {
@@ -1064,7 +1064,7 @@ function registerApp(app, options = {}) {
         bot => sender === bot || sender === bot + "[bot]"
       );
 
-    if (!config?.ai_review?.enabled || isBotPR) return;
+    if (!isReviewEnabled(config) || isBotPR) return;
 
     try {
       const result = await reviewPullRequest(context.octokit, owner, repo, pr.number);

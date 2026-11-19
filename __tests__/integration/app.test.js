@@ -36,6 +36,8 @@ jest.mock('../../src/merge-strategy.js', () => ({
 }));
 
 jest.mock('../../src/ai-review.js', () => ({
+  // the real predicate, so the gate under test is the shipped one
+  isReviewEnabled: jest.requireActual('../../src/ai-review.js').isReviewEnabled,
   reviewPullRequest: jest.fn(),
   updateReviewStatus: jest.fn()
 }));
@@ -829,6 +831,28 @@ describe('app', () => {
       await handlers['pull_request.synchronize'](context);
 
       expect(reviewPullRequest).toHaveBeenCalledWith(octokit, 'pulseengine', 'rivet', 99);
+    });
+
+    // temper#92: with the model paused, the rivet oracle still reviews; with
+    // both off, nothing runs.
+    it.each([
+      [{ ai_review: { enabled: false }, rivet_oracle: { enabled: true, binary_path: 'data/rivet/rivet' } }, 1],
+      [{ ai_review: { enabled: false }, rivet_oracle: { enabled: false, binary_path: 'data/rivet/rivet' } }, 0]
+    ])('pull_request.synchronize reviews when only the oracle is on (%j -> %i call)', async (cfg, calls) => {
+      _setConfigForTesting(cfg);
+      reviewPullRequest.mockClear();
+      reviewPullRequest.mockResolvedValue({ success: true });
+      const { handlers } = setupApp();
+      await handlers['pull_request.synchronize']({
+        id: `delivery-oracle-${calls}`,
+        log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+        octokit: createMockOctokit(),
+        payload: {
+          pull_request: { number: 98, node_id: 'PR_98', user: { login: 'human-author' } },
+          repository: { name: 'rivet', owner: { login: 'pulseengine' }, default_branch: 'main' }
+        }
+      });
+      expect(reviewPullRequest).toHaveBeenCalledTimes(calls);
     });
 
     // Bug #13: a redelivered PR event must not re-run auto-merge, the AI
