@@ -1,0 +1,14 @@
+{
+ "pr": "jess#197",
+ "fixed_by": "jess#202",
+ "defects": [
+  {
+   "anchored": true,
+   "file": "tools/timer-probe/run.sh",
+   "line": 59,
+   "quoted_line": "    print(f\"  -> the wake FIRED after {elapsed} poll(s) — the timer path WORKS end to end\")",
+   "class": "vacuous-check",
+   "evidence": "The fixing PR (S3) found run.sh ended on its decoder heredoc without sys.exit so it returned 0 for any bitfield, and added the gate on the six properties and the wake; the escape line announces success from a script that could not fail."
+  }
+ ]
+}

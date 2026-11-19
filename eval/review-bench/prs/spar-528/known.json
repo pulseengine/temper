@@ -1,0 +1,14 @@
+{
+ "pr": "spar#528",
+ "fixed_by": "spar#531",
+ "defects": [
+  {
+   "anchored": false,
+   "file": "crates/spar-analysis/src/rta.rs",
+   "line": null,
+   "quoted_line": null,
+   "class": "logic",
+   "evidence": "The fixing PR found Priority declared as Thread_Properties::Priority was still ignored by get_priority (it read only the bare name and Deployment_Properties::Priority), so the new larger-is-higher dispatch_order never saw the standard spelling; it replaced get_priority and the scheduling advisory check. Not on an added line: the reader the escape PR left unchanged."
+  }
+ ]
+}

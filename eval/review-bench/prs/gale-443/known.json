@@ -1,0 +1,14 @@
+{
+ "pr": "gale#443",
+ "fixed_by": "gale#445",
+ "defects": [
+  {
+   "anchored": true,
+   "file": ".github/workflows/kill-criteria.yml",
+   "line": 623,
+   "quoted_line": "          if cargo xtask check aadl-parse --module safety/aadl/semaphore.aadl; then",
+   "class": "test-gap",
+   "evidence": "The fixing PR repaired semaphore.aadl and had to replace this negative control (and the matching self-test fixture) because a control that requires a real committed model to stay broken becomes a false RED the moment that model is fixed."
+  }
+ ]
+}

@@ -1,0 +1,16 @@
+{
+ "pr": "loom#428",
+ "reviewer": "opus",
+ "findings": [
+  {
+   "file": ".github/workflows/validate-shared.yml",
+   "line": 147,
+   "quoted_line": "          test -s \"$output\"",
+   "class": "test-gap",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "low",
+   "claim": "The gate accepts any non-empty file as success. Output is never checked as valid wasm (e.g. wasm-tools validate) or for the expected folded result, so an optimizer that emits a truncated or corrupt module still passes the integration step."
+  }
+ ]
+}

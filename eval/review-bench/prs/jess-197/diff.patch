@@ -1,0 +1,119 @@
+diff --git a/artifacts/findings.yaml b/artifacts/findings.yaml
+index ec4d40a..ce0b887 100644
+--- a/artifacts/findings.yaml
++++ b/artifacts/findings.yaml
+@@ -1828,14 +1828,77 @@ artifacts:
+       - type: traces-to
+         target: REQ-PIX-007
+ 
++  - id: AFD-049
++    type: ai-found-defect
++    severity: critical
++    triage-status: closed
++    detected-by: gale identified jess's own constant on gale#223; jess reproduced and root-caused it, 2026-09-02
++    title: AFD-047's CENTRAL CONCLUSION WAS WRONG - the clock was frozen by a STALE ARTIFACT jess's own script selected, not by gale; with the ticking HAL the wake FIRES on the first poll and the timer path works end to end
++    status: resolved
++    description: >
++      2026-09-02. AFD-047 reported that on shipped gale-nano 0.7.0 the clock does not advance, that
++      an armed wake never fires in 10,000 polls, and - the load-bearing error - that "gale's
++      time::now() does NOT read through gust:hal/mmio". gale disproved the last claim by pointing at
++      their own one-line source, and jess reproduced the correction.
++      *** THE CONSTANT WAS JESS'S OWN STUB, AND IT PROVES THE SEAM WORKS ***:
++        gale: fn now() -> u64 { read32(TIM2_CNT) as u64 }   with TIM2_CNT = 0x4000_0024
++        0x4000_0024 & 0xFF = 36 - exactly the constant AFD-047 reported as unexplained.
++      So now() DOES call through gust:hal/mmio.read32 with the expected address, and the value came
++      back out of jess's own address-derived stub. AFD-047's first instinct was right and its
++      "correction" was wrong.
++      *** ROOT CAUSE - A STALE ARTIFACT THE SCRIPT PREFERRED ALPHABETICALLY ***. jess DID build a
++      ticking HAL variant to test exactly this, and concluded from it that the clock stayed frozen.
++      That test never ran the ticking HAL. app/gust-hal-tick was created with `cp -r
++      app/gust-hal-stub`, which copied the stub's target/ directory too, leaving a stale
++      jess_gust_hal_stub.wasm beside the real jess_gust_hal_tick.wasm. Both the ad-hoc compose and
++      the committed tools/timer-probe/run.sh selected `ls .../*.wasm | head -1`, and the stale STUB
++      sorts first. Every "ticking" run silently composed the CONSTANT stub.
++      *** THE CORRECTED RESULT - A CLEAN SINGLE-VARIABLE DIFFERENTIAL ***, everything identical but
++      read32's return:
++        CONSTANT stub    clock_advances=0  slept=0  polls=10000  elapsed_at=0
++        TICKING hal      clock_advances=1  slept=1  polls=0      elapsed_at=1
++      The probe is now 6/6 including its negative control, and THE WAKE FIRES ON THE FIRST POLL.
++      *** WHAT THIS CHANGES ***: gale's timer path WORKS end to end on the shipped v0.7.0 -
++      spawn.start -> timer.sleep -> timer.slept -> elapsed. PERIODICITY IS UNBLOCKED. The design gale
++      documented is confirmed: the embedder supplies time through gust:hal/mmio, TIM2_CNT is a
++      documented mock counter, and timer-thin is the driver meant to own the real prescaler behind
++      that seam. gust:hal is the right home for jess's clock, as gale said.
++      *** WHAT SURVIVES FROM AFD-047 ***: the reframing gale adopted for DD-025 - the constraint is
++      not only who drives the EXECUTOR but who supplies the CLOCK - is still correct, and is now
++      correct for a demonstrated reason rather than a mistaken one: time enters the graph ONLY
++      through the host's read32. An application in pure wasm cannot manufacture it. Also confirmed by
++      gale: 7f09ada touches only the world and the example, no runtime.
++      *** THE LESSON, and it is the third instance of the same shape this campaign ***: AFD-048
++      found a control that measured statefulness instead of input sensitivity; this one ran a
++      control that never applied its variable at all. Both PASSED and both were wrong. A negative
++      control must be shown to have ACTUALLY CHANGED the thing it names - here, that the artifact
++      composed is the artifact intended. run.sh now names the tick artifact explicitly and REFUSES
++      if a stale stub is present in that directory; the refusal is itself negative-controlled.
++      NOT CLAIMED: this ran under wasmtime. The ticking read32 advances on every call, so the wake
++      firing on poll 0 is a degenerate instant timer, not a realistic rate - it proves the MECHANISM,
++      not a schedule.
++    tags: [gale, dd-025, timer, clock, stale-artifact, vacuous-control, self-correction, periodicity]
++    links:
++      - type: traces-to
++        target: DD-025
++      - type: traces-to
++        target: REQ-PIX-007
++
+   - id: AFD-047
+     type: ai-found-defect
+     severity: major
+     triage-status: open
+     detected-by: jess exercised gale's app-timer shape against the SHIPPED gale-nano 0.7.0, 2026-08-28
+-    title: ON SHIPPED gale-nano 0.7.0 THE CLOCK DOES NOT ADVANCE — every timer semantic holds INCLUDING a negative control, but time::now() is constant (36) and an armed wake never fires in 10,000 polls; this is the DD-025 evidence gale asked for
+-    status: open
++    title: SUPERSEDED BY AFD-049 - the central conclusion here is WRONG. ON SHIPPED gale-nano 0.7.0 THE CLOCK DOES NOT ADVANCE — every timer semantic holds INCLUDING a negative control, but time::now() is constant (36) and an armed wake never fires in 10,000 polls; this is the DD-025 evidence gale asked for
++    status: resolved
+     description: >
++      *** READ AFD-049 FIRST. THE HEADLINE CONCLUSION OF THIS FINDING IS WRONG. *** The clock was
++      frozen because jess composed against a STALE CONSTANT-STUB ARTIFACT, never against the ticking
++      HAL this finding claims to have tested. With the correct artifact the clock advances and the
++      wake FIRES on the first poll. The specific sentence to disregard is "gale's time::now() does
++      NOT read through gust:hal/mmio" - it does, and gale identified the constant 36 as jess's own
++      stub returning the low byte of TIM2_CNT (0x4000_0024 & 0xFF = 36). Retained unedited below as
++      the record of what was believed; corrected in AFD-049.
+       2026-08-28. gale answered jess's periodicity question on gale#223: `world app-timer` was BROKEN
+       (no `spawn` import, so no valid handle was obtainable and only the invalid-handle path was
+       reachable), fixed in 7f09ada with a worked example, and Q1's answer is (a) - spawn a task, arm
+diff --git a/tools/timer-probe/run.sh b/tools/timer-probe/run.sh
+index 505f68b..289e0ca 100755
+--- a/tools/timer-probe/run.sh
++++ b/tools/timer-probe/run.sh
+@@ -16,8 +16,19 @@ for c in timer-probe gust-hal-tick; do
+   ( cd "$ROOT/app/$c" && cargo build --release --target wasm32-unknown-unknown ) || fail "$c build"
+ done
+ wasm-tools component new "$ROOT/app/timer-probe/target/wasm32-unknown-unknown/release/jess_timer_probe.wasm" -o "$OUT/probe.wasm"
+-# NOTE: the tick crate keeps the stub's lib name; take the produced file, do not guess.
+-wasm-tools component new "$(ls "$ROOT"/app/gust-hal-tick/target/wasm32-unknown-unknown/release/*.wasm | head -1)" -o "$OUT/hal-tick.wasm"
++# NAME THE ARTIFACT EXPLICITLY. The earlier version took `ls .../*.wasm | head -1` on the
++# assumption that the tick crate kept the stub's lib name. It does not — the package is
++# `jess-gust-hal-tick`, so cargo emits jess_gust_hal_tick.wasm. But app/gust-hal-tick was
++# created with `cp -r app/gust-hal-stub`, which copied the stub's target/ dir along with it,
++# leaving a STALE jess_gust_hal_stub.wasm that sorts FIRST alphabetically. So `head -1`
++# silently composed the CONSTANT stub every time and the ticking HAL was never once tested —
++# which is how AFD-047 concluded the clock could not be unfrozen. See AFD-049.
++TICK="$ROOT/app/gust-hal-tick/target/wasm32-unknown-unknown/release/jess_gust_hal_tick.wasm"
++[ -f "$TICK" ] || fail "ticking HAL not built at $TICK"
++# Refuse to proceed if a stale stub artifact is sitting in the tick crate's target dir.
++stale="$ROOT/app/gust-hal-tick/target/wasm32-unknown-unknown/release/jess_gust_hal_stub.wasm"
++[ -e "$stale" ] && fail "stale stub artifact in the tick crate's target dir: $stale — remove it"
++wasm-tools component new "$TICK" -o "$OUT/hal-tick.wasm"
+ cp "$NANO" "$OUT/gale-nano.wasm"
+ cp "$ROOT/tools/timer-probe/probe.wac" "$ROOT/tools/timer-probe/hal.wac" "$OUT/"
+ 
+@@ -45,7 +56,7 @@ polls   = (r >> 8) & 0x3FFF
+ elapsed = (r >> 22) & 0x3FF
+ print(f"\n  polls made = {polls}   last slept() = {last}   elapsed_at = {elapsed}")
+ if elapsed:
+-    print(f"  -> the wake FIRED after {elapsed} polls")
++    print(f"  -> the wake FIRED after {elapsed} poll(s) — the timer path WORKS end to end")
+ elif polls >= 9999:
+     print("  -> loop ran to EXHAUSTION and the wake never fired")
+     print("     (this is the DD-025 observation; it is NOT an early break)")

@@ -1,0 +1,6 @@
+{
+ "pr": "spar#538",
+ "fixed_by": "spar#548",
+ "defects": [],
+ "note": "The fixing PR adds a new Error check in binding_rules.rs for an Actual_Connection_Binding resolving nowhere; the escape PR (wrpc_binding.rs) disclosed this gap as pre-existing and out of scope, and the fixing PR does not change its lines."
+}

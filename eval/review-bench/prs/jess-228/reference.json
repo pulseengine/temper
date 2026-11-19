@@ -1,0 +1,106 @@
+{
+ "pr": "jess#228",
+ "reviewer": "opus",
+ "findings": [
+  {
+   "file": "tools/bench/with-device/src/main.rs",
+   "line": 450,
+   "quoted_line": "    if argv.iter().any(|a| a == \"--help\" || a == \"-h\") {",
+   "class": "logic",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "high",
+   "claim": "--help/-h, --version/-V, --self-test and --status are matched anywhere in argv, including the wrapped command after `--`. `with-device dev -- probe-rs --version` prints with-device's version and exits 0 without claiming or running the command."
+  },
+  {
+   "file": "tools/bench/with-device/src/main.rs",
+   "line": 357,
+   "quoted_line": "            \"kill -9 $$\",",
+   "class": "vacuous-check",
+   "net_class": "vacuous-gate",
+   "cwe": null,
+   "severity": "medium",
+   "claim": "The 'after holder CRASHED' check kills the wrapped `sh` ($$ is sh's pid), not with-device. The holder exits normally and releases the lock, so kernel release on holder crash is never exercised and the check passes even if a crashed holder leaves the device locked."
+  },
+  {
+   "file": "tools/bench/with-device/src/main.rs",
+   "line": 34,
+   "quoted_line": "//! So the self-test discriminates on (a), NOT on (b). Do not read a green self-test as",
+   "class": "docs-mismatch",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "low",
+   "claim": "False claim: with the sort (b) intact and drop-and-retry (a) removed, both processes take selftest-a first, so no cycle forms and the opposite-order test still passes. It fails only when both are removed. It discriminates on neither mechanism alone, and the table omits that variant."
+  },
+  {
+   "file": "tools/bench/with-device/src/main.rs",
+   "line": 240,
+   "quoted_line": "            let free = try_claim(&dev, \"status probe\", \"status\").is_ok();",
+   "class": "concurrency",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "medium",
+   "claim": "--status probes by actually taking LOCK_EX on every free device and overwriting its .holder file. A real claimant racing it without --wait gets exit 3 'DEVICE BUSY' with holder 'status probe', and nothing is run. A read-only status query can cause refused claims."
+  },
+  {
+   "file": "tools/bench/with-device/src/main.rs",
+   "line": 168,
+   "quoted_line": "        .map_err(|_| ())?;",
+   "class": "error-handling",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "medium",
+   "claim": "try_claim collapses lock-file open errors (EACCES, ENOENT after the ignored create_dir_all failure, EMFILE) and flock errors other than EWOULDBLOCK into Err(()). claim_all reports them as 'DEVICE BUSY ... claimed', exits 3, and with --wait spins until the deadline, so a setup error is hidden."
+  },
+  {
+   "file": "tools/bench/with-device/src/main.rs",
+   "line": 172,
+   "quoted_line": "    if let Ok(mut h) = File::create(dir.join(format!(\"{dev}.holder\"))) {",
+   "class": "security",
+   "net_class": "no-test",
+   "cwe": "CWE-59",
+   "severity": "medium",
+   "claim": "The holder file is opened with File::create (O_CREAT|O_TRUNC, follows symlinks) in a predictable dir under world-writable /var/tmp. Another local user who pre-creates /var/tmp/pulseengine-bench can symlink <dev>.holder so that a claim truncates and overwrites any file the claimant can write."
+  },
+  {
+   "file": "tools/bench/with-device/src/main.rs",
+   "line": 176,
+   "quoted_line": "            who.replace('\"', \"'\"),",
+   "class": "logic",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "low",
+   "claim": "The holder JSON is built by hand, and only '\"' is replaced. A backslash or newline in BENCH_WHO or --purpose produces invalid JSON, and status --format json embeds the holder verbatim (and the device name unescaped), so its machine-readable output becomes unparseable."
+  },
+  {
+   "file": "tools/bench/with-device/src/main.rs",
+   "line": 492,
+   "quoted_line": "                wait_s = head.get(i).and_then(|s| s.parse().ok()).unwrap_or(0);",
+   "class": "api-contract",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "low",
+   "claim": "A malformed or missing --wait value (e.g. `--wait 5s`) is silently treated as 0, so the run is fail-fast. USAGE says bad arguments exit 2. The user asked to wait and gets an immediate exit 3 instead."
+  },
+  {
+   "file": ".github/workflows/release.yml",
+   "line": 39,
+   "quoted_line": "      - uses: actions/checkout@v4",
+   "class": "config-ci",
+   "net_class": "no-test",
+   "cwe": null,
+   "severity": "medium",
+   "claim": "On workflow_dispatch, build checks out the dispatch ref (the default branch), not inputs.tag, but publish attaches the binaries to that tag with --clobber. Assets built from different source replace the tag's assets. checkout needs `ref: ${{ inputs.tag || github.ref }}`."
+  },
+  {
+   "file": ".github/workflows/release.yml",
+   "line": 107,
+   "quoted_line": "          gh release upload \"$TAG\" --repo \"$GITHUB_REPOSITORY\" --clobber *.tar.gz SHA256SUMS.txt",
+   "class": "config-ci",
+   "net_class": "unclassified",
+   "cwe": null,
+   "severity": "medium",
+   "claim": "The header says varve#130 needs a SIGNED release asset, but the workflow uploads unsigned tarballs and a SHA256SUMS.txt from the same job: no cosign signature, attestation or provenance. The stated consumer requirement is not met."
+  }
+ ]
+}

@@ -1,0 +1,41 @@
+# The review benchmark (temper#92): the gate for any model reviewer.
+
+artifacts:
+  - id: REQ-041
+    type: requirement
+    title: A review model SHALL be switched on only after it meets the pre-registered bar on eval/review-bench, and the benchmark's reference data SHALL stay anchored on its diffs
+    status: implemented
+    description: >
+      Owner decision 2026-11-19: keep the review set as a benchmark. Bar on
+      the trimmed variant: primary recall >= 0.25 (10 of 40 on the full set,
+      9 of 33 on the public copy), false findings <= 1.5 per PR, format
+      failures <= 1 per 10, p90 <= 120 s on the target. One PR is private
+      and kept only on the evaluation host.
+    fields:
+      priority: must
+      category: constraint
+      upstream-ref: temper#92
+    links:
+      - type: derives-from
+        target: SC-006
+
+  - id: FEAT-008
+    type: feature
+    title: review-bench, the pre-registered benchmark for model reviewers
+    status: implemented
+    description: eval/review-bench (9 public PRs, reference and known defects, run.mjs, revmatch).
+    links:
+      - type: satisfies
+        target: REQ-041
+
+  - id: VER-025
+    type: verification
+    title: review-bench CI job (matcher tests, anchoring, reference self-score)
+    status: implemented
+    fields:
+      method: automated-test
+      test-name: "review-bench job in .github/workflows/ci.yml; revmatch tests/match.rs"
+      test-location: .github/workflows/ci.yml, eval/review-bench/revmatch/tests/match.rs
+    links:
+      - type: verifies
+        target: REQ-041

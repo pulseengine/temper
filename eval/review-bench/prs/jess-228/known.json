@@ -1,0 +1,22 @@
+{
+ "pr": "jess#228",
+ "fixed_by": "jess#230",
+ "defects": [
+  {
+   "anchored": true,
+   "file": "tools/bench/with-device/src/main.rs",
+   "line": 450,
+   "quoted_line": "    if argv.iter().any(|a| a == \"--help\" || a == \"-h\") {",
+   "class": "logic",
+   "evidence": "The fixing PR split argv on \"--\" first and looks for mode flags (-h, -V, --self-test, --status) only in the head, because matching them across the whole argv made `with-device d -- tool --version` print its own version and exit 0 without running the command."
+  },
+  {
+   "anchored": true,
+   "file": ".github/workflows/release.yml",
+   "line": 96,
+   "quoted_line": "          sha256sum *.tar.gz > SHA256SUMS.txt",
+   "class": "config-ci",
+   "evidence": "The fixing PR made the release signable (cosign bundle, SBOM, provenance) and changed the manifest to `sha256sum ./*` because varve consumes entries with a ./ prefix; the escape release published unsigned digests that its consumer could not ingest."
+  }
+ ]
+}

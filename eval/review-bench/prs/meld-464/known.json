@@ -1,0 +1,6 @@
+{
+ "pr": "meld#464",
+ "fixed_by": "meld#466",
+ "defects": [],
+ "note": "The escape PR explicitly fixed only the reloc warning (module_reloc_risk) and said it left the aliasing open; the fixing PR repairs a different pre-existing defect (memory_base_offset = 0u64 in the adapter re-rewrite loop, lines the escape PR did not add or change)."
+}

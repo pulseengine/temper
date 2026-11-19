@@ -1,0 +1,14 @@
+{
+ "pr": "ordeal#183",
+ "fixed_by": "ordeal#197",
+ "defects": [
+  {
+   "anchored": true,
+   "file": "artifacts/verification-results.yaml",
+   "line": 2015,
+   "quoted_line": "      timestamp: 2026-09-30T06:45:00Z",
+   "class": "docs-mismatch",
+   "evidence": "The fixing PR changed this VE-036 timestamp to 2026-09-30T03:41:21Z, saying the hand-written value was about two hours in the future relative to the commit; the rest of that PR (check_cnf debug_assert) is unrelated to the escape PR."
+  }
+ ]
+}

@@ -1,0 +1,6 @@
+{
+ "pr": "loom#428",
+ "fixed_by": "loom#431",
+ "defects": [],
+ "note": "The fixing PR serialises two flaky stats unit tests in loom-core/src/stats.rs that share a global revert map; the escape PR only changed a workflow file and did not touch or cause that race."
+}
