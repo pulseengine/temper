@@ -99,7 +99,15 @@ repos       = ["*"]                            # glob allow-list on the repo nam
 docs_url    = "https://pulseengine.eu/"        # optional; enables point-to-docs
 ask_label   = "needs-reproduction"             # optional
 deny        = []                               # substrings never to post
+warte_ca_file = "/etc/temper-triage/warte-ca.pem"  # optional; see below
 ```
+
+`warte_ca_file` names the CA that signs warte's certificate when warte sits
+behind a local CA. warte is then trusted through that CA only. A missing or
+unreadable file, or one with no certificate in it, stops the run: it never
+falls back to the public roots or to skipping verification. GitHub is always
+reached through the public roots. warte's URL, like the deny-list, belongs
+only in the deploy config.
 
 Credentials are files, never arguments or environment values. Under systemd
 they come from `$CREDENTIALS_DIRECTORY/warte-token` and
@@ -113,7 +121,10 @@ Tags `temper-triage-v*` run `.github/workflows/triage-release.yml`, modelled
 on pulseengine/plant's `release.yml`: static musl archives for x86_64 and
 aarch64 Linux plus macOS, a CycloneDX SBOM, `SHA256SUMS.txt` signed keyless
 with cosign from the tag ref, and SLSA provenance. The pulseengine realm
-layer can then carry it with `repo = "pulseengine/temper"`.
+layer can carry it as `repo = "pulseengine/temper"`, `version = "0.1.0"`,
+`release = "temper-triage-v0.1.0"`, with assets `%R-<target>.tar.gz`. The
+layer's release-tag check refuses prefixed tags until varve#374 ships, so
+the layer entry waits for that varve release.
 
 ## Why Rust and not temper's Node code
 

@@ -8,16 +8,46 @@ use crate::{GitHub, Warte};
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
 use serde_json::{json, Value};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const UA: &str = concat!("temper-triage/", env!("CARGO_PKG_VERSION"));
 
-fn agent() -> ureq::Agent {
+fn builder() -> ureq::AgentBuilder {
     ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(30))
         .redirects(0)
         .user_agent(UA)
-        .build()
+}
+
+fn agent() -> ureq::Agent {
+    builder().build()
+}
+
+/// A TLS config that trusts exactly the certificates in the PEM file at
+/// `path`. Fails closed: an unreadable file or one without a certificate is
+/// an error, never a fallback to the public roots or to no verification.
+pub fn tls_trusting(path: &str) -> Result<Arc<rustls::ClientConfig>, String> {
+    use rustls_pki_types::pem::PemObject;
+    use rustls_pki_types::CertificateDer;
+    let pem = std::fs::read(path).map_err(|e| format!("warte_ca_file {path}: {e}"))?;
+    let mut roots = rustls::RootCertStore::empty();
+    for c in CertificateDer::pem_slice_iter(&pem) {
+        let c = c.map_err(|e| format!("warte_ca_file {path}: {e}"))?;
+        roots
+            .add(c)
+            .map_err(|e| format!("warte_ca_file {path}: {e}"))?;
+    }
+    if roots.is_empty() {
+        return Err(format!("warte_ca_file {path}: no certificate in it"));
+    }
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let cfg = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| format!("tls: {e}"))?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Ok(Arc::new(cfg))
 }
 
 fn now() -> u64 {
@@ -159,12 +189,17 @@ pub struct RealWarte {
 }
 
 impl RealWarte {
-    pub fn new(base: &str, token: &str) -> RealWarte {
-        RealWarte {
+    /// `ca_file`: trust only this CA for warte (see `tls_trusting`).
+    pub fn new(base: &str, token: &str, ca_file: Option<&str>) -> Result<RealWarte, String> {
+        let http = match ca_file {
+            Some(p) => builder().tls_config(tls_trusting(p)?).build(),
+            None => agent(),
+        };
+        Ok(RealWarte {
             base: base.trim_end_matches('/').into(),
             auth: format!("Bearer {}", token.trim()),
-            http: agent(),
-        }
+            http,
+        })
     }
 }
 

@@ -158,7 +158,7 @@ fn go(a: &Args) -> Result<ExitCode, String> {
         return Ok(ExitCode::SUCCESS);
     }
     let token = read_secret("warte-token", cfg.warte_token_file.as_ref())?;
-    let mut warte = RealWarte::new(&cfg.warte_url, &token);
+    let mut warte = RealWarte::new(&cfg.warte_url, &token, cfg.warte_ca_file.as_deref())?;
     let items = run(&h, &mut gh, &mut warte)?;
     let failed = items
         .iter()

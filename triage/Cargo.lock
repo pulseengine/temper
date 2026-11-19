@@ -504,6 +504,8 @@ dependencies = [
  "base64",
  "fancy-regex",
  "ring",
+ "rustls",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "toml",

@@ -34,6 +34,10 @@ pub struct Config {
     pub warte_token_file: Option<String>,
     #[serde(default)]
     pub app_key_file: Option<String>,
+    /// PEM CA that signs warte's certificate, when it is not publicly trusted.
+    /// Only this CA is then trusted for warte; a missing file is an error.
+    #[serde(default)]
+    pub warte_ca_file: Option<String>,
     #[serde(default = "default_api")]
     pub github_api: String,
 }
