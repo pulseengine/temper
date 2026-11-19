@@ -36,6 +36,9 @@ jest.mock('../../src/merge-strategy.js', () => ({
 }));
 
 jest.mock('../../src/ai-review.js', () => ({
+  // the real predicate, so the gate under test is the shipped one
+  isReviewEnabled: jest.requireActual('../../src/ai-review.js').isReviewEnabled,
+  reviewStatus: jest.requireActual('../../src/ai-review.js').reviewStatus,
   reviewPullRequest: jest.fn(),
   updateReviewStatus: jest.fn()
 }));
@@ -831,6 +834,28 @@ describe('app', () => {
       expect(reviewPullRequest).toHaveBeenCalledWith(octokit, 'pulseengine', 'rivet', 99);
     });
 
+    // temper#92: with the model paused, the rivet oracle still reviews; with
+    // both off, nothing runs.
+    it.each([
+      [{ ai_review: { enabled: false }, rivet_oracle: { enabled: true, binary_path: 'data/rivet/rivet' } }, 1],
+      [{ ai_review: { enabled: false }, rivet_oracle: { enabled: false, binary_path: 'data/rivet/rivet' } }, 0]
+    ])('pull_request.synchronize reviews when only the oracle is on (%j -> %i call)', async (cfg, calls) => {
+      _setConfigForTesting(cfg);
+      reviewPullRequest.mockClear();
+      reviewPullRequest.mockResolvedValue({ success: true });
+      const { handlers } = setupApp();
+      await handlers['pull_request.synchronize']({
+        id: `delivery-oracle-${calls}`,
+        log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+        octokit: createMockOctokit(),
+        payload: {
+          pull_request: { number: 98, node_id: 'PR_98', user: { login: 'human-author' } },
+          repository: { name: 'rivet', owner: { login: 'pulseengine' }, default_branch: 'main' }
+        }
+      });
+      expect(reviewPullRequest).toHaveBeenCalledTimes(calls);
+    });
+
     // Bug #13: a redelivered PR event must not re-run auto-merge, the AI
     // review or the dependabot enqueue.
     it.each(['pull_request.opened', 'pull_request.reopened', 'pull_request.synchronize'])(
@@ -918,7 +943,18 @@ describe('app', () => {
       );
     });
 
-    it('health endpoint includes queue stats', () => {
+it('health endpoint shows the model review as off, with its reason (temper#92)', () => {
+  _setConfigForTesting({ ai_review: { enabled: false, off_reason: 'temper#92: no local model met the bar' } });
+  const { routeHandlers } = setupApp();
+  const mockRes = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+  routeHandlers['/health']({}, mockRes);
+  const body = mockRes.json.mock.calls[0][0];
+  expect(body.review.model).toEqual({ state: 'off', reason: 'temper#92: no local model met the bar' });
+  expect(body.review.oracle.state).toBe('off');
+  expect(body.status).toBe('healthy');
+});
+
+it('health endpoint includes queue stats', () => {
       defaultQueue.stats.mockReturnValue({ pending: 2, active: 1, completed: 10, failed: 1 });
       const { routeHandlers } = setupApp();
       const mockRes = { status: jest.fn().mockReturnThis(), json: jest.fn() };

@@ -357,3 +357,43 @@ export async function runRivetOracle(binary, repoPath, opts = {}) {
     findings
   };
 }
+
+/**
+ * The version the binary reports (`rivet 0.41.1 (...)` → "0.41.1"), or null.
+ */
+export async function rivetBinaryVersion(binary, opts = {}) {
+  const r = await runCli(binary, ['--version'], { timeout: 10000, runner: opts.runner });
+  if (!r.ok) return null;
+  const m = String(r.stdout || '').match(/^rivet (\S+)/m);
+  return m ? m[1] : null;
+}
+
+/**
+ * May the oracle run for this repo (temper#94)? Findings from a different
+ * rivet than the one the repo's own CI runs contradict that CI, so the
+ * binary must report the configured version and the repo must pin the
+ * configured varve layer. Anything missing or different: skip. Pure.
+ *
+ * @returns {{ok: true} | {ok: false, reason: string}}
+ */
+export function oracleVersionGate({ configured, binaryVersion, repoLayer }) {
+  if (!configured?.version || !configured?.layer) {
+    return { ok: false, reason: 'rivet_oracle.version and rivet_oracle.layer are not configured' };
+  }
+  if (binaryVersion !== configured.version) {
+    return {
+      ok: false,
+      reason: `the binary reports rivet ${binaryVersion ?? 'unknown'}, the config expects ${configured.version}`
+    };
+  }
+  if (!repoLayer) {
+    return { ok: false, reason: 'the repository pins no varve layer (varve.toml)' };
+  }
+  if (repoLayer !== configured.layer) {
+    return {
+      ok: false,
+      reason: `the repository pins layer ${repoLayer}, the oracle runs layer ${configured.layer}`
+    };
+  }
+  return { ok: true };
+}

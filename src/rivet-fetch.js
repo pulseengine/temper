@@ -37,6 +37,26 @@ export async function hasRivetYaml(octokit, owner, repo, ref) {
   }
 }
 
+/**
+ * The varve layer a repo pins at `ref` (`layer = "..."` in varve.toml), or
+ * null when there is no pin or it cannot be read (temper#94).
+ */
+export async function repoVarveLayer(octokit, owner, repo, ref) {
+  try {
+    const r = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
+      owner,
+      repo,
+      path: 'varve.toml',
+      ref
+    });
+    const text = Buffer.from(r?.data?.content || '', 'base64').toString('utf8');
+    const m = text.match(/^\s*layer\s*=\s*"([^"]+)"/m);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Cap stderr capture from `tar` to avoid OOM on pathological output. */
 const TAR_STDERR_CAP_BYTES = 64 * 1024;
 

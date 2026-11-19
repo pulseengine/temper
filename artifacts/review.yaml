@@ -1,0 +1,107 @@
+# AI-review redesign (temper#92). Stage 2: mechanical gates carry what they
+# can, independent of the model reviewer.
+
+artifacts:
+  - id: REQ-038
+    type: requirement
+    title: The rivet oracle SHALL review a pull request whenever it is configured, whether or not the model review is enabled, and an oracle-only comment SHALL NOT claim a model ran
+    status: implemented
+    description: >
+      Until 2026-11-19 reviewPullRequest and both PR handlers returned on
+      ai_review.enabled false before the oracle, so pausing the model on
+      netcup also paused the only mechanical review check. isReviewEnabled
+      (model or configured oracle) now gates the handlers; the model call
+      and its endpoint check run only with ai_review.enabled.
+    fields:
+      priority: must
+      category: functional
+      corrective: true
+      upstream-ref: temper#92
+    links:
+      - type: derives-from
+        target: SC-010
+
+  - id: VER-022
+    type: verification
+    title: Oracle-only review tests (no model call, honest footer, handler gate)
+    status: implemented
+    fields:
+      method: automated-test
+      test-name: "reviewPullRequest with ai_review off; isReviewEnabled; pull_request.synchronize reviews when only the oracle is on"
+      test-location: __tests__/integration/ai-review-oracle-only.test.js, __tests__/integration/app.test.js
+    links:
+      - type: verifies
+        target: REQ-038
+
+  - id: REQ-039
+    type: requirement
+    title: The rivet oracle SHALL run only when its binary reports the configured rivet version and the target repository pins the configured varve layer
+    status: implemented
+    description: >
+      Findings from a rivet other than the one the repository's own CI runs
+      contradict that CI, and oracle findings bypass the model's filter and
+      can raise the verdict to request_changes. The production host carried
+      rivet 0.4.3 while layer 2026.11.0 carries 0.41.1 (temper#94). Missing
+      configuration, a missing pin or any difference skips the oracle with a
+      log line.
+    fields:
+      priority: must
+      category: functional
+      corrective: true
+      upstream-ref: temper#94
+    links:
+      - type: derives-from
+        target: SC-008
+
+  - id: VER-023
+    type: verification
+    title: Oracle version gate tests (pure gate table, skip paths, parsers)
+    status: implemented
+    fields:
+      method: automated-test
+      test-name: "oracleVersionGate (temper#94); reviewPullRequest skips the oracle when it is not the pinned rivet; repoVarveLayer; rivetBinaryVersion"
+      test-location: __tests__/integration/ai-review-oracle-only.test.js, __tests__/unit/rivet-version.test.js
+    links:
+      - type: verifies
+        target: REQ-039
+
+  - id: REQ-040
+    type: requirement
+    title: The model review SHALL be off by default, switched on only for a model that clears the pre-registered bar on the review benchmark, and /health SHALL report the review state with its reason
+    status: implemented
+    description: >
+      Owner decision 2026-11-19 on temper#92: no local model met the bar
+      (primary recall >= 10 of 40). config.yml sets ai_review.enabled false
+      with off_reason; /health carries review.model and review.oracle so the
+      off state is visible, not silently idle.
+    fields:
+      priority: must
+      category: functional
+      upstream-ref: temper#92
+    links:
+      - type: derives-from
+        target: SC-006
+
+  - id: VER-024
+    type: verification
+    title: reviewStatus and /health review-state tests
+    status: implemented
+    fields:
+      method: automated-test
+      test-name: "reviewStatus (temper#92); health endpoint shows the model review as off, with its reason (temper#92)"
+      test-location: __tests__/integration/ai-review-oracle-only.test.js, __tests__/integration/app.test.js
+    links:
+      - type: verifies
+        target: REQ-040
+
+  - id: FEAT-007
+    type: feature
+    title: Oracle-first PR review with the model review gated by a benchmark
+    status: implemented
+    description: >
+      src/ai-review.js (isReviewEnabled, reviewStatus, the oracle version
+      gate), config.yml. The benchmark itself (eval/review-bench) follows
+      in its own PR.
+    links:
+      - type: satisfies
+        target: REQ-040

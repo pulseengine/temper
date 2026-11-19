@@ -15,9 +15,11 @@ import {
   runRivetOracle,
   runRivetValidate,
   subtractFindings,
-  groupOracleFindings
+  groupOracleFindings,
+  rivetBinaryVersion,
+  oracleVersionGate
 } from './rivet-oracle.js';
-import { hasRivetYaml, withTempRepoCheckout } from './rivet-fetch.js';
+import { hasRivetYaml, repoVarveLayer, withTempRepoCheckout } from './rivet-fetch.js';
 import { countReview } from './report-stats.js';
 
 const _reviewTimestamps = new Map();
@@ -386,12 +388,43 @@ async function supersedePreviousReviews(octokit, owner, repo, prNumber) {
   }
 }
 
+/** The rivet oracle can run: enabled and a binary configured. */
+function isOracleConfigured(config) {
+  return !!(config?.rivet_oracle?.enabled && config?.rivet_oracle?.binary_path);
+}
+
+/**
+ * What the review path will do, for /health (temper#92: the model review is
+ * off by decision, and that must be visible rather than silently idle).
+ */
+function reviewStatus(config) {
+  const ai = config?.ai_review || {};
+  const ro = config?.rivet_oracle || {};
+  return {
+    model: ai.enabled
+      ? { state: 'on', model: ai.model || null }
+      : { state: 'off', reason: ai.off_reason || 'ai_review.enabled is false' },
+    oracle: isOracleConfigured(config)
+      ? { state: 'on', layer: ro.layer ?? null, version: ro.version ?? null }
+      : { state: 'off', reason: ro.enabled === false ? 'rivet_oracle.enabled is false' : 'no rivet binary configured' }
+  };
+}
+
+/** A PR review has something to run: the model, the rivet oracle, or both. */
+function isReviewEnabled(config) {
+  return !!config?.ai_review?.enabled || isOracleConfigured(config);
+}
+
 async function reviewPullRequest(octokit, owner, repo, prNumber) {
   const config = getConfig();
-  const aiConfig = config.ai_review;
+  const aiConfig = config.ai_review || {};
 
-  if (!aiConfig?.enabled) {
-    return { success: false, error: 'AI review is not enabled in configuration.' };
+  // The rivet oracle is mechanical and needs no model, so it runs on its own
+  // switch: pausing the model (temper#92) must not also pause the oracle.
+  const modelOn = !!aiConfig.enabled;
+  const oracleOn = isOracleConfigured(config);
+  if (!modelOn && !oracleOn) {
+    return { success: false, error: 'Neither AI review nor the rivet oracle is enabled in configuration.' };
   }
 
   // Rate limiting: reject if <5min since last review on same PR
@@ -403,8 +436,8 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
     };
   }
 
-  // Endpoint validation
-  if (!aiConfig.allow_remote_endpoint && !isLocalEndpoint(aiConfig.endpoint)) {
+  // Endpoint validation (only when a model will be called)
+  if (modelOn && !aiConfig.allow_remote_endpoint && !isLocalEndpoint(aiConfig.endpoint)) {
     return {
       success: false,
       error: 'Remote AI endpoints are not allowed. Set allow_remote_endpoint: true to enable.'
@@ -443,7 +476,7 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
     let oracleFindings = [];
     let oracleSummary = null;
     const rivetCfg = config.rivet_oracle;
-    if (rivetCfg?.enabled && rivetCfg?.binary_path) {
+    if (oracleOn) {
       const headSha = prData.data.head?.sha;
       const baseSha = prData.data.base?.sha;
       // Resolve binary path against the temper deploy root, NOT the tmpdir
@@ -454,7 +487,21 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
         ? rivetCfg.binary_path
         : path.resolve(__dirname, '..', rivetCfg.binary_path);
       try {
-        if (headSha && (await hasRivetYaml(octokit, owner, repo, headSha))) {
+        // temper#94: only the rivet this repository pins may speak for it.
+        const gate = (headSha && (await hasRivetYaml(octokit, owner, repo, headSha)))
+          ? oracleVersionGate({
+              configured: rivetCfg,
+              binaryVersion: await rivetBinaryVersion(resolvedBinary),
+              repoLayer: await repoVarveLayer(octokit, owner, repo, headSha)
+            })
+          : null;
+        if (gate && !gate.ok) {
+          getLogger().info(
+            { pr: prNumber, reason: gate.reason },
+            'Rivet oracle skipped: not the rivet this repository pins'
+          );
+        }
+        if (gate?.ok) {
           // Run head oracle and base validate in parallel — they are
           // independent (different tarballs, different cwds, different
           // commands). Sequential they cost ~2× tarball-fetch + 2× extract +
@@ -528,32 +575,36 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
     }
 
     // Strict-JSON contract by default; legacy freeform if user explicitly
-    // overrides system_prompt in config.
+    // overrides system_prompt in config. Oracle-only runs use the strict
+    // path with no model output.
     const systemPrompt = aiConfig.system_prompt || STRICT_SYSTEM_PROMPT;
-    const useStrictMode = !aiConfig.system_prompt;
+    const useStrictMode = !modelOn || !aiConfig.system_prompt;
 
     const diffText = typeof diffResponse.data === 'string' ? diffResponse.data : '';
-    const userPrompt = buildReviewPrompt(
-      prData.data,
-      diffText,
-      filesResponse.data,
-      aiConfig.max_diff_size || 12000
-    );
 
-    const aiResponse = await callLocalAI(
-      aiConfig.endpoint,
-      aiConfig.model || 'local-model',
-      systemPrompt,
-      userPrompt,
-      {
-        maxTokens: aiConfig.max_tokens || 2000,
-        temperature: aiConfig.temperature || 0.3,
-        timeout: aiConfig.timeout || 120000,
-        // Grammar-constrained output in strict mode only — legacy freeform
-        // path expects prose, would get rejected by JSON-schema decoding.
-        responseFormat: useStrictMode ? buildResponseFormat() : undefined
-      }
-    );
+    let aiResponse = '';
+    if (modelOn) {
+      const userPrompt = buildReviewPrompt(
+        prData.data,
+        diffText,
+        filesResponse.data,
+        aiConfig.max_diff_size || 12000
+      );
+      aiResponse = await callLocalAI(
+        aiConfig.endpoint,
+        aiConfig.model || 'local-model',
+        systemPrompt,
+        userPrompt,
+        {
+          maxTokens: aiConfig.max_tokens || 2000,
+          temperature: aiConfig.temperature || 0.3,
+          timeout: aiConfig.timeout || 120000,
+          // Grammar-constrained output in strict mode only — legacy freeform
+          // path expects prose, would get rejected by JSON-schema decoding.
+          responseFormat: useStrictMode ? buildResponseFormat() : undefined
+        }
+      );
+    }
 
     recordReview(rateKey);
 
@@ -570,7 +621,9 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
     let findingsCount = 0;
 
     if (useStrictMode) {
-      const parsed = tryParseReview(aiResponse);
+      const parsed = modelOn
+        ? tryParseReview(aiResponse)
+        : { ok: true, data: { summary: null, findings: [] } };
       let modelFindings = [];
       let modelSummary = null;
 
@@ -613,7 +666,7 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
           : 'No findings.');
 
       const renderInput = { summary, findings: allFindings };
-      comment = renderReviewMarkdown(renderInput, prNumber, headSha, meta);
+      comment = renderReviewMarkdown(renderInput, prNumber, headSha, meta, { modelUsed: modelOn });
       assessment = computeVerdict(allFindings);
       findingsCount = allFindings.length;
 
@@ -757,6 +810,8 @@ loadReviews();
 
 export {
   reviewPullRequest,
+  isReviewEnabled,
+  reviewStatus,
   buildReviewPrompt,
   callLocalAI,
   formatReviewComment,

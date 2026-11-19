@@ -22,7 +22,7 @@ import {
 } from './dependabot.js';
 import { ensureLabelsExist } from './labels.js';
 import { handleSignedCommitMerge, checkPRMergeStrategy } from './merge-strategy.js';
-import { reviewPullRequest, updateReviewStatus, setRateLimitStore } from './ai-review.js';
+import { reviewPullRequest, isReviewEnabled, reviewStatus, updateReviewStatus, setRateLimitStore } from './ai-review.js';
 import { isProcessed, markProcessed, setIdempotencyStore } from './idempotency.js';
 import { triggerSelfUpdate } from './self-update.js';
 import { defaultQueue } from './queue.js';
@@ -214,7 +214,8 @@ function createCustomRoutesHandler() {
         timestamp: new Date().toISOString(),
         version: DEPLOY_SHA || '1.0.0',
         queue: defaultQueue.stats(),
-        checks: probe.checks
+        checks: probe.checks,
+        review: reviewStatus(getConfig())
       };
       if (_taskStore) {
         healthData.tasks = _taskStore.getStats();
@@ -988,7 +989,7 @@ function registerApp(app, options = {}) {
         bot => sender === bot || sender === bot + "[bot]"
       );
 
-    if (config?.ai_review?.enabled && !isBotPR) {
+    if (isReviewEnabled(config) && !isBotPR) {
       try {
         const result = await reviewPullRequest(context.octokit, owner, repo, pr.number);
         if (result.success) {
@@ -1064,7 +1065,7 @@ function registerApp(app, options = {}) {
         bot => sender === bot || sender === bot + "[bot]"
       );
 
-    if (!config?.ai_review?.enabled || isBotPR) return;
+    if (!isReviewEnabled(config) || isBotPR) return;
 
     try {
       const result = await reviewPullRequest(context.octokit, owner, repo, pr.number);
@@ -1142,7 +1143,8 @@ function registerApp(app, options = {}) {
         timestamp: new Date().toISOString(),
         version: DEPLOY_SHA || '1.0.0',
         queue: defaultQueue.stats(),
-        checks: probe.checks
+        checks: probe.checks,
+        review: reviewStatus(getConfig())
       };
       if (_taskStore) {
         healthData.tasks = _taskStore.getStats();

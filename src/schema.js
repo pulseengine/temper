@@ -231,11 +231,20 @@ export function validateConfig(config) {
       if (ro.binary_path !== undefined && typeof ro.binary_path !== 'string') {
         errors.push('rivet_oracle.binary_path must be a string');
       }
+      for (const k of ['layer', 'version']) {
+        if (ro[k] !== undefined && (typeof ro[k] !== 'string' || !ro[k])) {
+          errors.push(`rivet_oracle.${k} must be a non-empty string`);
+        }
+      }
       if (ro.timeout_ms !== undefined &&
           (typeof ro.timeout_ms !== 'number' || ro.timeout_ms < 1000)) {
         errors.push('rivet_oracle.timeout_ms must be a number >= 1000');
       }
     }
+  }
+
+  if (config.ai_review?.off_reason !== undefined && typeof config.ai_review.off_reason !== 'string') {
+    errors.push('ai_review.off_reason must be a string');
   }
 
   if (config.ai_review?.enabled) {

@@ -699,7 +699,7 @@ describe('ai-review', () => {
       const result = await reviewPullRequest(octokit, 'owner', 'repo', 1);
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('AI review is not enabled in configuration.');
+      expect(result.error).toBe('Neither AI review nor the rivet oracle is enabled in configuration.');
     });
 
     it('returns error when ai_review config is missing entirely', async () => {
@@ -708,7 +708,7 @@ describe('ai-review', () => {
       const result = await reviewPullRequest(octokit, 'owner', 'repo', 1);
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('AI review is not enabled in configuration.');
+      expect(result.error).toBe('Neither AI review nor the rivet oracle is enabled in configuration.');
     });
 
     it('returns error when ai_review is null', async () => {
@@ -717,7 +717,7 @@ describe('ai-review', () => {
       const result = await reviewPullRequest(octokit, 'owner', 'repo', 1);
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('AI review is not enabled in configuration.');
+      expect(result.error).toBe('Neither AI review nor the rivet oracle is enabled in configuration.');
     });
 
     it('returns error when ai_review is undefined', async () => {
@@ -726,7 +726,7 @@ describe('ai-review', () => {
       const result = await reviewPullRequest(octokit, 'owner', 'repo', 1);
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('AI review is not enabled in configuration.');
+      expect(result.error).toBe('Neither AI review nor the rivet oracle is enabled in configuration.');
     });
 
     it('returns rate limit error when called too frequently on same PR', async () => {
