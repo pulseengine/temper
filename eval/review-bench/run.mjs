@@ -7,6 +7,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 
 const TEMPER = process.env.TEMPER || path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 const ENDPOINT = process.env.ENDPOINT || 'http://127.0.0.1:11434/v1/chat/completions';
@@ -139,7 +140,7 @@ async function runOne(model, variant, folder) {
   const { user, shown } = buildRequest(variant, folder);
   const rec = { pr: folder, model, variant, prompt_chars: user.length + SYSTEM.length, ok: false,
     error: null, latency_ms: null, raw_findings: 0, kept: [], dropped: 0, raw: null };
-  const LOG = process.env.OLLAMA_LOG || path.join(process.env.HOME, 'Library/Logs/ollama.log');
+  const LOG = process.env.OLLAMA_LOG || path.join(os.homedir(), 'Library/Logs/ollama.log');
   const logAt = fs.existsSync(LOG) ? fs.statSync(LOG).size : null;
   const t0 = Date.now();
   try {
