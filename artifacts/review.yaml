@@ -93,3 +93,15 @@ artifacts:
     links:
       - type: verifies
         target: REQ-040
+
+  - id: FEAT-007
+    type: feature
+    title: Oracle-first PR review with the model review gated by a benchmark
+    status: implemented
+    description: >
+      src/ai-review.js (isReviewEnabled, reviewStatus, the oracle version
+      gate), config.yml. The benchmark itself (eval/review-bench) follows
+      in its own PR.
+    links:
+      - type: satisfies
+        target: REQ-040
