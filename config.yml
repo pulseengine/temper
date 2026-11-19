@@ -232,6 +232,12 @@ ai_review:
 rivet_oracle:
   enabled: true
   binary_path: "data/rivet/rivet"
+  # The oracle runs only when the binary reports `version` and the target
+  # repo pins `layer` in its varve.toml (temper#94): findings from another
+  # rivet would contradict the repo's own CI. Install the binary from this
+  # varve layer.
+  layer: "2026.11.0"
+  version: "0.41.1"
   timeout_ms: 60000
 
 scheduler:

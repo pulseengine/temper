@@ -16,6 +16,7 @@ jest.mock('fs', () => ({
 
 jest.mock('../../src/rivet-fetch.js', () => ({
   hasRivetYaml: jest.fn().mockResolvedValue(true),
+  repoVarveLayer: jest.fn().mockResolvedValue('2026.11.0'),
   withTempRepoCheckout: jest.fn((octokit, owner, repo, ref, fn) => fn(`/tmp/checkout-${ref}`))
 }));
 
@@ -24,15 +25,19 @@ jest.mock('../../src/rivet-oracle.js', () => {
   return {
     ...actual,
     runRivetOracle: jest.fn(),
+    rivetBinaryVersion: jest.fn().mockResolvedValue('0.41.1'),
     runRivetValidate: jest.fn().mockResolvedValue({ ok: true, findings: [] })
   };
 });
 
 import { reviewPullRequest, isReviewEnabled, _reviewTimestamps, _resetReviews } from '../../src/ai-review.js';
 import { _setConfigForTesting } from '../../src/config.js';
-import { runRivetOracle } from '../../src/rivet-oracle.js';
+import { runRivetOracle, rivetBinaryVersion, oracleVersionGate } from '../../src/rivet-oracle.js';
+import { repoVarveLayer } from '../../src/rivet-fetch.js';
 
-const ORACLE = { enabled: true, binary_path: '/opt/rivet/rivet', timeout_ms: 60000 };
+const ORACLE = {
+  enabled: true, binary_path: '/opt/rivet/rivet', timeout_ms: 60000, layer: '2026.11.0', version: '0.41.1'
+};
 
 function octokitFor() {
   const posted = [];
@@ -75,6 +80,8 @@ afterEach(() => {
   _resetReviews();
   _setConfigForTesting({});
   jest.clearAllMocks();
+  rivetBinaryVersion.mockResolvedValue('0.41.1');
+  repoVarveLayer.mockResolvedValue('2026.11.0');
 });
 
 describe('isReviewEnabled', () => {
@@ -131,5 +138,39 @@ describe('reviewPullRequest with ai_review off', () => {
     expect(r.error).toMatch(/Neither AI review nor the rivet oracle/);
     expect(gh.request).not.toHaveBeenCalled();
     expect(runRivetOracle).not.toHaveBeenCalled();
+  });
+});
+
+describe('oracleVersionGate (temper#94)', () => {
+  const configured = { layer: '2026.11.0', version: '0.41.1' };
+  it.each([
+    [{ configured, binaryVersion: '0.41.1', repoLayer: '2026.11.0' }, true, null],
+    [{ configured, binaryVersion: '0.4.3', repoLayer: '2026.11.0' }, false, /reports rivet 0.4.3/],
+    [{ configured, binaryVersion: null, repoLayer: '2026.11.0' }, false, /reports rivet unknown/],
+    [{ configured, binaryVersion: '0.41.1', repoLayer: null }, false, /pins no varve layer/],
+    [{ configured, binaryVersion: '0.41.1', repoLayer: '2026.10.3' }, false, /pins layer 2026.10.3/],
+    [{ configured: { layer: '2026.11.0' }, binaryVersion: '0.41.1', repoLayer: '2026.11.0' }, false, /not configured/],
+    [{ configured: undefined, binaryVersion: '0.41.1', repoLayer: '2026.11.0' }, false, /not configured/]
+  ])('%j -> ok=%s', (input, ok, why) => {
+    const g = oracleVersionGate(input);
+    expect(g.ok).toBe(ok);
+    if (why) expect(g.reason).toMatch(why);
+  });
+});
+
+describe('reviewPullRequest skips the oracle when it is not the pinned rivet', () => {
+  it.each([
+    ['an old binary', () => rivetBinaryVersion.mockResolvedValue('0.4.3')],
+    ['a repo pinned to another layer', () => repoVarveLayer.mockResolvedValue('2026.10.3')],
+    ['a repo without a pin', () => repoVarveLayer.mockResolvedValue(null)]
+  ])('%s: no oracle run, nothing posted', async (_, arrange) => {
+    _setConfigForTesting({ ai_review: { enabled: false }, rivet_oracle: ORACLE });
+    arrange();
+    runRivetOracle.mockResolvedValue({ ok: true, applicable: true, findings: [finding] });
+    const gh = octokitFor();
+    const r = await reviewPullRequest(gh, 'org', 'r', 7);
+    expect(runRivetOracle).not.toHaveBeenCalled();
+    expect(gh.posted).toHaveLength(0);
+    expect(r).toMatchObject({ success: true, skipped: true });
   });
 });

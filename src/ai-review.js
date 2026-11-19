@@ -15,9 +15,11 @@ import {
   runRivetOracle,
   runRivetValidate,
   subtractFindings,
-  groupOracleFindings
+  groupOracleFindings,
+  rivetBinaryVersion,
+  oracleVersionGate
 } from './rivet-oracle.js';
-import { hasRivetYaml, withTempRepoCheckout } from './rivet-fetch.js';
+import { hasRivetYaml, repoVarveLayer, withTempRepoCheckout } from './rivet-fetch.js';
 import { countReview } from './report-stats.js';
 
 const _reviewTimestamps = new Map();
@@ -468,7 +470,21 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
         ? rivetCfg.binary_path
         : path.resolve(__dirname, '..', rivetCfg.binary_path);
       try {
-        if (headSha && (await hasRivetYaml(octokit, owner, repo, headSha))) {
+        // temper#94: only the rivet this repository pins may speak for it.
+        const gate = (headSha && (await hasRivetYaml(octokit, owner, repo, headSha)))
+          ? oracleVersionGate({
+              configured: rivetCfg,
+              binaryVersion: await rivetBinaryVersion(resolvedBinary),
+              repoLayer: await repoVarveLayer(octokit, owner, repo, headSha)
+            })
+          : null;
+        if (gate && !gate.ok) {
+          getLogger().info(
+            { pr: prNumber, reason: gate.reason },
+            'Rivet oracle skipped: not the rivet this repository pins'
+          );
+        }
+        if (gate?.ok) {
           // Run head oracle and base validate in parallel — they are
           // independent (different tarballs, different cwds, different
           // commands). Sequential they cost ~2× tarball-fetch + 2× extract +

@@ -32,3 +32,35 @@ artifacts:
     links:
       - type: verifies
         target: REQ-038
+
+  - id: REQ-039
+    type: requirement
+    title: The rivet oracle SHALL run only when its binary reports the configured rivet version and the target repository pins the configured varve layer
+    status: implemented
+    description: >
+      Findings from a rivet other than the one the repository's own CI runs
+      contradict that CI, and oracle findings bypass the model's filter and
+      can raise the verdict to request_changes. The production host carried
+      rivet 0.4.3 while layer 2026.11.0 carries 0.41.1 (temper#94). Missing
+      configuration, a missing pin or any difference skips the oracle with a
+      log line.
+    fields:
+      priority: must
+      category: functional
+      corrective: true
+      upstream-ref: temper#94
+    links:
+      - type: derives-from
+        target: SC-008
+
+  - id: VER-023
+    type: verification
+    title: Oracle version gate tests (pure gate table, skip paths, parsers)
+    status: implemented
+    fields:
+      method: automated-test
+      test-name: "oracleVersionGate (temper#94); reviewPullRequest skips the oracle when it is not the pinned rivet; repoVarveLayer; rivetBinaryVersion"
+      test-location: __tests__/integration/ai-review-oracle-only.test.js, __tests__/unit/rivet-version.test.js
+    links:
+      - type: verifies
+        target: REQ-039
