@@ -56,7 +56,7 @@ fn every_template_passes_and_a_planted_host_does_not() {
             "{k:?}"
         );
     }
-    let bad = render(Kind::PointToDocs, Some("https://docs.internal.lan/x"));
+    let bad = render(Kind::PointToDocs, Some("https://docs.internal.lan/x")); // planted control; hostname-scan: allow
     assert!(check_outgoing(&bad, &[], None).is_err());
     let deny = vec!["runner-07".to_string()];
     let err = check_outgoing("logs are on RUNNER-07 today", &deny, None).unwrap_err();

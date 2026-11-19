@@ -205,7 +205,7 @@ fn a_failed_post_leaves_the_item_unmarked() {
 // rivet: verifies REQ-035
 #[test]
 fn internal_docs_url_posts_nothing() {
-    let c = cfg("docs_url = \"https://wiki.build.lan/docs\"");
+    let c = cfg("docs_url = \"https://wiki.build.lan/docs\""); // planted control; hostname-scan: allow
     let mut gh = FakeGitHub::with_issue(9, "How do I configure it?", "");
     let p = handler(&c).handle(&mut gh, "demo", 9).unwrap();
     assert_eq!(p.outcome, Outcome::Skipped);
