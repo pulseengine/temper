@@ -38,6 +38,7 @@ jest.mock('../../src/merge-strategy.js', () => ({
 jest.mock('../../src/ai-review.js', () => ({
   // the real predicate, so the gate under test is the shipped one
   isReviewEnabled: jest.requireActual('../../src/ai-review.js').isReviewEnabled,
+  reviewStatus: jest.requireActual('../../src/ai-review.js').reviewStatus,
   reviewPullRequest: jest.fn(),
   updateReviewStatus: jest.fn()
 }));
@@ -942,7 +943,18 @@ describe('app', () => {
       );
     });
 
-    it('health endpoint includes queue stats', () => {
+it('health endpoint shows the model review as off, with its reason (temper#92)', () => {
+  _setConfigForTesting({ ai_review: { enabled: false, off_reason: 'temper#92: no local model met the bar' } });
+  const { routeHandlers } = setupApp();
+  const mockRes = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+  routeHandlers['/health']({}, mockRes);
+  const body = mockRes.json.mock.calls[0][0];
+  expect(body.review.model).toEqual({ state: 'off', reason: 'temper#92: no local model met the bar' });
+  expect(body.review.oracle.state).toBe('off');
+  expect(body.status).toBe('healthy');
+});
+
+it('health endpoint includes queue stats', () => {
       defaultQueue.stats.mockReturnValue({ pending: 2, active: 1, completed: 10, failed: 1 });
       const { routeHandlers } = setupApp();
       const mockRes = { status: jest.fn().mockReturnThis(), json: jest.fn() };

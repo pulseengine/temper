@@ -215,7 +215,11 @@ dependabot_generation:
   max_directories_per_ecosystem: 5
 
 ai_review:
-  enabled: true
+  # Off by owner decision 2026-11-19 (temper#92): no local model (1.5-8B)
+  # met the pre-registered review bar. A model is switched on only after it
+  # clears that bar on eval/review-bench. /health reports this state.
+  enabled: false
+  off_reason: "temper#92: no local model met the pre-registered review bar"
   endpoint: "http://localhost:11434/v1/chat/completions"
   model: "qwen2.5-coder:3b"
   max_diff_size: 12000

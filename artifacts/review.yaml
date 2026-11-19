@@ -64,3 +64,32 @@ artifacts:
     links:
       - type: verifies
         target: REQ-039
+
+  - id: REQ-040
+    type: requirement
+    title: The model review SHALL be off by default, switched on only for a model that clears the pre-registered bar on the review benchmark, and /health SHALL report the review state with its reason
+    status: implemented
+    description: >
+      Owner decision 2026-11-19 on temper#92: no local model met the bar
+      (primary recall >= 10 of 40). config.yml sets ai_review.enabled false
+      with off_reason; /health carries review.model and review.oracle so the
+      off state is visible, not silently idle.
+    fields:
+      priority: must
+      category: functional
+      upstream-ref: temper#92
+    links:
+      - type: derives-from
+        target: SC-006
+
+  - id: VER-024
+    type: verification
+    title: reviewStatus and /health review-state tests
+    status: implemented
+    fields:
+      method: automated-test
+      test-name: "reviewStatus (temper#92); health endpoint shows the model review as off, with its reason (temper#92)"
+      test-location: __tests__/integration/ai-review-oracle-only.test.js, __tests__/integration/app.test.js
+    links:
+      - type: verifies
+        target: REQ-040

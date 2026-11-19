@@ -30,7 +30,7 @@ jest.mock('../../src/rivet-oracle.js', () => {
   };
 });
 
-import { reviewPullRequest, isReviewEnabled, _reviewTimestamps, _resetReviews } from '../../src/ai-review.js';
+import { reviewPullRequest, isReviewEnabled, reviewStatus, _reviewTimestamps, _resetReviews } from '../../src/ai-review.js';
 import { _setConfigForTesting } from '../../src/config.js';
 import { runRivetOracle, rivetBinaryVersion, oracleVersionGate } from '../../src/rivet-oracle.js';
 import { repoVarveLayer } from '../../src/rivet-fetch.js';
@@ -172,5 +172,21 @@ describe('reviewPullRequest skips the oracle when it is not the pinned rivet', (
     expect(runRivetOracle).not.toHaveBeenCalled();
     expect(gh.posted).toHaveLength(0);
     expect(r).toMatchObject({ success: true, skipped: true });
+  });
+});
+
+describe('reviewStatus (temper#92)', () => {
+  it('reports the model off with its reason and the oracle with its pin', () => {
+    expect(reviewStatus({ ai_review: { enabled: false, off_reason: 'r' }, rivet_oracle: ORACLE })).toEqual({
+      model: { state: 'off', reason: 'r' },
+      oracle: { state: 'on', layer: '2026.11.0', version: '0.41.1' }
+    });
+  });
+  it('names why each part is off', () => {
+    const s = reviewStatus({ rivet_oracle: { ...ORACLE, enabled: false } });
+    expect(s.model).toEqual({ state: 'off', reason: 'ai_review.enabled is false' });
+    expect(s.oracle).toEqual({ state: 'off', reason: 'rivet_oracle.enabled is false' });
+    expect(reviewStatus({}).oracle.reason).toBe('no rivet binary configured');
+    expect(reviewStatus({ ai_review: { enabled: true, model: 'm' } }).model).toEqual({ state: 'on', model: 'm' });
   });
 });

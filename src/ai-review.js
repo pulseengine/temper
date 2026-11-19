@@ -393,6 +393,23 @@ function isOracleConfigured(config) {
   return !!(config?.rivet_oracle?.enabled && config?.rivet_oracle?.binary_path);
 }
 
+/**
+ * What the review path will do, for /health (temper#92: the model review is
+ * off by decision, and that must be visible rather than silently idle).
+ */
+function reviewStatus(config) {
+  const ai = config?.ai_review || {};
+  const ro = config?.rivet_oracle || {};
+  return {
+    model: ai.enabled
+      ? { state: 'on', model: ai.model || null }
+      : { state: 'off', reason: ai.off_reason || 'ai_review.enabled is false' },
+    oracle: isOracleConfigured(config)
+      ? { state: 'on', layer: ro.layer ?? null, version: ro.version ?? null }
+      : { state: 'off', reason: ro.enabled === false ? 'rivet_oracle.enabled is false' : 'no rivet binary configured' }
+  };
+}
+
 /** A PR review has something to run: the model, the rivet oracle, or both. */
 function isReviewEnabled(config) {
   return !!config?.ai_review?.enabled || isOracleConfigured(config);
@@ -794,6 +811,7 @@ loadReviews();
 export {
   reviewPullRequest,
   isReviewEnabled,
+  reviewStatus,
   buildReviewPrompt,
   callLocalAI,
   formatReviewComment,

@@ -22,7 +22,7 @@ import {
 } from './dependabot.js';
 import { ensureLabelsExist } from './labels.js';
 import { handleSignedCommitMerge, checkPRMergeStrategy } from './merge-strategy.js';
-import { reviewPullRequest, isReviewEnabled, updateReviewStatus, setRateLimitStore } from './ai-review.js';
+import { reviewPullRequest, isReviewEnabled, reviewStatus, updateReviewStatus, setRateLimitStore } from './ai-review.js';
 import { isProcessed, markProcessed, setIdempotencyStore } from './idempotency.js';
 import { triggerSelfUpdate } from './self-update.js';
 import { defaultQueue } from './queue.js';
@@ -214,7 +214,8 @@ function createCustomRoutesHandler() {
         timestamp: new Date().toISOString(),
         version: DEPLOY_SHA || '1.0.0',
         queue: defaultQueue.stats(),
-        checks: probe.checks
+        checks: probe.checks,
+        review: reviewStatus(getConfig())
       };
       if (_taskStore) {
         healthData.tasks = _taskStore.getStats();
@@ -1142,7 +1143,8 @@ function registerApp(app, options = {}) {
         timestamp: new Date().toISOString(),
         version: DEPLOY_SHA || '1.0.0',
         queue: defaultQueue.stats(),
-        checks: probe.checks
+        checks: probe.checks,
+        review: reviewStatus(getConfig())
       };
       if (_taskStore) {
         healthData.tasks = _taskStore.getStats();

@@ -243,6 +243,10 @@ export function validateConfig(config) {
     }
   }
 
+  if (config.ai_review?.off_reason !== undefined && typeof config.ai_review.off_reason !== 'string') {
+    errors.push('ai_review.off_reason must be a string');
+  }
+
   if (config.ai_review?.enabled) {
     if (config.ai_review.endpoint !== undefined && typeof config.ai_review.endpoint !== 'string') {
       errors.push('ai_review.endpoint must be a string');
