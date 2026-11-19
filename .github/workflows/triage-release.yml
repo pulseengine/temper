@@ -1,0 +1,257 @@
+name: temper-triage release
+
+# Builds, checks, signs and publishes temper-triage (triage/) for a
+# temper-triage-v* tag. Modelled on pulseengine/plant's release.yml: static
+# musl and macOS archives, a CycloneDX SBOM and a docs archive, all inside
+# SHA256SUMS.txt, which cosign signs keyless; SLSA provenance for the
+# archives; build-env.txt.
+#
+# The prefix keeps these tags apart from temper's own v* tags. Signing happens
+# only in a run for a temper-triage-v* tag ref: the keyless certificate then
+# names triage-release.yml@refs/tags/<tag>, the identity a varve layer and
+# the notes' verify command accept. There is no workflow_dispatch. To retry a
+# failed tag run, use "Re-run failed jobs", which keeps the tag ref.
+#
+# Runners: GitHub-hosted on purpose. The trigger is a tag push (never a pull
+# request), signed builds run on fresh ephemeral machines, and macOS has no
+# self-hosted pool. Images are pinned (ubuntu-24.04, not ubuntu-latest).
+concurrency:
+  group: triage-release-${{ github.ref }}
+  cancel-in-progress: false
+
+on:
+  push:
+    tags:
+      - "temper-triage-v*"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # The tag must name Cargo.toml's version before anything compiles.
+  version-guard:
+    name: Tag names the crate version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Compare the tag with triage/Cargo.toml
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in refs/tags/temper-triage-v*) ;; *) echo "not a temper-triage-v* tag: $GITHUB_REF"; exit 1 ;; esac
+          tag="${GITHUB_REF#refs/tags/temper-triage-v}"
+          crate=$(sed -n 's/^version = "\(.*\)"$/\1/p' triage/Cargo.toml | head -1)
+          test -n "$crate"
+          test "$tag" = "$crate" || { echo "tag $tag != triage/Cargo.toml $crate"; exit 1; }
+
+  build-binaries:
+    name: Build ${{ matrix.target }}
+    needs: [version-guard]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-24.04
+            musl: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+            musl: true
+          - target: x86_64-apple-darwin
+            os: macos-15
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable, 2026-11-15
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Install musl toolchain
+        if: matrix.musl
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build temper-triage
+        working-directory: triage
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --locked --release --target "$TARGET"
+
+      - name: Package archive
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          ARCHIVE="${TAG}-${TARGET}.tar.gz"
+          mkdir -p staging
+          cp "triage/target/${TARGET}/release/temper-triage" staging/
+          cp docs/triage.md LICENSE staging/
+          tar -czf "$ARCHIVE" -C staging .
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+          echo "VERSION=${TAG#temper-triage-v}" >> "$GITHUB_ENV"
+
+      # The archive a user downloads, not the loose build output.
+      - name: Smoke-test the packaged binary
+        run: |
+          set -euo pipefail
+          mkdir -p smoke
+          tar -xzf "$ARCHIVE" -C smoke
+          test "$(smoke/temper-triage --version)" = "temper-triage $VERSION"
+          smoke/temper-triage docs design | grep -q '^# temper-triage'
+          set +e; smoke/temper-triage --no-such-flag 2>/dev/null; rc=$?; set -e
+          test "$rc" -eq 2
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: binary-${{ matrix.target }}
+          path: ${{ env.ARCHIVE }}
+          retention-days: 7
+
+  # The SBOM tool runs here, with a read-only token, not in the signing job.
+  sbom:
+    name: SBOM (CycloneDX)
+    needs: [version-guard]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install cargo-cyclonedx
+        run: cargo install --locked cargo-cyclonedx --version 0.5.10
+
+      - name: Generate the SBOM
+        run: |
+          set -euo pipefail
+          cargo cyclonedx --manifest-path triage/Cargo.toml --format json --spec-version 1.5
+          src=$(find triage -maxdepth 1 -name '*.cdx.json' | head -1)
+          test -n "$src" && test -s "$src"
+          mkdir -p sbom && cp "$src" sbom/temper-triage.cdx.json
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: sbom
+          path: sbom/temper-triage.cdx.json
+          retention-days: 7
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-binaries, sbom]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+
+      - name: Flatten release assets
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          mkdir -p release-assets
+          find artifacts -type f -name "*.tar.gz" -exec cp {} release-assets/ \;
+          n=$(ls release-assets/*.tar.gz | wc -l)
+          test "$n" -eq 4 || { echo "expected 4 archives, found $n"; exit 1; }
+          cp artifacts/sbom/temper-triage.cdx.json "release-assets/${TAG}.cdx.json"
+
+      # Docs archive before the sums, so a varve layer can ingest it through
+      # the signed digest; taken from the released x86_64 binary itself.
+      - name: Build the docs archive
+        run: |
+          set -euo pipefail
+          mkdir -p bin "docs-out/${TAG}-docs"
+          tar -xzf "release-assets/${TAG}-x86_64-unknown-linux-musl.tar.gz" -C bin
+          bin/temper-triage docs design > "docs-out/${TAG}-docs/design.md"
+          test -s "docs-out/${TAG}-docs/design.md"
+          tar -czf "release-assets/${TAG}-docs.tar.gz" -C docs-out .
+
+      - name: Capture build environment
+        run: |
+          set -euo pipefail
+          {
+            echo "rustc: $(rustc --version)"
+            echo "cargo: $(cargo --version)"
+            echo "cosign: v2.4.1 (sigstore/cosign-installer, pinned below)"
+            echo "runner: $(uname -srm)"
+          } > release-assets/build-env.txt
+
+      - name: Generate SHA256 checksums
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum ./* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # Nothing is attested or signed from a branch, whatever started the run.
+      - name: Sign only from a temper-triage tag ref
+        run: |
+          case "$GITHUB_REF" in refs/tags/temper-triage-v*) ;; *) echo "refusing to sign $GITHUB_REF"; exit 1 ;; esac
+
+      - name: Generate SLSA build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: "release-assets/*.tar.gz"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: 'v2.4.1'
+
+      - name: Sign SHA256SUMS with cosign (keyless OIDC)
+        run: |
+          set -euo pipefail
+          cd release-assets
+          cosign sign-blob --yes \
+            --bundle SHA256SUMS.txt.cosign.bundle \
+            --output-signature SHA256SUMS.txt.sig \
+            --output-certificate SHA256SUMS.txt.pem \
+            SHA256SUMS.txt
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          notes=$(mktemp)
+          cat > "$notes" <<EOF
+          Work in progress; no production-ready claims.
+
+          Verify this release:
+
+              cosign verify-blob \\
+                --certificate-identity-regexp '^https://github.com/pulseengine/temper/.github/workflows/triage-release.yml@refs/tags/temper-triage-v.*$' \\
+                --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \\
+                --bundle SHA256SUMS.txt.cosign.bundle SHA256SUMS.txt
+              sha256sum -c --ignore-missing SHA256SUMS.txt
+              gh attestation verify ${TAG}-<target>.tar.gz --repo pulseengine/temper
+          EOF
+          # Never overwrite published assets: to re-run, delete the release.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists; delete it before re-running" >&2
+            exit 1
+          fi
+          gh release create "$TAG" --verify-tag --title "temper-triage ${TAG#temper-triage-}" \
+            --notes-file "$notes" --prerelease --latest=false release-assets/*

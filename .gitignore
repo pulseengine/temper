@@ -72,3 +72,6 @@ bazel-*
 # Python bytecode (gate-probe and hostname-scan self-tests)
 __pycache__/
 *.pyc
+
+# Rust
+triage/target/

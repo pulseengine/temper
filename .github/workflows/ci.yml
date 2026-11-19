@@ -119,6 +119,36 @@ jobs:
       - name: Python 3.9 floor
         run: pipx run --spec vermin==1.9.2 vermin -t=3.9- --no-tips --violations .github/actions/gate-probe/
 
+  # temper-triage (docs/triage.md): the Rust reply run and its negative
+  # controls. Hosted on purpose: this workflow runs on pull requests.
+  triage:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: triage
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable, 2026-11-15
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Tests (negative controls, private-host equivalence, App JWT)
+        run: cargo test --locked --no-fail-fast
+      - name: CLI conventions
+        run: |
+          set -euo pipefail
+          b=target/debug/temper-triage
+          test "$($b --version)" = "temper-triage $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          $b --help > /dev/null
+          set +e; $b --no-such-flag 2>/dev/null; rc=$?; set -e
+          test "$rc" -eq 2
+
   ci:
     runs-on: ubuntu-latest
     steps:

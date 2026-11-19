@@ -1,0 +1,13 @@
+https://localhost/
+https://127.0.0.1/
+https://169.254.169.254/
+https://[fe80::1]/
+https://[::1]/
+https://build.corp/
+https://nas.internal/
+https://x.localdomain/
+https://runner01/
+https://0xC0A80105/
+https://3232235777/
+https://docs.example.com:8443/
+https://user@nas.internal/
