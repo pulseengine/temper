@@ -82,6 +82,9 @@ impl Config {
                 }
             }
         }
+        if let Some(u) = &self.docs_url {
+            docs_host_ok(u)?;
+        }
         if let Some(l) = &self.ask_label {
             let ok = (1..=50).contains(&l.len())
                 && l.chars()
@@ -100,6 +103,47 @@ impl Config {
             .iter()
             .any(|r| r == "*" || r.eq_ignore_ascii_case(repo))
     }
+}
+
+/// A docs URL must name a public DNS host: no IP literal, no single label,
+/// no loopback or private-use suffix. The outgoing check runs as well; this
+/// catches what the plugin's patterns do not (localhost, 127.0.0.1, .internal).
+fn docs_host_ok(url: &str) -> Result<(), String> {
+    let rest = url.strip_prefix("https://").unwrap_or(url);
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = host.rsplit('@').next().unwrap_or("");
+    let bad = |why: &str| Err(format!("config: docs_url host {why}"));
+    if host.starts_with('[') || host.contains(':') {
+        return bad("is an IP literal or carries a port");
+    }
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() < 2 || labels.iter().any(|l| l.is_empty()) {
+        return bad("is not a dotted DNS name");
+    }
+    let tld = labels[labels.len() - 1];
+    if tld.chars().all(|c| c.is_ascii_digit()) || host.starts_with("0x") {
+        return bad("is an IP literal");
+    }
+    const PRIVATE: &[&str] = &[
+        "localhost",
+        "local",
+        "lan",
+        "internal",
+        "intranet",
+        "corp",
+        "home",
+        "localdomain",
+        "test",
+        "invalid",
+        "example",
+        "arpa",
+        "private",
+    ];
+    if PRIVATE.contains(&tld) || host.ends_with(".ts.net") {
+        return bad("is not a public name");
+    }
+    Ok(())
 }
 
 /// GitHub as the handler sees it: only `Route`s.
@@ -281,7 +325,10 @@ pub struct Item {
 
 /// One pass: the offer, each item, the done marks (REQ-032).
 pub fn run(h: &Handler, gh: &mut dyn GitHub, warte: &mut dyn Warte) -> Result<Vec<Item>, String> {
-    let offer = warte.offer()?;
+    let mut offer = warte.offer()?;
+    // One pass handles an issue once, however warte lists it.
+    let mut seen = std::collections::HashSet::new();
+    offer.retain(|(r, n)| seen.insert((r.to_ascii_lowercase(), *n)));
     let mut out = Vec::new();
     for (repo, number) in offer {
         let mut item = Item {

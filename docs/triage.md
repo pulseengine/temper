@@ -76,6 +76,30 @@ one of three replies. They cannot choose the target or an action:
   the log names the kind of hit, masked (REQ-035). The deny-list lives in the
   deploy config, not in this repository, because it names the private hosts.
 
+## Known limits
+
+From a fresh-context review on 2026-11-19; accepted for v0.1:
+
+- **Hidden org members.** The author and commenter checks use GitHub's
+  `author_association`. A member whose membership is private shows as
+  `CONTRIBUTOR` or `NONE` and gets a reply like anyone else.
+- **Skips are final.** warte drops an item once it is marked done, so a
+  `skipped` item (too many comments, an outgoing-check hit, a repository
+  briefly private) is not offered again. That is warte's contract; an
+  outgoing-check hit means the deploy config needs fixing, and the log says so.
+- **One replier.** The marker check and the post are not atomic. Two
+  repliers at once (the timer and warte's `REPLY_CMD`) could both post.
+  Deploy exactly one; within one run a duplicated offer is handled once.
+- **The private-host port is no wider than the plugin's patterns.** It
+  misses `localhost`, loopback and link-local literals and `.internal`-style
+  names. `docs_url`, the only deploy value a reply carries, is therefore also
+  checked at config load: a dotted public DNS name, no IP literal, no port,
+  no private-use suffix. Runner names and other hostnames rely on `deny`.
+
+The installation token is minted per run with `issues: write` and
+`metadata: read` only, and refreshed after 50 minutes. Any non-2xx answer
+from GitHub or warte, redirects included, is an error.
+
 ## Negative controls
 
 `triage/tests/negative_controls.rs` runs the handler against a recording

@@ -88,8 +88,10 @@ impl AppKey {
     pub fn jwt(&self, app_id: u64) -> Result<String, String> {
         let t = now();
         let head = URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256","typ":"JWT"}"#);
-        let claims = URL_SAFE_NO_PAD
-            .encode(json!({"iat": t - 60, "exp": t + 540, "iss": app_id.to_string()}).to_string());
+        let claims = URL_SAFE_NO_PAD.encode(
+            json!({"iat": t.saturating_sub(60), "exp": t + 540, "iss": app_id.to_string()})
+                .to_string(),
+        );
         let msg = format!("{head}.{claims}");
         let mut sig = vec![0u8; self.0.public().modulus_len()];
         self.0
@@ -109,7 +111,8 @@ pub struct RealGitHub {
     org: String,
     app_id: u64,
     key: AppKey,
-    token: Option<String>,
+    /// The installation token and when it was minted (tokens last an hour).
+    token: Option<(String, u64)>,
     http: ureq::Agent,
 }
 
@@ -126,17 +129,21 @@ impl RealGitHub {
     }
 
     fn installation_token(&mut self) -> Result<String, String> {
-        if let Some(t) = &self.token {
-            return Ok(t.clone());
+        if let Some((t, at)) = &self.token {
+            if now().saturating_sub(*at) < 50 * 60 {
+                return Ok(t.clone());
+            }
         }
         let inst = self.call(&Route::OrgInstallation, None)?;
         let id = inst["id"].as_u64().ok_or("installation: no id")?;
-        let tok = self.call(&Route::InstallationToken(id), None)?;
+        // Scoped to what a reply needs, not the installation's full grant.
+        let scope = json!({"permissions": {"issues": "write", "metadata": "read"}});
+        let tok = self.call(&Route::InstallationToken(id), Some(&scope))?;
         let t = tok["token"]
             .as_str()
             .ok_or("installation token: none returned")?
             .to_string();
-        self.token = Some(t.clone());
+        self.token = Some((t.clone(), now()));
         Ok(t)
     }
 
@@ -173,6 +180,10 @@ impl GitHub for RealGitHub {
         };
         // Only the method and path are reported: never the token or a body.
         match res {
+            // redirects(0) hands a 3xx back as Ok: only 2xx is success.
+            Ok(r) if !(200..300).contains(&r.status()) => {
+                Err(format!("{m} {path}: HTTP {}", r.status()))
+            }
             Ok(r) => r
                 .into_json::<Value>()
                 .map_err(|e| format!("{m} {path}: {e}")),
@@ -205,7 +216,7 @@ impl RealWarte {
 
 impl Warte for RealWarte {
     fn offer(&mut self) -> Result<Vec<(String, u64)>, String> {
-        let v: Value = self
+        let v = self
             .http
             .get(&format!("{}/api/triage", self.base))
             .set("Authorization", &self.auth)
@@ -213,9 +224,11 @@ impl Warte for RealWarte {
             .map_err(|e| match e {
                 ureq::Error::Status(c, _) => format!("GET /api/triage: HTTP {c}"),
                 e => format!("GET /api/triage: {}", e.kind()),
-            })?
-            .into_json()
-            .map_err(|e| format!("GET /api/triage: {e}"))?;
+            })?;
+        if !(200..300).contains(&v.status()) {
+            return Err(format!("GET /api/triage: HTTP {}", v.status()));
+        }
+        let v: Value = v.into_json().map_err(|e| format!("GET /api/triage: {e}"))?;
         let ready = v["ready"]
             .as_array()
             .ok_or("GET /api/triage: no ready list")?;
@@ -232,7 +245,8 @@ impl Warte for RealWarte {
             .set("Authorization", &self.auth)
             .send_json(json!({"repo": repo, "number": number, "outcome": outcome.as_str()}));
         match r {
-            Ok(_) => Ok(true),
+            Ok(r) if (200..300).contains(&r.status()) => Ok(true),
+            Ok(r) => Err(format!("POST /api/triage/done: HTTP {}", r.status())),
             Err(ureq::Error::Status(422, _)) => Ok(false),
             Err(ureq::Error::Status(c, _)) => Err(format!("POST /api/triage/done: HTTP {c}")),
             Err(e) => Err(format!("POST /api/triage/done: {}", e.kind())),

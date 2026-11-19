@@ -205,7 +205,12 @@ fn a_failed_post_leaves_the_item_unmarked() {
 // rivet: verifies REQ-035
 #[test]
 fn internal_docs_url_posts_nothing() {
-    let c = cfg("docs_url = \"https://wiki.build.lan/docs\""); // planted control; hostname-scan: allow
+    // Config::parse refuses this URL; set it after parsing so the outgoing
+    // check, the second layer, is what is tested here.
+    let c = Config {
+        docs_url: Some("https://wiki.build.lan/docs".into()), // planted control; hostname-scan: allow
+        ..cfg("")
+    };
     let mut gh = FakeGitHub::with_issue(9, "How do I configure it?", "");
     let p = handler(&c).handle(&mut gh, "demo", 9).unwrap();
     assert_eq!(p.outcome, Outcome::Skipped);
@@ -288,4 +293,52 @@ fn classifier_and_marker() {
         assert_eq!(marker(&render(k, Some("https://x.example/"))), Some(k));
     }
     assert_eq!(marker("<!-- temper-triage:v1 kind=close-all -->"), None);
+}
+
+// rivet: verifies REQ-035
+#[test]
+fn docs_url_must_name_a_public_host() {
+    // the hosts the fresh-context review found passing the plugin's patterns
+    for u in [
+        "https://localhost/",
+        "https://127.0.0.1/",
+        "https://169.254.169.254/",
+        "https://[fe80::1]/",
+        "https://[::1]/",
+        "https://build.corp/",
+        "https://nas.internal/",
+        "https://x.localdomain/",
+        "https://runner01/",
+        "https://0xC0A80105/",
+        "https://3232235777/",
+        "https://docs.example.com:8443/",
+        "https://user@nas.internal/",
+    ] {
+        let r = Config::parse(&format!(
+            "org = \"pulseengine\"\nwarte_url = \"https://w.example.com\"\napp_id = 1\nrepos = [\"*\"]\ndocs_url = \"{u}\""
+        ));
+        assert!(r.is_err(), "{u} accepted");
+    }
+    assert!(Config::parse(
+        "org = \"pulseengine\"\nwarte_url = \"https://w.example.com\"\napp_id = 1\nrepos = [\"*\"]\ndocs_url = \"https://pulseengine.eu/docs\""
+    )
+    .is_ok());
+}
+
+// rivet: verifies REQ-034
+#[test]
+fn a_duplicated_offer_is_handled_once() {
+    let c = cfg("");
+    let mut gh = FakeGitHub::with_issue(11, "Idea", "text");
+    let mut warte = FakeWarte {
+        ready: vec![
+            ("demo".into(), 11),
+            ("demo".into(), 11),
+            ("DEMO".into(), 11),
+        ],
+        ..Default::default()
+    };
+    let items = run(&handler(&c), &mut gh, &mut warte).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(gh.writes().len(), 1);
 }
