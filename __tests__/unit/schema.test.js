@@ -202,3 +202,33 @@ describe('validateConfig', () => {
     expect(result.errors[0]).toContain('rate_limit_threshold');
   });
 });
+
+describe('validateConfig: per-repo rivet oracle', () => {
+  const full = {
+    enabled: true,
+    varve_binary: '/usr/local/bin/varve',
+    pins_dir: '/var/lib/temper/pins',
+    stores_dir: '/var/lib/temper/stores',
+    realms_file: '/etc/temper/varve-realms.toml',
+    realms_allowed: ['pulseengine', 'covalent']
+  };
+  it('accepts a complete per-repo block', () => {
+    expect(validateConfig({ rivet_oracle: full })).toEqual({ valid: true, errors: [] });
+  });
+  it('requires the dirs, the trusted realms file and the allow-list with varve_binary', () => {
+    const r = validateConfig({ rivet_oracle: { enabled: true, varve_binary: '/usr/local/bin/varve' } });
+    expect(r.errors).toEqual(expect.arrayContaining([
+      'rivet_oracle.pins_dir is required with rivet_oracle.varve_binary',
+      'rivet_oracle.stores_dir is required with rivet_oracle.varve_binary',
+      'rivet_oracle.realms_file is required with rivet_oracle.varve_binary',
+      'rivet_oracle.realms_allowed is required with rivet_oracle.varve_binary'
+    ]));
+  });
+  it('refuses relative paths and a non-list allow-list', () => {
+    const r = validateConfig({ rivet_oracle: { ...full, realms_file: 'varve-realms.toml', realms_allowed: 'pulseengine' } });
+    expect(r.errors).toEqual([
+      'rivet_oracle.realms_file must be an absolute path',
+      'rivet_oracle.realms_allowed must be a list of realm names'
+    ]);
+  });
+});

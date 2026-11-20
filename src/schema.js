@@ -236,6 +236,20 @@ export function validateConfig(config) {
           errors.push(`rivet_oracle.${k} must be a non-empty string`);
         }
       }
+      for (const k of ['varve_binary', 'pins_dir', 'stores_dir', 'realms_file']) {
+        if (ro[k] !== undefined && (typeof ro[k] !== 'string' || !ro[k].startsWith('/'))) {
+          errors.push(`rivet_oracle.${k} must be an absolute path`);
+        }
+      }
+      if (ro.realms_allowed !== undefined &&
+          (!Array.isArray(ro.realms_allowed) || !ro.realms_allowed.every((r) => typeof r === 'string' && r))) {
+        errors.push('rivet_oracle.realms_allowed must be a list of realm names');
+      }
+      if (ro.varve_binary !== undefined) {
+        for (const k of ['pins_dir', 'stores_dir', 'realms_file', 'realms_allowed']) {
+          if (ro[k] === undefined) errors.push(`rivet_oracle.${k} is required with rivet_oracle.varve_binary`);
+        }
+      }
       if (ro.timeout_ms !== undefined &&
           (typeof ro.timeout_ms !== 'number' || ro.timeout_ms < 1000)) {
         errors.push('rivet_oracle.timeout_ms must be a number >= 1000');

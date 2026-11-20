@@ -243,6 +243,18 @@ rivet_oracle:
   layer: "2026.11.0"
   version: "0.41.1"
   timeout_ms: 60000
+  # Per-repo rivet (temper#94 follow-up), set in the deploy's config: with
+  # varve_binary set, the oracle runs the rivet each commit pins instead of
+  # binary_path/layer/version. temper reads only realm, channel and layer
+  # from the repo's varve.toml, writes <pins_dir>/<realm>/<channel>/<layer>/
+  # with a copy of realms_file (the trusted realm definitions; never the
+  # repo's), and resolves with VARVE_ROOT=<stores_dir>/<realm>/<channel>/<layer>.
+  # temper never installs; the host lays those layers down.
+  # varve_binary: "/usr/local/bin/varve"
+  # pins_dir: "/var/lib/temper/varve-pins"
+  # stores_dir: "/var/lib/temper/varve-stores"
+  # realms_file: "/etc/temper/varve-realms.toml"
+  # realms_allowed: ["pulseengine", "covalent"]
 
 scheduler:
   interval_minutes: 5

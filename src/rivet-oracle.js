@@ -397,3 +397,111 @@ export function oracleVersionGate({ configured, binaryVersion, repoLayer }) {
   }
   return { ok: true };
 }
+
+// ── Per-repo rivet (temper#94 follow-up) ─────────────────────────────────
+//
+// Every repo moves its own varve pin, so one configured layer matches almost
+// none of them. Instead the oracle resolves the rivet each repo pins, through
+// varve, in a pin directory temper writes itself. Only two strings come from
+// the repository (realm name, layer) plus the channel, each validated; the
+// realm definitions, which carry the trust root, come from the deploy's own
+// realms file and never from the repository. A fork PR therefore cannot point
+// temper at a realm whose key it controls. temper never installs: a layer the
+// host has not laid down is a skip with a reason.
+
+const PIN_REALM_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const PIN_CHANNEL_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const PIN_LAYER_RE = /^\d{4}\.\d{1,2}\.\d{1,2}$/;
+
+/**
+ * realm, channel and layer from the [toolchain] table of a varve.toml, or
+ * null. Pure; a deliberately narrow reader (quoted string values only).
+ */
+export function parseVarvePin(text) {
+  if (typeof text !== 'string') return null;
+  let inToolchain = false;
+  const pin = {};
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/#.*$/, '').trim();
+    if (!line) continue;
+    const table = line.match(/^\[([^\]]+)\]$/);
+    if (table) {
+      inToolchain = table[1].trim() === 'toolchain';
+      continue;
+    }
+    if (!inToolchain) continue;
+    const kv = line.match(/^(realm|channel|layer)\s*=\s*"([^"]*)"$/);
+    if (kv) pin[kv[1]] = kv[2];
+  }
+  return pin.layer ? pin : null;
+}
+
+/**
+ * May temper resolve rivet for this pin? Pure.
+ * @returns {{ok: true} | {ok: false, reason: string}}
+ */
+export function validateVarvePin(pin, realmsAllowed) {
+  if (!pin) return { ok: false, reason: 'the repository pins no varve layer (varve.toml)' };
+  const { realm, channel, layer } = pin;
+  if (!realm || !PIN_REALM_RE.test(realm)) {
+    return { ok: false, reason: 'the varve pin names no valid realm' };
+  }
+  if (!Array.isArray(realmsAllowed) || !realmsAllowed.includes(realm)) {
+    return { ok: false, reason: `realm ${realm} is not in rivet_oracle.realms_allowed` };
+  }
+  if (!channel || !PIN_CHANNEL_RE.test(channel)) {
+    return { ok: false, reason: 'the varve pin names no valid channel' };
+  }
+  if (!PIN_LAYER_RE.test(layer)) {
+    return { ok: false, reason: 'the varve pin names no valid layer' };
+  }
+  return { ok: true };
+}
+
+/**
+ * The rivet binary the pin resolves to on this host, via `varve which rivet`
+ * in `<pinsDir>/<realm>/<channel>/<layer>/`, against the store
+ * `<storesDir>/<realm>/<channel>/<layer>`. Writes that directory's
+ * varve.toml from the validated pin and copies the trusted realms file next
+ * to it on every call. The pin must already have passed validateVarvePin.
+ *
+ * @returns {Promise<{ok: true, binary: string} | {ok: false, reason: string}>}
+ */
+export async function resolvePinnedRivet({ pin, varveBinary, pinsDir, storesDir, realmsFile, runner = execFileP }) {
+  const label = `${pin.realm}/${pin.layer}`;
+  const dir = path.join(pinsDir, pin.realm, pin.channel, pin.layer);
+  try {
+    await fs.promises.mkdir(dir, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(dir, 'varve.toml'),
+      `manifest-version = 1\n\n[toolchain]\nrealm   = "${pin.realm}"\nchannel = "${pin.channel}"\nlayer   = "${pin.layer}"\n`
+    );
+    await fs.promises.copyFile(realmsFile, path.join(dir, 'varve-realms.toml'));
+  } catch (err) {
+    return { ok: false, reason: `cannot prepare the pin directory for ${label}: ${err.message}` };
+  }
+  // One varve store per pin: anti-rollback is per line per store (varve#256),
+  // so a shared store refuses older pins once a newer layer is installed.
+  const env = { ...process.env, VARVE_ROOT: path.join(storesDir, pin.realm, pin.channel, pin.layer) };
+  let stdout;
+  let stderr;
+  try {
+    ({ stdout, stderr } = await runner(varveBinary, ['which', 'rivet'], { cwd: dir, env, timeout: 10000 }));
+  } catch (err) {
+    const msg = String(err.stderr || err.message || '');
+    if (/is not installed/.test(msg)) {
+      return { ok: false, reason: `layer ${label} is not installed on this host` };
+    }
+    return { ok: false, reason: `varve which rivet failed for ${label}: ${msg.trim().split('\n')[0]}` };
+  }
+  // varve 0.47 prints the binary on stdout and the layer it resolved on
+  // stderr (`layer <name> (<channel>) sha256:...`); it must be the pinned one.
+  const binary = String(stdout || '').trim().split('\n')[0];
+  const resolvedLayer = `${stdout || ''}\n${stderr || ''}`
+    .split('\n')
+    .some((l) => l.trim().startsWith(`layer ${pin.layer} `));
+  if (!binary || !path.isAbsolute(binary) || !resolvedLayer) {
+    return { ok: false, reason: `varve which rivet gave unexpected output for ${label}` };
+  }
+  return { ok: true, binary };
+}

@@ -65,6 +65,52 @@ artifacts:
       - type: verifies
         target: REQ-039
 
+  - id: REQ-042
+    type: requirement
+    title: With varve configured, the rivet oracle SHALL run the rivet each commit pins, resolved from validated pin strings against the deploy's trusted realms, one store per pin, and SHALL never install
+    status: implemented
+    description: >
+      Repositories move their own varve pins (on 2026-11-20 the first six
+      production PRs pinned 2026.11.10 or 2026.11.16 while the oracle carried
+      2026.11.0), so a single configured layer skipped every one. The head
+      oracle runs the head commit's pinned rivet and base validate the base
+      commit's. Only realm, channel and layer are read from the repository
+      and validated (realm on rivet_oracle.realms_allowed, layer a dated
+      name). temper writes its own pin directory with a copy of the deploy's
+      realms file, because the realms file carries the trust root and a
+      fork PR's copy would let it name its own key. Each pin gets its own
+      VARVE_ROOT, since anti-rollback is per line per store (varve#256).
+      A layer the host has not installed, a pin that fails validation or an
+      unexpected varve answer is a skip logged with the repository and layer.
+    fields:
+      priority: must
+      category: functional
+      corrective: true
+      upstream-ref: temper#94
+    links:
+      - type: derives-from
+        target: SC-008
+      - type: refines
+        target: REQ-039
+
+  - id: VER-026
+    type: verification
+    title: Per-repo rivet tests (pin parser and validator, pin directory and store, head/base binaries, skip paths)
+    status: implemented
+    description: >
+      Unit and integration tests with a fake varve, plus a one-off check of
+      resolvePinnedRivet against varve 0.47.0 on the mini (2026-11-20):
+      empty per-pin store gives "not installed"; after varve install into
+      that store it resolves rivet 0.41.1; a realms file with another trust
+      root resolves nothing.
+    fields:
+      method: automated-test
+      test-name: "parseVarvePin; validateVarvePin; resolvePinnedRivet; per-repo rivet; validateConfig: per-repo rivet oracle"
+      test-location: __tests__/unit/rivet-pin.test.js, __tests__/integration/ai-review-oracle-per-repo.test.js, __tests__/unit/schema.test.js
+    links:
+      - type: verifies
+        target: REQ-042
+
   - id: REQ-040
     type: requirement
     title: The model review SHALL be off by default, switched on only for a model that clears the pre-registered bar on the review benchmark, and /health SHALL report the review state with its reason
@@ -105,3 +151,5 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-040
+      - type: satisfies
+        target: REQ-042
