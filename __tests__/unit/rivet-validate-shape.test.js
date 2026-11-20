@@ -5,10 +5,17 @@
 // json` output on this repository, trimmed.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { runRivetValidate, runRivetImpact } from '../../src/rivet-oracle.js';
 
-const REPO = path.resolve(__dirname, '..', '..'); // has rivet.yaml
+// A rivet project is any directory with rivet.yaml; the runner is mocked.
+let REPO;
+beforeAll(() => {
+  REPO = fs.mkdtempSync(path.join(os.tmpdir(), 'temper-shape-'));
+  fs.writeFileSync(path.join(REPO, 'rivet.yaml'), 'project: {}\n');
+});
+afterAll(() => fs.rmSync(REPO, { recursive: true, force: true }));
 const fixture = (v) => fs.readFileSync(path.join(__dirname, '..', 'fixtures', `rivet-${v}-validate.json`), 'utf8');
 
 describe.each(['0.41.1', '0.42.2'])('runRivetValidate on rivet %s output', (version) => {

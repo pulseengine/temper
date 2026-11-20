@@ -16,6 +16,11 @@ js_library(
     ],
 )
 
+filegroup(
+    name = "test_fixtures",
+    srcs = glob(["fixtures/*.json"]),
+)
+
 jest_bin.jest_test(
     name = "unit_tests",
     args = [
@@ -28,6 +33,7 @@ jest_bin.jest_test(
     ],
     data = [
         ":test_sources",
+        ":test_fixtures",
         "//src:lib",
         "//:jest_config",
         "//:config_yml",
@@ -51,6 +57,7 @@ jest_bin.jest_test(
     ],
     data = [
         ":test_sources",
+        ":test_fixtures",
         "//src:lib",
         "//:jest_config",
         "//:config_yml",
