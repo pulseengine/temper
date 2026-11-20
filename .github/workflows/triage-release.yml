@@ -2,7 +2,7 @@ name: temper-triage release
 
 # Builds, checks, signs and publishes temper-triage (triage/) for a
 # temper-triage-v* tag. Modelled on pulseengine/plant's release.yml: static
-# musl and macOS archives, a CycloneDX SBOM and a docs archive, all inside
+# musl and Apple-silicon macOS archives, a CycloneDX SBOM and a docs archive, all inside
 # SHA256SUMS.txt, which cosign signs keyless; SLSA provenance for the
 # archives; build-env.txt.
 #
@@ -66,8 +66,6 @@ jobs:
           - target: aarch64-unknown-linux-musl
             os: ubuntu-24.04-arm
             musl: true
-          - target: x86_64-apple-darwin
-            os: macos-15
           - target: aarch64-apple-darwin
             os: macos-latest
     steps:
@@ -174,7 +172,7 @@ jobs:
           mkdir -p release-assets
           find artifacts -type f -name "*.tar.gz" -exec cp {} release-assets/ \;
           n=$(ls release-assets/*.tar.gz | wc -l)
-          test "$n" -eq 4 || { echo "expected 4 archives, found $n"; exit 1; }
+          test "$n" -eq 3 || { echo "expected 3 archives (2 Linux musl, 1 Apple-silicon macOS), found $n"; exit 1; }
           cp artifacts/sbom/temper-triage.cdx.json "release-assets/${TAG}.cdx.json"
 
       # Docs archive before the sums, so a varve layer can ingest it through
