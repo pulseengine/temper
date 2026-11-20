@@ -1,0 +1,47 @@
+{
+  "backlinks": 0,
+  "circular_deps": 0,
+  "command": "validate",
+  "cross_repo_broken": 0,
+  "errors": 0,
+  "infos": 74,
+  "lifecycle_gaps": 13,
+  "result": "PASS",
+  "version_conflicts": 0,
+  "warnings": 0,
+  "diagnostics": [
+    {
+      "artifact_id": "REQ-001",
+      "message": "Every requirement should be satisfied by at least one design decision or feature — needs an incoming `satisfies` link from one of [design-decision, feature]",
+      "rule": "requirement-coverage",
+      "severity": "info"
+    }
+  ],
+  "lifecycle_coverage": [
+    {
+      "artifact_id": "REQ-007",
+      "artifact_type": "requirement",
+      "missing": [
+        "design-decision"
+      ],
+      "status": "implemented"
+    },
+    {
+      "artifact_id": "REQ-008",
+      "artifact_type": "requirement",
+      "missing": [
+        "design-decision"
+      ],
+      "status": "implemented"
+    }
+  ],
+  "broken_cross_refs": [],
+  "circular_dependencies": [],
+  "schemas": [
+    {
+      "name": "common",
+      "source": "embedded",
+      "version": "0.3.1"
+    }
+  ]
+}

@@ -41,6 +41,11 @@ async function runCli(binary, args, opts = {}) {
   }
 }
 
+/** rivet output fields change shape across versions; iterate only lists. */
+function asArray(v) {
+  return Array.isArray(v) ? v : [];
+}
+
 function safeParseJson(text) {
   try {
     return JSON.parse(text);
@@ -83,13 +88,17 @@ function gapToFinding(gap) {
   if (!gap || typeof gap !== 'object') return null;
   const id = gap.artifact_id || gap.id;
   if (!id) return null;
-  const reason = gap.reason || gap.message || 'lifecycle coverage gap: no downstream artifacts';
+  const missing = asArray(gap.missing).filter((m) => typeof m === 'string');
+  const reason = gap.reason || gap.message ||
+    (missing.length
+      ? `lifecycle coverage gap: no downstream ${missing.join(', ')}`
+      : 'lifecycle coverage gap: no downstream artifacts');
   return {
     source: 'oracle:rivet-validate',
     severity: 'warning',
     artifact_id: id,
     message: reason,
-    claim: `${id} (${gap.type || 'artifact'}) — ${reason}`
+    claim: `${id} (${gap.artifact_type || gap.type || 'artifact'}) — ${reason}`
   };
 }
 
@@ -140,15 +149,18 @@ export async function runRivetValidate(binary, repoPath, opts = {}) {
   }
 
   const findings = [];
-  for (const d of data.diagnostics || []) {
+  for (const d of asArray(data.diagnostics)) {
     const f = diagnosticToFinding(d);
     if (f) findings.push(f);
   }
-  for (const g of data.lifecycle_gaps || []) {
+  // rivet 0.41+ reports lifecycle_gaps as a COUNT and the gaps themselves
+  // as lifecycle_coverage; older rivet put the list under lifecycle_gaps.
+  const gaps = Array.isArray(data.lifecycle_gaps) ? data.lifecycle_gaps : asArray(data.lifecycle_coverage);
+  for (const g of gaps) {
     const f = gapToFinding(g);
     if (f) findings.push(f);
   }
-  for (const r of data.broken_cross_refs || []) {
+  for (const r of asArray(data.broken_cross_refs)) {
     findings.push(brokenCrossRefToFinding(r));
   }
 
@@ -160,9 +172,9 @@ export async function runRivetValidate(binary, repoPath, opts = {}) {
       errors: data.errors ?? 0,
       warnings: data.warnings ?? 0,
       infos: data.infos ?? 0,
-      broken_cross_refs: (data.broken_cross_refs || []).length,
-      circular_dependencies: (data.circular_dependencies || []).length,
-      lifecycle_gaps: (data.lifecycle_gaps || []).length
+      broken_cross_refs: asArray(data.broken_cross_refs).length,
+      circular_dependencies: asArray(data.circular_dependencies).length,
+      lifecycle_gaps: gaps.length
     }
   };
 }
@@ -198,7 +210,8 @@ export async function runRivetImpact(binary, repoPath, baseRef, opts = {}) {
 
   const findings = [];
 
-  for (const id of data.removed || []) {
+  for (const item of asArray(data.removed)) {
+    const id = typeof item === 'string' ? item : item?.id || 'unknown';
     findings.push({
       source: 'oracle:rivet-impact',
       severity: 'warning',
@@ -207,7 +220,7 @@ export async function runRivetImpact(binary, repoPath, baseRef, opts = {}) {
     });
   }
 
-  for (const item of data.directly_affected || []) {
+  for (const item of asArray(data.directly_affected)) {
     const id = item?.id || 'unknown';
     const reason = Array.isArray(item?.reason) ? item.reason.join('; ') : '';
     const title = item?.title ? ` — ${item.title}` : '';
@@ -219,7 +232,7 @@ export async function runRivetImpact(binary, repoPath, baseRef, opts = {}) {
     });
   }
 
-  const transitiveCount = (data.transitively_affected || []).length;
+  const transitiveCount = asArray(data.transitively_affected).length;
   if (transitiveCount > 0) {
     findings.push({
       source: 'oracle:rivet-impact',
@@ -233,11 +246,11 @@ export async function runRivetImpact(binary, repoPath, baseRef, opts = {}) {
     ok: true,
     findings,
     summary: data.summary || {
-      added: (data.added || []).length,
-      removed: (data.removed || []).length,
-      changed: (data.changed || []).length,
-      direct: (data.directly_affected || []).length,
-      transitive: (data.transitively_affected || []).length
+      added: asArray(data.added).length,
+      removed: asArray(data.removed).length,
+      changed: asArray(data.changed).length,
+      direct: asArray(data.directly_affected).length,
+      transitive: asArray(data.transitively_affected).length
     }
   };
 }

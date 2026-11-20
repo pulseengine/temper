@@ -162,6 +162,21 @@ describe('per-repo rivet', () => {
   });
 });
 
+describe('oracle failures name the repo and layer', () => {
+  it('logs repo and layer when the head oracle or base validate throws', async () => {
+    repoVarvePin.mockImplementation(async (o, owner, repo, sha) =>
+      sha === 'head111' ? pin('2026.11.16', 'covalent') : pin('2026.11.10', 'covalent'));
+    runRivetValidate.mockRejectedValueOnce(new Error('base boom'));
+    runRivetOracle.mockRejectedValueOnce(new Error('head boom'));
+    await reviewPullRequest(octokitFor(), 'org', 'r', 7);
+    const warns = getLogger().warn.mock.calls;
+    const base = warns.find((c) => /base-ref validate failed/.test(c[1]));
+    const head = warns.find((c) => /Rivet oracle failed/.test(c[1]));
+    expect(base[0]).toMatchObject({ repo: 'org/r', layer: 'covalent/2026.11.10', err: 'base boom' });
+    expect(head[0]).toMatchObject({ repo: 'org/r', layer: 'covalent/2026.11.16', err: 'head boom' });
+  });
+});
+
 describe('reviewStatus in per-repo mode', () => {
   it('reports the oracle on, per-repo, with the trusted realms', () => {
     expect(reviewStatus({ ai_review: { enabled: false }, rivet_oracle: ORACLE }).oracle).toEqual({
