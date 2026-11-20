@@ -77,3 +77,4 @@ __pycache__/
 triage/target/
 eval/review-bench/runs/
 eval/review-bench/revmatch/target/
+tools/self-update/target/
