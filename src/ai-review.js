@@ -17,9 +17,11 @@ import {
   subtractFindings,
   groupOracleFindings,
   rivetBinaryVersion,
-  oracleVersionGate
+  oracleVersionGate,
+  validateVarvePin,
+  resolvePinnedRivet
 } from './rivet-oracle.js';
-import { hasRivetYaml, repoVarveLayer, withTempRepoCheckout } from './rivet-fetch.js';
+import { hasRivetYaml, repoVarveLayer, repoVarvePin, withTempRepoCheckout } from './rivet-fetch.js';
 import { countReview } from './report-stats.js';
 
 const _reviewTimestamps = new Map();
@@ -388,9 +390,53 @@ async function supersedePreviousReviews(octokit, owner, repo, prNumber) {
   }
 }
 
-/** The rivet oracle can run: enabled and a binary configured. */
+/**
+ * Which rivet speaks for this PR (temper#94). With rivet_oracle.varve_binary
+ * set, the head oracle runs the rivet the head commit pins and base validate
+ * the rivet the base commit pins, each resolved through varve from validated
+ * pin strings and the deploy's trusted realms file (resolvePinnedRivet).
+ * Without it, the single configured binary must match the configured layer
+ * and version. A base that cannot be resolved leaves the oracle head-only.
+ *
+ * @returns {Promise<{ok: true, head: string, base: string|null, baseReason?: string}
+ *   | {ok: false, reason: string, layer?: string}>}
+ */
+async function oracleBinaries({ octokit, owner, repo, headSha, baseSha, rivetCfg, resolvedBinary }) {
+  if (!rivetCfg.varve_binary) {
+    const gate = oracleVersionGate({
+      configured: rivetCfg,
+      binaryVersion: resolvedBinary ? await rivetBinaryVersion(resolvedBinary) : null,
+      repoLayer: await repoVarveLayer(octokit, owner, repo, headSha)
+    });
+    return gate.ok ? { ok: true, head: resolvedBinary, base: resolvedBinary } : gate;
+  }
+  const resolve = async (sha) => {
+    const pin = await repoVarvePin(octokit, owner, repo, sha);
+    const v = validateVarvePin(pin, rivetCfg.realms_allowed);
+    const layer = pin?.layer && pin?.realm ? `${pin.realm}/${pin.layer}` : undefined;
+    if (!v.ok) return { ...v, layer };
+    const r = await resolvePinnedRivet({
+      pin,
+      varveBinary: rivetCfg.varve_binary,
+      pinsDir: rivetCfg.pins_dir,
+      realmsFile: rivetCfg.realms_file,
+      storesDir: rivetCfg.stores_dir
+    });
+    return { ...r, layer };
+  };
+  const head = await resolve(headSha);
+  if (!head.ok) return head;
+  if (!baseSha || baseSha === headSha) return { ok: true, head: head.binary, base: null };
+  const base = await resolve(baseSha);
+  return base.ok
+    ? { ok: true, head: head.binary, base: base.binary }
+    : { ok: true, head: head.binary, base: null, baseReason: base.reason };
+}
+
+/** The rivet oracle can run: enabled and a binary (or varve, per repo) configured. */
 function isOracleConfigured(config) {
-  return !!(config?.rivet_oracle?.enabled && config?.rivet_oracle?.binary_path);
+  const ro = config?.rivet_oracle;
+  return !!(ro?.enabled && (ro.binary_path || ro.varve_binary));
 }
 
 /**
@@ -405,7 +451,9 @@ function reviewStatus(config) {
       ? { state: 'on', model: ai.model || null }
       : { state: 'off', reason: ai.off_reason || 'ai_review.enabled is false' },
     oracle: isOracleConfigured(config)
-      ? { state: 'on', layer: ro.layer ?? null, version: ro.version ?? null }
+      ? (ro.varve_binary
+        ? { state: 'on', rivet: 'per-repo pin', realms: ro.realms_allowed ?? [] }
+        : { state: 'on', layer: ro.layer ?? null, version: ro.version ?? null })
       : { state: 'off', reason: ro.enabled === false ? 'rivet_oracle.enabled is false' : 'no rivet binary configured' }
   };
 }
@@ -483,22 +531,24 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
       // cwd that runRivetOracle uses. Without this, a relative binary_path
       // like "data/rivet/rivet" gets looked up inside the freshly-extracted
       // PR tarball — which obviously doesn't have the rivet binary in it.
-      const resolvedBinary = path.isAbsolute(rivetCfg.binary_path)
+      const resolvedBinary = !rivetCfg.binary_path ? null : path.isAbsolute(rivetCfg.binary_path)
         ? rivetCfg.binary_path
         : path.resolve(__dirname, '..', rivetCfg.binary_path);
       try {
         // temper#94: only the rivet this repository pins may speak for it.
         const gate = (headSha && (await hasRivetYaml(octokit, owner, repo, headSha)))
-          ? oracleVersionGate({
-              configured: rivetCfg,
-              binaryVersion: await rivetBinaryVersion(resolvedBinary),
-              repoLayer: await repoVarveLayer(octokit, owner, repo, headSha)
-            })
+          ? await oracleBinaries({ octokit, owner, repo, headSha, baseSha, rivetCfg, resolvedBinary })
           : null;
         if (gate && !gate.ok) {
           getLogger().info(
-            { pr: prNumber, reason: gate.reason },
+            { repo: `${owner}/${repo}`, pr: prNumber, layer: gate.layer, reason: gate.reason },
             'Rivet oracle skipped: not the rivet this repository pins'
+          );
+        }
+        if (gate?.ok && gate.baseReason) {
+          getLogger().warn(
+            { repo: `${owner}/${repo}`, pr: prNumber, reason: gate.baseReason },
+            'base-ref rivet unavailable — head-only oracle findings'
           );
         }
         if (gate?.ok) {
@@ -513,19 +563,19 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
             owner,
             repo,
             headSha,
-            (repoPath) => runRivetOracle(resolvedBinary, repoPath, {
+            (repoPath) => runRivetOracle(gate.head, repoPath, {
               baseRef: baseSha,
               timeout: rivetCfg.timeout_ms || 60000
             })
           );
 
-          const basePromise = (baseSha && baseSha !== headSha)
+          const basePromise = (baseSha && baseSha !== headSha && gate.base)
             ? withTempRepoCheckout(
                 octokit,
                 owner,
                 repo,
                 baseSha,
-                (repoPath) => runRivetValidate(resolvedBinary, repoPath, {
+                (repoPath) => runRivetValidate(gate.base, repoPath, {
                   timeout: rivetCfg.timeout_ms || 60000
                 })
               ).catch((err) => {

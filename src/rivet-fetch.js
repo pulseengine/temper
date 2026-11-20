@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { parseVarvePin } from './rivet-oracle.js';
 
 /**
  * Cheap pre-check: is `rivet.yaml` at the root of this ref? Avoids the
@@ -52,6 +53,24 @@ export async function repoVarveLayer(octokit, owner, repo, ref) {
     const text = Buffer.from(r?.data?.content || '', 'base64').toString('utf8');
     const m = text.match(/^\s*layer\s*=\s*"([^"]+)"/m);
     return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The varve pin ({realm, channel, layer}) a repo has at `ref`, or null when
+ * there is none or it cannot be read. Repository data: validate before use.
+ */
+export async function repoVarvePin(octokit, owner, repo, ref) {
+  try {
+    const r = await octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
+      owner,
+      repo,
+      path: 'varve.toml',
+      ref
+    });
+    return parseVarvePin(Buffer.from(r?.data?.content || '', 'base64').toString('utf8'));
   } catch {
     return null;
   }

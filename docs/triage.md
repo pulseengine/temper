@@ -143,7 +143,7 @@ own; the job needs the App's existing `issues: write` and `metadata: read`.
 
 Tags `temper-triage-v*` run `.github/workflows/triage-release.yml`, modelled
 on pulseengine/plant's `release.yml`: static musl archives for x86_64 and
-aarch64 Linux plus macOS, a CycloneDX SBOM, `SHA256SUMS.txt` signed keyless
+aarch64 Linux plus Apple-silicon macOS (no Intel macOS: owner decision 2026-11-20), a CycloneDX SBOM, `SHA256SUMS.txt` signed keyless
 with cosign from the tag ref, and SLSA provenance. The pulseengine realm
 layer can carry it as `repo = "pulseengine/temper"`, `version = "0.1.0"`,
 `release = "temper-triage-v0.1.0"`, with assets `%R-<target>.tar.gz`. The
