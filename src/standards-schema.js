@@ -26,6 +26,9 @@ export function validateStandards(config = {}) {
   if (s.merge_queue?.repos !== undefined && !Array.isArray(s.merge_queue.repos)) {
     errors.push('standards.merge_queue.repos must be an array');
   }
+  if (s.checks_app_id !== undefined && !(Number.isInteger(s.checks_app_id) && s.checks_app_id > 0)) {
+    errors.push('standards.checks_app_id must be a positive integer (GitHub Actions is 15368)');
+  }
   for (const [i, wf] of (s.required_workflows || []).entries()) {
     if (!wf?.name || !wf?.context || !wf?.path || !wf?.template) {
       errors.push(`standards.required_workflows[${i}] needs name, context, path and template`);

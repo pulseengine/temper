@@ -18,6 +18,7 @@ import {
   renderWorkflowTemplate
 } from '../../src/standards.js';
 import { validateConfig } from '../../src/schema.js';
+import { rulesetsMatch } from '../../src/rulesets.js';
 
 const REPO_CONFIG = yaml.load(fs.readFileSync(path.join(__dirname, '..', '..', 'config.yml'), 'utf8'));
 const ADMIN = { actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: 'always' };
@@ -47,7 +48,7 @@ function compliantSnapshot(name = 'good') {
     rules: [{ type: 'deletion' }, { type: 'non_fast_forward' }, { type: 'required_signatures' },
       { type: 'pull_request', parameters: {} },
       { type: 'required_status_checks', parameters: { strict_required_status_checks_policy: false,
-        required_status_checks: [{ context: 'build' }, { context: 'hostname-scan' }] } }],
+        required_status_checks: [{ context: 'build' }, { context: 'hostname-scan', integration_id: 15368 }] } }],
     bypass_actors: []
   };
   return {
@@ -110,6 +111,16 @@ describe('config.yml standards', () => {
       expect(validateConfig(cfg).valid).toBe(true);
     });
 
+    it('checks_app_id must be a positive integer', () => {
+      const cfg = structuredClone(REPO_CONFIG);
+      expect(cfg.standards.checks_app_id).toBe(15368);
+      expect(validateConfig(cfg).valid).toBe(true);
+      for (const bad of ['15368', 0, -1, 1.5]) {
+        cfg.standards.checks_app_id = bad;
+        expect(validateConfig(cfg).errors.join()).toMatch(/checks_app_id must be a positive integer/);
+      }
+    });
+
     it('rejects malformed blocks', () => {
       expect(validateStandards({ standards: 'yes' })).toEqual(['standards must be an object']);
       expect(validateStandards({ standards: { enabled: false, merge_queue: { repos: 'x' } } })).toEqual([]);
@@ -144,7 +155,8 @@ describe('evaluateRepo', () => {
 
     snap.rulesets.items[0].bypass_actors = [ADMIN];
     const ev = evaluateRepo(snap, std());
-    expect(drifted(ev)).toEqual(['no_bypass', 'required_checks']);
+    // A bypassable ruleset binds no one, so its check binding does not count either.
+    expect(drifted(ev)).toEqual(['check_source', 'no_bypass', 'required_checks']);
     expect(ev.findings.find((f) => f.rule === 'no_bypass').actual).toMatch(/RepositoryRole:5\/always/);
     snap.rulesets.items[0].bypass_actors = [];
 
@@ -359,7 +371,9 @@ describe('enforceStandards', () => {
     expect(created.map((r) => r.name)).toEqual([
       'temper-default-branch-protection', 'temper-release-tags-immutable', 'temper-release-tags-create']);
     const checks = created[0].rules.find((r) => r.type === 'required_status_checks');
-    expect(checks.parameters.required_status_checks).toEqual([{ context: 'build' }, { context: 'hostname-scan' }]);
+    // hostname-scan is a required workflow temper names: bound to Actions;
+    // build was carried over unbound and stays that way.
+    expect(checks.parameters.required_status_checks).toEqual([{ context: 'build' }, { context: 'hostname-scan', integration_id: 15368 }]);
     expect(actions).toEqual(expect.arrayContaining(['classic protection: enforce_admins on']));
   });
 
@@ -456,5 +470,92 @@ describe('snapshots', () => {
     const fromDisk = loadSnapshotDir(repoDir);
     expect(evaluateRepo(fromDisk, std())).toEqual(evaluateRepo(live, std()));
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+// temper#100: a single required context ("required / verdict") is the whole
+// gate, so a check temper names must come from GitHub Actions, not from any
+// app that posts a status under that name.
+describe('required checks are bound to the app that reports them', () => {
+  const bound = (rs) => rs.rules.find((r) => r.type === 'required_status_checks').parameters.required_status_checks;
+
+  it('every check from standards.repos.<repo>.required_checks is bound to Actions', () => {
+    const s = std({ repos: { r: { required_checks: ['required / verdict', 'baseline / guard'] } } });
+    const st = deriveState(compliantSnapshot('r'));
+    const checks = bound(buildManagedRuleset(REPO_CONFIG.branch_protection.default, st, s));
+    expect(checks.filter((c) => c.context !== 'hostname-scan')).toEqual([
+      { context: 'required / verdict', integration_id: 15368 },
+      { context: 'baseline / guard', integration_id: 15368 }
+    ]);
+    expect(checks.every((c) => c.integration_id === 15368)).toBe(true);
+  });
+
+  it('a carried-over context keeps its app (legacy app_id or ruleset integration_id)', () => {
+    const snap = compliantSnapshot('r');
+    snap.protection.body.required_status_checks.checks = [{ context: 'build', app_id: 4242 }];
+    let checks = bound(buildManagedRuleset(REPO_CONFIG.branch_protection.default, deriveState(snap), std()));
+    expect(checks).toContainEqual({ context: 'build', integration_id: 4242 });
+
+    const snap2 = compliantSnapshot('r');
+    snap2.rulesets.items[0].rules[4].parameters.required_status_checks[0] = { context: 'build', integration_id: 777 };
+    snap2.branchRules.body[4].parameters.required_status_checks[0] = { context: 'build', integration_id: 777 };
+    checks = bound(buildManagedRuleset(REPO_CONFIG.branch_protection.default, deriveState(snap2), std()));
+    expect(checks).toContainEqual({ context: 'build', integration_id: 777 });
+  });
+
+  it('a named context bound to another app is rebound to Actions and reported until then', () => {
+    const snap = compliantSnapshot('r');
+    for (const rules of [snap.rulesets.items[0].rules, snap.branchRules.body]) {
+      rules[4].parameters.required_status_checks[1] = { context: 'hostname-scan', integration_id: 4242 };
+    }
+    const checks = bound(buildManagedRuleset(REPO_CONFIG.branch_protection.default, deriveState(snap), std()));
+    expect(checks).toContainEqual({ context: 'hostname-scan', integration_id: 15368 });
+    expect(evaluateRepo(snap, std()).findings.find((f) => f.rule === 'check_source').drift).toBe(true);
+  });
+
+  it('a binding only in a bypassable ruleset does not count as bound', () => {
+    const snap = compliantSnapshot('r');
+    snap.rulesets.items[0].bypass_actors = [ADMIN];
+    expect(evaluateRepo(snap, std()).findings.find((f) => f.rule === 'check_source').drift).toBe(true);
+  });
+
+  it('a context named like an Object.prototype key is not confused with a binding', () => {
+    const snap = compliantSnapshot('r');
+    for (const rules of [snap.rulesets.items[0].rules, snap.branchRules.body]) {
+      rules[4].parameters.required_status_checks.push({ context: '__proto__' }, { context: 'constructor' });
+    }
+    const checks = bound(buildManagedRuleset(REPO_CONFIG.branch_protection.default, deriveState(snap), std()));
+    expect(checks).toContainEqual({ context: '__proto__' });
+    expect(checks).toContainEqual({ context: 'constructor' });
+  });
+
+  it('a context carried over unbound stays unbound (temper cannot know its app)', () => {
+    const checks = bound(buildManagedRuleset(REPO_CONFIG.branch_protection.default, deriveState(compliantSnapshot('r')), std()));
+    expect(checks).toContainEqual({ context: 'build' });
+  });
+
+  it('check_source: positive control clean; a named check accepted from any app is drift', () => {
+    const clean = evaluateRepo(compliantSnapshot('r'), std()).findings.find((f) => f.rule === 'check_source');
+    expect(clean.drift).toBe(false);
+    const snap = compliantSnapshot('r');
+    for (const rules of [snap.rulesets.items[0].rules, snap.branchRules.body]) {
+      rules[4].parameters.required_status_checks[1] = { context: 'hostname-scan' };
+    }
+    const f = evaluateRepo(snap, std()).findings.find((x) => x.rule === 'check_source');
+    expect(f).toMatchObject({ drift: true, fix: 'auto' });
+    expect(f.actual).toContain('hostname-scan');
+  });
+
+  it('a bound ruleset matches what temper builds, so a sync does not re-PUT it', () => {
+    const snap = compliantSnapshot('r');
+    const desired = buildManagedRuleset(REPO_CONFIG.branch_protection.default, deriveState(snap), std());
+    // The fixture's pull_request rule carries no parameters; give it the ones
+    // temper sets, so only the status-check bindings are under test.
+    const actual = structuredClone(snap.rulesets.items[0]);
+    actual.rules[3].parameters = desired.rules.find((r) => r.type === 'pull_request').parameters;
+    expect(rulesetsMatch(actual, desired)).toBe(true);
+    // Negative control: the same ruleset without the binding is drift.
+    actual.rules[4].parameters.required_status_checks[1] = { context: 'hostname-scan' };
+    expect(rulesetsMatch(actual, desired)).toBe(false);
   });
 });

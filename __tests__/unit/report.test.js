@@ -53,7 +53,7 @@ function compliantSnapshot(name = 'good') {
     rules: [{ type: 'deletion' }, { type: 'non_fast_forward' }, { type: 'required_signatures' },
       { type: 'pull_request', parameters: {} },
       { type: 'required_status_checks', parameters: { strict_required_status_checks_policy: false,
-        required_status_checks: [{ context: 'build' }, { context: 'hostname-scan' }] } }],
+        required_status_checks: [{ context: 'build' }, { context: 'hostname-scan', integration_id: 15368 }] } }],
     bypass_actors: []
   };
   const tags = [

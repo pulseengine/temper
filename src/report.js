@@ -36,6 +36,7 @@ const UNDECIDED = new Set(['unknown', 'error_api', 'error_permission']);
 // fold into one id (merge.settings); the check is ok only if all of them are.
 const RULE_MAP = {
   required_checks: ['protection.required_checks', 'critical'],
+  check_source: ['protection.required_checks', 'critical'],
   no_bypass: ['protection.enforce_admins', 'high'],
   required_signatures: ['protection.signed_commits', 'high'],
   pull_request: ['protection.required_reviews', 'high'],

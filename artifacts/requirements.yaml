@@ -481,3 +481,54 @@ artifacts:
         target: SC-009
       - type: derives-from
         target: SC-003
+
+  - id: REQ-044
+    type: requirement
+    title: A required check temper names SHALL be bound to the app that reports it, and a sync SHALL keep the binding of a check it only carries over
+    status: implemented
+    description: >
+      temper#100. Checks from standards.repos.<repo>.required_checks and
+      required workflows are bound to GitHub Actions (standards.checks_app_id,
+      default 15368), so no other installed app can post a passing status
+      under that name, replacing any other app's binding. That matters once
+      a repo requires one context ("required / verdict", jig). For a context
+      only carried over, a binding already on the repo (classic app_id or
+      ruleset integration_id) is kept instead of being stripped, and an
+      unbound one stays unbound. The plan
+      reports a named but unbound check as check_source drift.
+    fields:
+      priority: must
+      category: functional
+      upstream-ref: "pulseengine/temper#100"
+    links:
+      - type: derives-from
+        target: SC-009
+      - type: derives-from
+        target: SC-002
+
+  - id: DD-005
+    type: design-decision
+    title: Bind only the checks temper names; carry every existing binding; leave carried-over unbound checks unbound
+    status: implemented
+    fields:
+      decision: >
+        intendedChecks binds a context to standards.checks_app_id whenever
+        temper named it (repos.<repo>.required_checks or a required
+        workflow), replacing another app's binding. A context only carried
+        over keeps its existing binding, or a name-only entry. Drift counts
+        only bindings that bind admins (classic with enforce_admins, rulesets
+        without bypass).
+      rationale: >
+        A check temper names is one temper knows is a workflow job, so
+        Actions is its source. A carried-over context may come from another
+        app (a coverage bot, smithy's runners report as Actions too, but a
+        third-party status would not), and binding it to the wrong app makes
+        the repo un-mergeable. Stripping an existing binding on sync would
+        weaken a stricter setting.
+      alternatives: >
+        Bind every context to Actions (breaks repos that require a
+        non-Actions status); look up each context's app from recent check
+        runs (an API call per repo per sync, and a fresh repo has none).
+    links:
+      - type: satisfies
+        target: REQ-044
