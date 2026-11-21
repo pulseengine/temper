@@ -67,6 +67,8 @@ export function getStandards(config = {}) {
     },
     required_workflows: s.required_workflows || [],
     repos: s.repos || {},
+    // The app a check temper names itself must come from (temper#100).
+    checks_app_id: Number.isInteger(s.checks_app_id) ? s.checks_app_id : GITHUB_ACTIONS_APP_ID,
     managed_ruleset_name: config?.rulesets?.name || TEMPER_RULESET_NAME
   };
 }
@@ -179,6 +181,9 @@ export function loadSnapshotDir(dir, owner = 'pulseengine') {
 
 const uniq = (xs) => [...new Set(xs)];
 
+/** GitHub Actions' app id: the integration a workflow job's check run comes from. */
+export const GITHUB_ACTIONS_APP_ID = 15368;
+
 function globToRegExp(glob) {
   const esc = (part) => part.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*');
   return new RegExp('^' + glob.split('**').map(esc).join('.*') + '$');
@@ -221,11 +226,20 @@ export function deriveState(snap) {
     }));
   const bypassIds = new Set(rulesetBypass.map((b) => b.id));
 
+  // The app each required context is already bound to, so a sync keeps it.
+  const contextApps = {};
+  for (const c of prot?.required_status_checks?.checks || []) {
+    if (Number.isInteger(c.app_id) && c.app_id > 0) contextApps[c.context] = c.app_id;
+  }
   const rulesetContexts = [];
   const bindingRulesetContexts = [];
   let rulesetStrict = false;
   for (const r of rules.filter((x) => x.type === 'required_status_checks')) {
-    const ctxs = (r.parameters?.required_status_checks || []).map((c) => c.context);
+    const checks = r.parameters?.required_status_checks || [];
+    for (const c of checks) {
+      if (Number.isInteger(c.integration_id) && c.integration_id > 0) contextApps[c.context] ??= c.integration_id;
+    }
+    const ctxs = checks.map((c) => c.context);
     rulesetContexts.push(...ctxs);
     if (!bypassIds.has(r.ruleset_id)) bindingRulesetContexts.push(...ctxs);
     if (r.parameters?.strict_required_status_checks_policy) rulesetStrict = true;
@@ -277,6 +291,7 @@ export function deriveState(snap) {
     rulesetContexts: uniq(rulesetContexts),
     bindingContexts,
     allContexts: uniq([...legacyContexts, ...rulesetContexts]),
+    contextApps,
     rulesetStrict,
     rulesetBypass,
     inertRulesets,
@@ -385,6 +400,13 @@ export function evaluateRepo(snap, std) {
       contexts.length === 0 || st.bindingContexts.length < contexts.length,
       contexts.length === 0 ? 'owner' : 'auto',
       contexts.length === 0 ? 'no required checks to carry over: owner must name them (standards.repos.<repo>.required_checks)' : ''));
+    // A check temper names but GitHub accepts from any app (temper#100).
+    const unbound = intendedChecks(st, std)
+      .filter((c) => c.integration_id && st.contextApps?.[c.context] !== c.integration_id)
+      .map((c) => c.context);
+    f.push(finding('check_source', `named checks bound to app ${std.checks_app_id}`,
+      unbound.length ? `accepted from any app: ${unbound.join(', ')}` : 'bound',
+      unbound.length > 0, 'auto'));
   }
 
   if (std.no_bypass) {
@@ -492,8 +514,27 @@ export function buildTagCreateRuleset(std) {
   };
 }
 
+/**
+ * Required checks as ruleset entries. A context already bound to an app keeps
+ * that app; one temper names itself (standards.repos.<repo>.required_checks or
+ * a required workflow) is bound to std.checks_app_id, so no other app can post
+ * a passing status under that name. A context carried over unbound stays
+ * unbound: temper cannot know which app reports it.
+ */
+export function intendedChecks(state, std) {
+  const override = std.repos?.[state.name]?.required_checks;
+  const named = new Set([
+    ...(Array.isArray(override) ? override : []),
+    ...std.required_workflows.filter((w) => state.workflowFiles.includes(w.path)).map((w) => w.context)
+  ]);
+  return intendedContexts(state, std).map((context) => {
+    const app = state.contextApps?.[context] ?? (named.has(context) ? std.checks_app_id : undefined);
+    return app ? { context, integration_id: app } : { context };
+  });
+}
+
 export function buildManagedRuleset(protectionConfig, state, std) {
-  const contexts = intendedContexts(state, std);
+  const contexts = intendedChecks(state, std);
   const strict = state.mergeQueue ? std.queue_strict : state.legacyStrict || state.rulesetStrict;
   return translateBranchProtectionToRuleset(
     {

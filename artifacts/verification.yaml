@@ -113,3 +113,22 @@ artifacts:
     links:
       - type: verifies
         target: REQ-031
+
+  - id: VER-029
+    type: verification
+    title: Required-check binding tests with negative controls
+    status: implemented
+    description: >
+      Override checks come out bound to 15368; an existing legacy app_id or
+      ruleset integration_id is kept; an unbound carried-over context stays
+      unbound; check_source is clean on the compliant fixture and drift when
+      a named check is unbound; a bound ruleset matches what temper builds
+      (no re-PUT) and the same ruleset unbound does not. Disabling the
+      binding fails 3 of these tests.
+    fields:
+      method: automated-test
+      test-name: "required checks are bound to the app that reports them"
+      test-location: __tests__/unit/standards.test.js
+    links:
+      - type: verifies
+        target: REQ-044

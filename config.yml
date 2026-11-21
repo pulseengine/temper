@@ -91,6 +91,11 @@ standards:
   # the contexts a repo already requires into its managed ruleset (where they
   # bind admins), or uses standards.repos.<repo>.required_checks.
   require_status_checks: true
+  # Checks temper names (repos.<repo>.required_checks, required_workflows) are
+  # bound to this app, so no other installed app can post a passing status
+  # under that name (temper#100). 15368 is GitHub Actions. Bindings a repo
+  # already has are kept.
+  checks_app_id: 15368
   require_pull_request: true
   merge_queue:
     # Intended queue repos. Audit-only: creating a queue is a per-repo rollout
