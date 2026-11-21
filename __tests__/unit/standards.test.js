@@ -455,6 +455,38 @@ describe('snapshots', () => {
     expect(snap.rulesets.items).toEqual([{ id: 1, name: 'x', bypass_actors: [] }]);
   });
 
+  it('fetchSnapshot reads same-org sha-pinned reusable workflows at the pin, and nothing else', async () => {
+    const sha = 'd'.repeat(40);
+    const ci = `on: [pull_request]
+jobs:
+  required: { uses: o/shared/.github/workflows/required.yml@${sha} }
+  tagged: { uses: o/shared/.github/workflows/required.yml@v2 }
+  foreign: { uses: x/shared/.github/workflows/required.yml@${sha} }
+`;
+    const b64 = (t) => Buffer.from(t).toString('base64');
+    const calls = [];
+    const kit = {
+      request: jest.fn().mockImplementation((route, p) => {
+        if (route === 'GET /repos/{owner}/{repo}') return Promise.resolve({ status: 200, data: { default_branch: 'main' } });
+        if (route.endsWith('{path}')) {
+          calls.push(`${p.owner}/${p.repo}/${p.path}@${p.ref}`);
+          if (p.path === '.github/workflows') return Promise.resolve({ status: 200, data: [{ name: 'ci.yml', path: '.github/workflows/ci.yml' }] });
+          if (p.path === '.github/workflows/ci.yml' && p.repo === 'r') return Promise.resolve({ status: 200, data: { content: b64(ci) } });
+          if (p.repo === 'shared') return Promise.resolve({ status: 200, data: { content: b64('jobs: {}') } });
+          return Promise.reject(Object.assign(new Error('Not Found'), { status: 404 }));
+        }
+        return Promise.resolve({ status: 200, data: [] });
+      })
+    };
+    const snap = await fetchSnapshot(kit, 'o', 'r');
+    expect(calls.filter((c) => c.startsWith('o/shared') || c.startsWith('x/'))).toEqual([`o/shared/.github/workflows/required.yml@${sha}`]);
+    expect(snap.remoteWorkflows).toEqual([
+      { uses: `o/shared/.github/workflows/required.yml@${sha}`, text: 'jobs: {}' },
+      { uses: 'o/shared/.github/workflows/required.yml@v2', reason: 'ref "v2" is not a full commit sha, so it is not read' },
+      { uses: `x/shared/.github/workflows/required.yml@${sha}`, reason: 'another org (x) is not read' }
+    ]);
+  });
+
   it('loadSnapshotDir reads a sweep cache and evaluates like the live snapshot', () => {
     const live = compliantSnapshot('fromdisk');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'temper-snap-'));

@@ -24,7 +24,7 @@
  *   pull_request, merge_queue, merge_methods, auto_merge  supporting settings.
  */
 
-import { analyzeGateSkips, PROBE_CONTRACT } from './gate-skip.js';
+import { analyzeGateSkips, remoteReusableCalls, PROBE_CONTRACT } from './gate-skip.js';
 import fs from 'fs';
 import path from 'path';
 import { getLogger } from './logger.js';
@@ -84,6 +84,9 @@ async function getWithStatus(octokit, route, params) {
   }
 }
 
+/** Remote reusable workflows read per repository; more are reported unread. */
+const MAX_REMOTE_WORKFLOWS = 20;
+
 /** Fetch a repo's enforcement snapshot (read-only). */
 export async function fetchSnapshot(octokit, owner, name) {
   const repo = await getWithStatus(octokit, 'GET /repos/{owner}/{repo}', { owner, repo: name });
@@ -132,6 +135,22 @@ export async function fetchSnapshot(octokit, owner, name) {
       }
     }
   }
+  // Remote reusable workflows the default branch calls: read only those in
+  // this org pinned to a full commit sha, at that sha (temper#103). The rest
+  // keep their reason and surface as required_unmatched.
+  const remoteWorkflows = [];
+  for (const call of remoteReusableCalls(workflowTexts, owner).slice(0, MAX_REMOTE_WORKFLOWS)) {
+    if (!call.fetchable) {
+      remoteWorkflows.push({ uses: call.uses, reason: call.reason });
+      continue;
+    }
+    const file = await getWithStatus(octokit, 'GET /repos/{owner}/{repo}/contents/{path}', {
+      owner: call.owner, repo: call.repo, path: call.path, ref: call.ref
+    });
+    remoteWorkflows.push(file.status === 200 && typeof file.body?.content === 'string'
+      ? { uses: call.uses, text: Buffer.from(file.body.content, 'base64').toString('utf8') }
+      : { uses: call.uses, reason: `could not be read at the pin (status ${file.status})` });
+  }
   const probe = await getWithStatus(octokit, 'GET /repos/{owner}/{repo}/contents/{path}', {
     owner, repo: name, path: PROBE_CONTRACT, ref: branch
   });
@@ -144,6 +163,7 @@ export async function fetchSnapshot(octokit, owner, name) {
     rulesets: { status: list.status, body: list.status === 200 ? undefined : list.body, items },
     workflows,
     workflowTexts,
+    remoteWorkflows,
     // The contract's text (null when absent): which outputs it probes or exempts.
     probeContract: probe.status === 200 && typeof probe.body?.content === 'string'
       ? Buffer.from(probe.body.content, 'base64').toString('utf8')
@@ -477,6 +497,7 @@ export function evaluateRepo(snap, std) {
     const hits = analyzeGateSkips(snap.workflowTexts, st.allContexts, {
       probeContract: snap.probeContract ?? null,
       publicRepo: !st.private,
+      remoteWorkflows: snap.remoteWorkflows || [],
       actionsContexts: [...(st.contextApps || new Map())].filter(([, app]) => app === GITHUB_ACTIONS_APP_ID).map(([c]) => c)
     });
     f.push(finding('gate_skip', 'skipped required checks fail closed',

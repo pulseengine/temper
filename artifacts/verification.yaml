@@ -156,3 +156,29 @@ artifacts:
     links:
       - type: verifies
         target: REQ-031
+
+  - id: VER-031
+    type: verification
+    title: gate-skip reads same-org sha-pinned remote reusable workflows, and only those
+    status: implemented
+    description: >
+      temper#103. fetchSnapshot reads a remote reusable workflow only when it
+      is in the repository's org and pinned to a full lowercase commit sha,
+      at that sha; a tag or branch ref, another org, or a failed read keeps
+      a reason that required_unmatched names. Remote texts are keyed by the
+      exact uses string and only expand their callers. Positive control: a
+      pinned "required / verdict" resolves clean. Planted: a detector-skipped
+      job accepted through the remote call is flagged; another sha, a tag
+      ref, a 404 and a renamed called job each stay required_unmatched with
+      their reason. Mutations: no remote expansion fails 2, no sha check
+      fails 3, no org check fails 2, remote texts analysed as repository
+      workflows fails 1. Live: jig's required.yml read through the contents
+      API at 4a22275 resolves clean; the same call at @main is unmatched
+      with "not a full commit sha".
+    fields:
+      method: automated-test
+      test-name: "remote reusable workflows (temper#103)"
+      test-location: __tests__/unit/gate-skip.test.js
+    links:
+      - type: verifies
+        target: REQ-031

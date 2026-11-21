@@ -31,8 +31,9 @@
  *                              action ref that is not a full commit sha; in
  *                              a public repo, also a self-hosted runs-on
  *                              that does not route fork PRs elsewhere
- * A job calling a local reusable workflow is expanded into its called jobs,
- * named "<caller> / <called>", before the rules run (temper#100).
+ * A job calling a local reusable workflow, or a same-org one pinned to a
+ * full commit sha (read at that sha, temper#103), is expanded into its
+ * called jobs, named "<caller> / <called>", before the rules run (temper#100).
  * Whether a detector itself fails closed is the behavioural probe's job
  * (.github/actions/gate-probe): source text cannot show it.
  */
@@ -59,21 +60,55 @@ function contextMatcher(id, job) {
 }
 
 const LOCAL_REUSABLE = /^\.\/(\.github\/workflows\/[^@\s]+\.ya?ml)$/;
+const REMOTE_REUSABLE = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/(\.github\/workflows\/[^@\s]+\.ya?ml)@(\S+)$/;
+const FULL_SHA = /^[0-9a-f]{40}$/;
+
+/**
+ * Every remote reusable-workflow call in these workflow files, deduplicated
+ * by its `uses` string. `fetchable` is true only for a call into `owner`'s
+ * own org pinned to a full commit sha: that text cannot change under the
+ * pin. Anything else gets a `reason` and is not read.
+ */
+export function remoteReusableCalls(files, owner) {
+  const calls = new Map();
+  for (const f of files) {
+    let doc;
+    try {
+      doc = yaml.load(f.text);
+    } catch {
+      continue;
+    }
+    if (!doc?.jobs || typeof doc.jobs !== 'object') continue;
+    for (const job of Object.values(doc.jobs)) {
+      const uses = String(job?.uses ?? '');
+      const m = REMOTE_REUSABLE.exec(uses);
+      if (!m || calls.has(uses)) continue;
+      const [, o, repo, path, ref] = m;
+      const reason = o.toLowerCase() !== String(owner).toLowerCase() ? `another org (${o}) is not read`
+        : !FULL_SHA.test(ref) ? `ref "${ref}" is not a full commit sha, so it is not read`
+          : undefined;
+      calls.set(uses, { uses, owner: o, repo, path, ref, fetchable: !reason, ...(reason ? { reason } : {}) });
+    }
+  }
+  return [...calls.values()];
+}
 const both = (a, b) => (a && b ? `(${a}) && (${b})` : a || b || undefined);
 
 /**
  * A job that calls a local reusable workflow reports one check run per called
  * job, named "<caller> / <called>". Each becomes a job of the caller's
  * workflow that runs under the caller's `needs` and both `if:`s, with both
- * texts, so the rules below see what decides it. A remote reusable workflow
- * cannot be read here; its contexts surface as required_unmatched.
+ * texts, so the rules below see what decides it. A remote workflow is
+ * expanded only from `remote` (parsed texts keyed by the exact `uses`);
+ * an unread one surfaces as required_unmatched.
  */
-function expandReusable(out) {
+function expandReusable(out, remote = new Map()) {
   const byPath = new Map(out.map((w) => [w.path, w]));
   for (const wf of out) {
     for (const [id, { job }] of Object.entries(wf.jobs)) {
-      const m = LOCAL_REUSABLE.exec(String(job.uses ?? ''));
-      const called = m && byPath.get(m[1]);
+      const uses = String(job.uses ?? '');
+      const m = LOCAL_REUSABLE.exec(uses);
+      const called = m ? byPath.get(m[1]) : remote.get(uses);
       if (!called || called === wf) continue;
       const callerName = typeof job.name === 'string' ? job.name : id;
       for (const [cid, { job: cjob }] of Object.entries(called.jobs)) {
@@ -87,8 +122,19 @@ function expandReusable(out) {
   return out;
 }
 
-/** Parse workflows into { path, doc, on, jobs: {id: {job, matches}} }; unparsable files are skipped. */
-export function parseWorkflows(files) {
+/**
+ * Parse workflows into { path, doc, on, jobs: {id: {job, matches}} };
+ * unparsable files are skipped. `remoteFiles` ({uses, text}) are the texts
+ * of remote reusable workflows: they only expand their callers and are not
+ * analysed as workflows of this repository.
+ */
+export function parseWorkflows(files, remoteFiles = []) {
+  const remote = new Map(parseEach(remoteFiles.filter((r) => typeof r.text === 'string').map((r) => ({ path: r.uses, text: r.text })))
+    .map((w) => [w.path, w]));
+  return expandReusable(parseEach(files), remote);
+}
+
+function parseEach(files) {
   const out = [];
   for (const f of files) {
     let doc;
@@ -104,7 +150,7 @@ export function parseWorkflows(files) {
     }
     out.push({ path: f.path, doc, on: triggers(doc), jobs });
   }
-  return expandReusable(out);
+  return out;
 }
 
 const jobText = (job) => JSON.stringify(job);
@@ -145,12 +191,14 @@ export function readProbeContract(text) {
 /**
  * @param {{path: string, text: string}[]} files - workflow files
  * @param {string[]} requiredContexts - the default branch's required checks
- * @param {{probeContract?: boolean}} [opts]
+ * @param {{probeContract?: boolean, publicRepo?: boolean, actionsContexts?: string[],
+ *   remoteWorkflows?: {uses: string, text?: string, reason?: string}[]}} [opts]
+ *   remoteWorkflows: remote reusable workflows, read (text) or not (reason)
  * @returns {{rule: string, workflow: string, job?: string, detail: string}[]}
  */
-export function analyzeGateSkips(files, requiredContexts, { probeContract = false, publicRepo = false, actionsContexts = [] } = {}) {
+export function analyzeGateSkips(files, requiredContexts, { probeContract = false, publicRepo = false, actionsContexts = [], remoteWorkflows = [] } = {}) {
   const contract = readProbeContract(probeContract);
-  const wfs = parseWorkflows(files);
+  const wfs = parseWorkflows(files, remoteWorkflows);
   const required = new Set(requiredContexts);
   const hits = [];
   const pairs = new Set();
@@ -254,11 +302,22 @@ export function analyzeGateSkips(files, requiredContexts, { probeContract = fals
   // (reusable-shaped, or bound to GitHub Actions); another app's status is
   // not expected to match a job.
   const actions = new Set(actionsContexts);
+  const why = new Map(remoteWorkflows.map((r) => [r.uses, r.reason ?? (typeof r.text === 'string' ? undefined : 'could not be read')]));
   for (const c of required) {
     if (!c.includes(' / ') && !actions.has(c)) continue;
     if (wfs.some((w) => Object.values(w.jobs).some((j) => j.matches(c)))) continue;
+    // Name the remote call whose caller matches "<caller> / ...", and why it was not expanded.
+    const caller = c.split(' / ')[0];
+    let reason = 'a remote reusable workflow is read only when it is in this org and pinned to a full commit sha';
+    for (const w of wfs) {
+      for (const [id, { job }] of Object.entries(w.jobs)) {
+        const name = typeof job.name === 'string' ? job.name : id;
+        if (name !== caller || !REMOTE_REUSABLE.test(String(job.uses ?? ''))) continue;
+        reason = `${job.uses}: ${!why.has(job.uses) ? 'not read' : why.get(job.uses) ?? 'read at the pin, but none of its jobs produces this name'}`;
+      }
+    }
     hits.push({ rule: 'required_unmatched', workflow: '(none)',
-      detail: `no job in the default branch's workflows produces "${c}" (a remote reusable workflow is not read)` });
+      detail: `no job in the default branch's workflows produces "${c}" (${reason})` });
   }
   return hits;
 }
