@@ -23,6 +23,61 @@ jobs:
       - run: npm test -- --coverage
       - name: Security audit
         run: npm audit --audit-level=moderate
+      # Lockfiles: every manifest has a committed lock, every lock is
+      # audited, and the audits are found by glob, never by a fixed list
+      # (a nested lock was missed elsewhere in the org, 2026-11-20).
+      - name: Every manifest has a committed lockfile
+        run: |
+          set -euo pipefail
+          check() {
+            local bad=0 m l
+            for m in $(git ls-files -- ':(glob)**/Cargo.toml'); do
+              l="$(dirname "$m")/Cargo.lock"
+              git ls-files --error-unmatch -- "$l" >/dev/null 2>&1 || { echo "::error file=$m::$l is not committed"; bad=1; }
+            done
+            for l in package-lock.json pnpm-lock.yaml MODULE.bazel.lock; do
+              git ls-files --error-unmatch -- "$l" >/dev/null 2>&1 || { echo "::error::$l is not committed"; bad=1; }
+            done
+            return $bad
+          }
+          check
+          # Planted control: the same check on an index without one lock must fail.
+          export GIT_INDEX_FILE="$RUNNER_TEMP/planted.index"
+          cp "$(git rev-parse --git-dir)/index" "$GIT_INDEX_FILE"
+          git rm -q --cached tools/self-update/Cargo.lock
+          if check >/dev/null; then echo "planted missing lock was not caught"; exit 1; fi
+      - name: pnpm-lock.yaml (Bazel's npm lock) matches package.json and is audited
+        run: |
+          set -euo pipefail
+          npx --yes pnpm@9.15.9 install --frozen-lockfile --lockfile-only --ignore-scripts
+          git diff --exit-code -- pnpm-lock.yaml
+          npx --yes pnpm@9.15.9 audit --audit-level=moderate
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-deny@0.20.2
+      - name: cargo-deny advisories on every Cargo.lock
+        run: |
+          set -euo pipefail
+          n=0
+          for l in $(git ls-files -- ':(glob)**/Cargo.lock'); do
+            echo "== $l"
+            cargo deny --manifest-path "$(dirname "$l")/Cargo.toml" --locked check advisories
+            n=$((n + 1))
+          done
+          echo "audited $n Cargo.lock files"
+          test "$n" -ge 3
+          # Planted control: a crate locked to a version with a known
+          # advisory (time 0.1.43, RUSTSEC-2020-0071) must fail.
+          p="$RUNNER_TEMP/planted-crate"; mkdir -p "$p/src"
+          printf '[package]\nname = "planted"\nversion = "0.0.0"\nedition = "2021"\n[dependencies]\ntime = "=0.1.43"\n' > "$p/Cargo.toml"
+          echo 'fn main() {}' > "$p/src/main.rs"
+          cargo generate-lockfile --manifest-path "$p/Cargo.toml"
+          if cargo deny --manifest-path "$p/Cargo.toml" --locked check advisories; then
+            echo "planted advisory was not caught"; exit 1
+          fi
+      - name: tools/self-update builds from its lock
+        run: cargo build --locked --manifest-path tools/self-update/Cargo.toml
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -199,8 +254,10 @@ jobs:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}
           repository-cache: true
-      - run: bazel build //...
-      - run: bazel test //...
+      # error, not update: a stale MODULE.bazel.lock fails here instead of
+      # being rewritten on the runner.
+      - run: bazel build --lockfile_mode=error //...
+      - run: bazel test --lockfile_mode=error //...
 
   sbom:
     runs-on: ubuntu-latest
