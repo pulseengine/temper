@@ -155,7 +155,8 @@ describe('evaluateRepo', () => {
 
     snap.rulesets.items[0].bypass_actors = [ADMIN];
     const ev = evaluateRepo(snap, std());
-    expect(drifted(ev)).toEqual(['no_bypass', 'required_checks']);
+    // A bypassable ruleset binds no one, so its check binding does not count either.
+    expect(drifted(ev)).toEqual(['check_source', 'no_bypass', 'required_checks']);
     expect(ev.findings.find((f) => f.rule === 'no_bypass').actual).toMatch(/RepositoryRole:5\/always/);
     snap.rulesets.items[0].bypass_actors = [];
 
@@ -489,18 +490,43 @@ describe('required checks are bound to the app that reports them', () => {
     expect(checks.every((c) => c.integration_id === 15368)).toBe(true);
   });
 
-  it('keeps an app a repo already binds a context to (legacy app_id or ruleset integration_id)', () => {
+  it('a carried-over context keeps its app (legacy app_id or ruleset integration_id)', () => {
     const snap = compliantSnapshot('r');
     snap.protection.body.required_status_checks.checks = [{ context: 'build', app_id: 4242 }];
-    const s = std({ repos: { r: { required_checks: ['build', 'other'] } } });
-    let checks = bound(buildManagedRuleset(REPO_CONFIG.branch_protection.default, deriveState(snap), s));
-    expect(checks).toEqual(expect.arrayContaining([{ context: 'build', integration_id: 4242 }]));
+    let checks = bound(buildManagedRuleset(REPO_CONFIG.branch_protection.default, deriveState(snap), std()));
+    expect(checks).toContainEqual({ context: 'build', integration_id: 4242 });
 
     const snap2 = compliantSnapshot('r');
     snap2.rulesets.items[0].rules[4].parameters.required_status_checks[0] = { context: 'build', integration_id: 777 };
     snap2.branchRules.body[4].parameters.required_status_checks[0] = { context: 'build', integration_id: 777 };
     checks = bound(buildManagedRuleset(REPO_CONFIG.branch_protection.default, deriveState(snap2), std()));
-    expect(checks).toEqual(expect.arrayContaining([{ context: 'build', integration_id: 777 }]));
+    expect(checks).toContainEqual({ context: 'build', integration_id: 777 });
+  });
+
+  it('a named context bound to another app is rebound to Actions and reported until then', () => {
+    const snap = compliantSnapshot('r');
+    for (const rules of [snap.rulesets.items[0].rules, snap.branchRules.body]) {
+      rules[4].parameters.required_status_checks[1] = { context: 'hostname-scan', integration_id: 4242 };
+    }
+    const checks = bound(buildManagedRuleset(REPO_CONFIG.branch_protection.default, deriveState(snap), std()));
+    expect(checks).toContainEqual({ context: 'hostname-scan', integration_id: 15368 });
+    expect(evaluateRepo(snap, std()).findings.find((f) => f.rule === 'check_source').drift).toBe(true);
+  });
+
+  it('a binding only in a bypassable ruleset does not count as bound', () => {
+    const snap = compliantSnapshot('r');
+    snap.rulesets.items[0].bypass_actors = [ADMIN];
+    expect(evaluateRepo(snap, std()).findings.find((f) => f.rule === 'check_source').drift).toBe(true);
+  });
+
+  it('a context named like an Object.prototype key is not confused with a binding', () => {
+    const snap = compliantSnapshot('r');
+    for (const rules of [snap.rulesets.items[0].rules, snap.branchRules.body]) {
+      rules[4].parameters.required_status_checks.push({ context: '__proto__' }, { context: 'constructor' });
+    }
+    const checks = bound(buildManagedRuleset(REPO_CONFIG.branch_protection.default, deriveState(snap), std()));
+    expect(checks).toContainEqual({ context: '__proto__' });
+    expect(checks).toContainEqual({ context: 'constructor' });
   });
 
   it('a context carried over unbound stays unbound (temper cannot know its app)', () => {

@@ -226,10 +226,16 @@ export function deriveState(snap) {
     }));
   const bypassIds = new Set(rulesetBypass.map((b) => b.id));
 
-  // The app each required context is already bound to, so a sync keeps it.
-  const contextApps = {};
+  // The app each required context is bound to. contextApps: any source, so a
+  // sync carries a binding over. bindingApps: only sources that bind admins
+  // (classic with enforce_admins, rulesets without bypass), for drift.
+  const isApp = (x) => Number.isInteger(x) && x > 0;
+  const contextApps = new Map();
+  const bindingApps = new Map();
   for (const c of prot?.required_status_checks?.checks || []) {
-    if (Number.isInteger(c.app_id) && c.app_id > 0) contextApps[c.context] = c.app_id;
+    if (!isApp(c.app_id)) continue;
+    contextApps.set(c.context, c.app_id);
+    if (prot.enforce_admins?.enabled === true) bindingApps.set(c.context, c.app_id);
   }
   const rulesetContexts = [];
   const bindingRulesetContexts = [];
@@ -237,7 +243,9 @@ export function deriveState(snap) {
   for (const r of rules.filter((x) => x.type === 'required_status_checks')) {
     const checks = r.parameters?.required_status_checks || [];
     for (const c of checks) {
-      if (Number.isInteger(c.integration_id) && c.integration_id > 0) contextApps[c.context] ??= c.integration_id;
+      if (!isApp(c.integration_id)) continue;
+      if (!contextApps.has(c.context)) contextApps.set(c.context, c.integration_id);
+      if (!bypassIds.has(r.ruleset_id) && !bindingApps.has(c.context)) bindingApps.set(c.context, c.integration_id);
     }
     const ctxs = checks.map((c) => c.context);
     rulesetContexts.push(...ctxs);
@@ -292,6 +300,7 @@ export function deriveState(snap) {
     bindingContexts,
     allContexts: uniq([...legacyContexts, ...rulesetContexts]),
     contextApps,
+    bindingApps,
     rulesetStrict,
     rulesetBypass,
     inertRulesets,
@@ -402,7 +411,7 @@ export function evaluateRepo(snap, std) {
       contexts.length === 0 ? 'no required checks to carry over: owner must name them (standards.repos.<repo>.required_checks)' : ''));
     // A check temper names but GitHub accepts from any app (temper#100).
     const unbound = intendedChecks(st, std)
-      .filter((c) => c.integration_id && st.contextApps?.[c.context] !== c.integration_id)
+      .filter((c) => c.integration_id && st.bindingApps?.get(c.context) !== c.integration_id)
       .map((c) => c.context);
     f.push(finding('check_source', `named checks bound to app ${std.checks_app_id}`,
       unbound.length ? `accepted from any app: ${unbound.join(', ')}` : 'bound',
@@ -515,11 +524,11 @@ export function buildTagCreateRuleset(std) {
 }
 
 /**
- * Required checks as ruleset entries. A context already bound to an app keeps
- * that app; one temper names itself (standards.repos.<repo>.required_checks or
- * a required workflow) is bound to std.checks_app_id, so no other app can post
- * a passing status under that name. A context carried over unbound stays
- * unbound: temper cannot know which app reports it.
+ * Required checks as ruleset entries. A context temper names itself
+ * (standards.repos.<repo>.required_checks or a required workflow) is always
+ * bound to std.checks_app_id: temper knows it is a workflow job, so another
+ * app's binding is wrong, not stricter. A context only carried over keeps the
+ * app it is bound to, or stays unbound: temper cannot know which app reports it.
  */
 export function intendedChecks(state, std) {
   const override = std.repos?.[state.name]?.required_checks;
@@ -528,7 +537,7 @@ export function intendedChecks(state, std) {
     ...std.required_workflows.filter((w) => state.workflowFiles.includes(w.path)).map((w) => w.context)
   ]);
   return intendedContexts(state, std).map((context) => {
-    const app = state.contextApps?.[context] ?? (named.has(context) ? std.checks_app_id : undefined);
+    const app = named.has(context) ? std.checks_app_id : state.contextApps?.get(context);
     return app ? { context, integration_id: app } : { context };
   });
 }

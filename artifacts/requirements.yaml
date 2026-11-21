@@ -484,16 +484,17 @@ artifacts:
 
   - id: REQ-044
     type: requirement
-    title: A required check temper names SHALL be bound to the app that reports it, and a sync SHALL keep any binding a repo already has
+    title: A required check temper names SHALL be bound to the app that reports it, and a sync SHALL keep the binding of a check it only carries over
     status: implemented
     description: >
       temper#100. Checks from standards.repos.<repo>.required_checks and
       required workflows are bound to GitHub Actions (standards.checks_app_id,
       default 15368), so no other installed app can post a passing status
-      under that name. That matters once a repo requires one context
-      ("required / verdict", jig). A binding already on the repo (classic
-      app_id or ruleset integration_id) is carried over instead of being
-      stripped; a context carried over unbound stays unbound. The plan
+      under that name, replacing any other app's binding. That matters once
+      a repo requires one context ("required / verdict", jig). For a context
+      only carried over, a binding already on the repo (classic app_id or
+      ruleset integration_id) is kept instead of being stripped, and an
+      unbound one stays unbound. The plan
       reports a named but unbound check as check_source drift.
     fields:
       priority: must
@@ -511,10 +512,12 @@ artifacts:
     status: implemented
     fields:
       decision: >
-        intendedChecks binds a context to standards.checks_app_id only when
+        intendedChecks binds a context to standards.checks_app_id whenever
         temper named it (repos.<repo>.required_checks or a required
-        workflow). A binding the repo already has wins. Other carried-over
-        contexts keep a name-only entry.
+        workflow), replacing another app's binding. A context only carried
+        over keeps its existing binding, or a name-only entry. Drift counts
+        only bindings that bind admins (classic with enforce_admins, rulesets
+        without bypass).
       rationale: >
         A check temper names is one temper knows is a workflow job, so
         Actions is its source. A carried-over context may come from another
