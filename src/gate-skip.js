@@ -21,12 +21,18 @@
  *   output_unprobed            a detector output that gates a required check
  *                              is neither in a detector's `outputs` nor in
  *                              its `exempt_outputs` (with a reason)
+ *   required_unmatched         a required context that should come from a
+ *                              workflow (reusable-shaped "<caller> / <called>",
+ *                              or bound to GitHub Actions) matches no job, so
+ *                              nothing above was evaluated for it
  *   probe_workflow_skippable   the workflow that runs the gate-probe action
  *                              can be skipped or weakened: a pull_request
  *                              filter, an `if:`, pull_request_target, or an
  *                              action ref that is not a full commit sha; in
  *                              a public repo, also a self-hosted runs-on
  *                              that does not route fork PRs elsewhere
+ * A job calling a local reusable workflow is expanded into its called jobs,
+ * named "<caller> / <called>", before the rules run (temper#100).
  * Whether a detector itself fails closed is the behavioural probe's job
  * (.github/actions/gate-probe): source text cannot show it.
  */
@@ -52,6 +58,35 @@ function contextMatcher(id, job) {
   return (c) => re.test(c);
 }
 
+const LOCAL_REUSABLE = /^\.\/(\.github\/workflows\/[^@\s]+\.ya?ml)$/;
+const both = (a, b) => (a && b ? `(${a}) && (${b})` : a || b || undefined);
+
+/**
+ * A job that calls a local reusable workflow reports one check run per called
+ * job, named "<caller> / <called>". Each becomes a job of the caller's
+ * workflow that runs under the caller's `needs` and both `if:`s, with both
+ * texts, so the rules below see what decides it. A remote reusable workflow
+ * cannot be read here; its contexts surface as required_unmatched.
+ */
+function expandReusable(out) {
+  const byPath = new Map(out.map((w) => [w.path, w]));
+  for (const wf of out) {
+    for (const [id, { job }] of Object.entries(wf.jobs)) {
+      const m = LOCAL_REUSABLE.exec(String(job.uses ?? ''));
+      const called = m && byPath.get(m[1]);
+      if (!called || called === wf) continue;
+      const callerName = typeof job.name === 'string' ? job.name : id;
+      for (const [cid, { job: cjob }] of Object.entries(called.jobs)) {
+        if (cjob.uses) continue; // nested reusable calls: not expanded
+        const name = `${callerName} / ${typeof cjob.name === 'string' ? cjob.name : cid}`;
+        const synth = { ...cjob, name, needs: job.needs, if: both(job.if, cjob.if), caller: job };
+        wf.jobs[`${id}/${cid}`] = { job: synth, matches: contextMatcher(cid, synth), reusable: called.path };
+      }
+    }
+  }
+  return out;
+}
+
 /** Parse workflows into { path, doc, on, jobs: {id: {job, matches}} }; unparsable files are skipped. */
 export function parseWorkflows(files) {
   const out = [];
@@ -69,7 +104,7 @@ export function parseWorkflows(files) {
     }
     out.push({ path: f.path, doc, on: triggers(doc), jobs });
   }
-  return out;
+  return expandReusable(out);
 }
 
 const jobText = (job) => JSON.stringify(job);
@@ -113,7 +148,7 @@ export function readProbeContract(text) {
  * @param {{probeContract?: boolean}} [opts]
  * @returns {{rule: string, workflow: string, job?: string, detail: string}[]}
  */
-export function analyzeGateSkips(files, requiredContexts, { probeContract = false, publicRepo = false } = {}) {
+export function analyzeGateSkips(files, requiredContexts, { probeContract = false, publicRepo = false, actionsContexts = [] } = {}) {
   const contract = readProbeContract(probeContract);
   const wfs = parseWorkflows(files);
   const required = new Set(requiredContexts);
@@ -213,6 +248,18 @@ export function analyzeGateSkips(files, requiredContexts, { probeContract = fals
     }
   }
   hits.push(...probeWorkflowHits(wfs, { publicRepo }));
+
+  // A required context no job produces was not analysed at all: say so
+  // rather than return nothing. Scoped to contexts a workflow should produce
+  // (reusable-shaped, or bound to GitHub Actions); another app's status is
+  // not expected to match a job.
+  const actions = new Set(actionsContexts);
+  for (const c of required) {
+    if (!c.includes(' / ') && !actions.has(c)) continue;
+    if (wfs.some((w) => Object.values(w.jobs).some((j) => j.matches(c)))) continue;
+    hits.push({ rule: 'required_unmatched', workflow: '(none)',
+      detail: `no job in the default branch's workflows produces "${c}" (a remote reusable workflow is not read)` });
+  }
   return hits;
 }
 

@@ -100,7 +100,7 @@ standards:
   merge_queue:
     # Intended queue repos. Audit-only: creating a queue is a per-repo rollout
     # (every required workflow needs a merge_group trigger first).
-    repos: [pulseengine.eu, rivet, relay, spar, loom, varve, gale, meld]
+    repos: [pulseengine.eu, rivet, relay, spar, loom, varve, gale, meld, jig]
     # The queue re-tests against the latest main; strict only adds
     # update-branch pressure and ~N^2/2 CI runs.
     strict_up_to_date: false
@@ -134,6 +134,10 @@ standards:
       required_checks: [test, lint, ci]   # temper#76
     .github:
       required_checks: [ci, lint, test]
+    # jig's verdict needs rivet, lint, test and the baseline and fails closed;
+    # guard is the baseline's own check (jig main run 44883260023, 4a22275).
+    jig:
+      required_checks: ["required / verdict", "baseline / guard"]
     # report_only: drift is reported, nothing is enforced, until the reason
     # is resolved and the line removed.
     pulseengine-layers:

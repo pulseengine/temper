@@ -261,3 +261,88 @@ jobs:
       detail: 'skippable by changes; .github/gate-probe.json is not valid JSON' }]);
   });
 });
+
+// temper#100: a reusable-workflow check is named "<caller> / <called>"
+// (jig's "required / verdict"). Shapes follow jig's ci.yml + required.yml.
+describe('reusable workflows: "<caller> / <called>" contexts', () => {
+  const REQUIRED = wf('required.yml', `
+name: required
+on:
+  workflow_call:
+    inputs:
+      results: { type: string, required: true }
+jobs:
+  verdict:
+    name: verdict
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo '\${{ inputs.results }}' | jig verdict
+`);
+  const CALLER = (extra = '', { needs = '[test]', ifExpr = 'always()', withResults = '${{ toJSON(needs) }}' } = {}) => wf('ci.yml', `
+name: CI
+on: [pull_request]
+jobs:
+${extra}
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps: [{ run: cargo test }]
+  required:
+    needs: ${needs}
+    if: ${ifExpr}
+    uses: ./.github/workflows/required.yml
+    with:
+      results: "${withResults}"
+`);
+  const CHANGES = `
+  changes:
+    runs-on: ubuntu-latest
+    outputs: { rust: x }
+    steps: [{ run: detect }]
+`;
+
+  it('positive control: jig\'s shape is matched and clean', () => {
+    expect(analyzeGateSkips([CALLER(), REQUIRED], ['required / verdict'], { probeContract: true })).toEqual([]);
+  });
+
+  it('planted: a gate that accepts a detector-skipped job without reading the detector is flagged', () => {
+    const extra = `${CHANGES}  build:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps: [{ run: make }]`;
+    const hits = analyzeGateSkips([CALLER(extra, { needs: '[test, build]', withResults: 'none' }), REQUIRED],
+      ['required / verdict'], { probeContract: true });
+    expect(hits).toEqual([{ rule: 'aggregate_accepts_skip', workflow: '.github/workflows/ci.yml', job: 'required/verdict',
+      detail: 'accepts skipped build without reading changes' }]);
+    // Reading the detector's result in what the caller passes closes it.
+    const read = analyzeGateSkips([CALLER(extra, { needs: '[test, build, changes]', withResults: '${{ needs.changes.result }}' }), REQUIRED],
+      ['required / verdict'], { probeContract: true });
+    expect(read).toEqual([]);
+  });
+
+  it('planted: a verdict whose caller is gated on a detector output needs the probe contract', () => {
+    const hits = analyzeGateSkips([CALLER(CHANGES, { needs: '[test, changes]', ifExpr: "needs.changes.outputs.rust == 'true'" }), REQUIRED],
+      ['required / verdict']);
+    expect(rules(hits)).toEqual(['detector_unprobed']);
+    expect(hits[0].job).toBe('required/verdict');
+  });
+
+  it('the called workflow alone does not produce the context', () => {
+    expect(rules(analyzeGateSkips([REQUIRED], ['required / verdict']))).toEqual(['required_unmatched']);
+  });
+
+  it('required_unmatched: a remote reusable call and a missing Actions check are reported; another app\'s status is not', () => {
+    const remote = wf('ci.yml', `
+on: [pull_request]
+jobs:
+  required:
+    uses: pulseengine/jig/.github/workflows/required.yml@${'a'.repeat(40)}
+`);
+    const hits = analyzeGateSkips([remote], ['required / verdict', 'lint', 'codecov/patch'], { actionsContexts: ['lint'] });
+    expect(hits.map((h) => [h.rule, h.detail.match(/"(.*)"/)[1]])).toEqual([
+      ['required_unmatched', 'required / verdict'],
+      ['required_unmatched', 'lint']
+    ]);
+  });
+});
