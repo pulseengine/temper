@@ -134,3 +134,25 @@ artifacts:
     links:
       - type: verifies
         target: REQ-044
+
+  - id: VER-030
+    type: verification
+    title: gate-skip on reusable-workflow contexts, with planted fail-open shapes
+    status: implemented
+    description: >
+      temper#100. Fixtures follow jig's ci.yml + required.yml. Positive
+      control: "required / verdict" resolves and is clean. Planted: a gate
+      that accepts a detector-skipped job without reading the detector, and
+      a caller gated on a detector output, are flagged on job
+      required/verdict; the called workflow alone, a remote reusable call
+      and an Actions-bound context with no job are required_unmatched;
+      another app's status is not. Mutations: no expansion fails 3, the
+      caller's if dropped fails 2, no unmatched rule fails 2. Run on jig
+      main 4a22275: both required contexts resolve, no findings.
+    fields:
+      method: automated-test
+      test-name: "reusable workflows: \"<caller> / <called>\" contexts"
+      test-location: __tests__/unit/gate-skip.test.js
+    links:
+      - type: verifies
+        target: REQ-031

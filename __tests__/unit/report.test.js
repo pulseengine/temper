@@ -46,6 +46,13 @@ function warteSample() {
   };
 }
 
+// The workflows a compliant repo has: one producing `build`, and the
+// hostname-scan stub producing the required `hostname-scan` check.
+const WORKFLOW_TEXTS = {
+  '.github/workflows/ci.yml': 'on: [pull_request]\njobs:\n  build: { runs-on: x, steps: [{ run: make }] }\n',
+  '.github/workflows/hostname-scan.yml': 'on: [pull_request]\njobs:\n  hostname-scan: { runs-on: x, steps: [{ run: scan }] }\n'
+};
+
 function compliantSnapshot(name = 'good') {
   const managed = {
     id: 100, name: 'temper-default-branch-protection', target: 'branch', enforcement: 'active',
@@ -168,7 +175,8 @@ describe('repoEntry maps standards findings to report checks', () => {
       '  changes: { runs-on: x, steps: [{ run: detect }] }',
       '  build: { needs: changes, if: "needs.changes.outputs.rust == \'true\'", runs-on: x, steps: [{ run: make }] }'
     ].join('\n');
-    snap.workflowTexts = [{ path: '.github/workflows/ci.yml', text: ci }];
+    snap.workflowTexts = [{ path: '.github/workflows/ci.yml', text: ci },
+      { path: '.github/workflows/hostname-scan.yml', text: WORKFLOW_TEXTS['.github/workflows/hostname-scan.yml'] }];
     const ev = evaluateRepo(snap, std());
     expect(ev.findings.find((f) => f.rule === 'gate_skip')).toMatchObject({ drift: true, fix: 'owner' });
     expect(byId(entry(snap))['standards.drift']).toMatchObject({ ok: false });
@@ -337,6 +345,9 @@ describe('report sweep', () => {
       }[r];
       if (r === 'GET /repos/{owner}/{repo}/rulesets/{ruleset_id}') {
         return ok(s.rulesets.items.find((x) => x.id === p.ruleset_id));
+      }
+      if (r === 'GET /repos/{owner}/{repo}/contents/{path}' && WORKFLOW_TEXTS[p.path]) {
+        return ok({ content: Buffer.from(WORKFLOW_TEXTS[p.path]).toString('base64') });
       }
       if (r === 'GET /rate_limit') return ok({ resources: { core: { remaining: 4900, limit: 5000, reset: 1800000000 } } });
       return pick || err(404, 'Not Found');
