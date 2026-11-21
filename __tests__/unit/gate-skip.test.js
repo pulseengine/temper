@@ -1,4 +1,4 @@
-import { analyzeGateSkips } from '../../src/gate-skip.js';
+import { analyzeGateSkips, remoteReusableCalls } from '../../src/gate-skip.js';
 
 const wf = (path, text) => ({ path: `.github/workflows/${path}`, text });
 const rules = (hits) => hits.map((h) => h.rule).sort();
@@ -343,6 +343,103 @@ jobs:
     expect(hits.map((h) => [h.rule, h.detail.match(/"(.*)"/)[1]])).toEqual([
       ['required_unmatched', 'required / verdict'],
       ['required_unmatched', 'lint']
+    ]);
+  });
+});
+
+describe('remote reusable workflows (temper#103)', () => {
+  const SHA = 'b'.repeat(40);
+  const USES = `pulseengine/jig/.github/workflows/required.yml@${SHA}`;
+  const REQUIRED_TEXT = `
+name: required
+on:
+  workflow_call:
+    inputs:
+      results: { type: string, required: true }
+jobs:
+  verdict:
+    name: verdict
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo '\${{ inputs.results }}' | jig verdict
+`;
+  const caller = (uses, { extra = '', needs = '[test]', withResults = '${{ toJSON(needs) }}' } = {}) => wf('ci.yml', `
+name: CI
+on: [pull_request]
+jobs:
+${extra}
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps: [{ run: cargo test }]
+  required:
+    needs: ${needs}
+    if: always()
+    uses: ${uses}
+    with:
+      results: "${withResults}"
+`);
+  const read = [{ uses: USES, text: REQUIRED_TEXT }];
+
+  it('positive control: a same-org call pinned to a sha, read at the pin, is matched and clean', () => {
+    expect(analyzeGateSkips([caller(USES)], ['required / verdict'], { probeContract: true, remoteWorkflows: read })).toEqual([]);
+  });
+
+  it('planted: the rules see through the remote call (accepting a detector-skipped job)', () => {
+    const extra = `
+  changes:
+    runs-on: ubuntu-latest
+    outputs: { rust: x }
+    steps: [{ run: detect }]
+  build:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps: [{ run: make }]`;
+    const hits = analyzeGateSkips([caller(USES, { extra, needs: '[test, build]', withResults: 'none' })],
+      ['required / verdict'], { probeContract: true, remoteWorkflows: read });
+    expect(hits).toEqual([{ rule: 'aggregate_accepts_skip', workflow: '.github/workflows/ci.yml', job: 'required/verdict',
+      detail: 'accepts skipped build without reading changes' }]);
+  });
+
+  it('a remote text is keyed by the exact uses string: another sha is not expanded from it', () => {
+    const other = USES.replace(SHA, 'c'.repeat(40));
+    const hits = analyzeGateSkips([caller(other)], ['required / verdict'], { remoteWorkflows: read });
+    expect(rules(hits)).toEqual(['required_unmatched']);
+    expect(hits[0].detail).toContain(`${other}: not read`);
+  });
+
+  it('a remote text is not analysed as a workflow of this repository', () => {
+    // Its own job "verdict" must not satisfy a required Actions context of this repo.
+    expect(rules(analyzeGateSkips([], ['verdict'], { actionsContexts: ['verdict'], remoteWorkflows: read }))).toEqual(['required_unmatched']);
+  });
+
+  it('required_unmatched names why a remote call was not expanded', () => {
+    const detail = (uses, remoteWorkflows) =>
+      analyzeGateSkips([caller(uses)], ['required / verdict'], { remoteWorkflows })[0].detail;
+    const tag = 'pulseengine/jig/.github/workflows/required.yml@v1';
+    expect(detail(tag, remoteReusableCalls([caller(tag)], 'pulseengine').map(({ uses, reason }) => ({ uses, reason }))))
+      .toContain('ref "v1" is not a full commit sha');
+    expect(detail(USES, [{ uses: USES, reason: 'could not be read at the pin (status 404)' }])).toContain('status 404');
+    const renamed = [{ uses: USES, text: REQUIRED_TEXT.replace('name: verdict', 'name: decide') }];
+    expect(detail(USES, renamed)).toContain('none of its jobs produces this name');
+  });
+
+  it('remoteReusableCalls: only same-org, full-sha calls are fetchable; local calls are not listed', () => {
+    const files = [caller(USES), wf('b.yml', `
+on: [push]
+jobs:
+  a: { uses: pulseengine/jig/.github/workflows/required.yml@main }
+  b: { uses: evil/jig/.github/workflows/required.yml@${SHA} }
+  c: { uses: ./.github/workflows/local.yml }
+  d: { uses: ${USES} }
+  e: { uses: pulseengine/jig/.github/workflows/required.yml@${'B'.repeat(40)} }
+`)];
+    expect(remoteReusableCalls(files, 'PulseEngine').map((c) => [c.uses.split('@')[1].slice(0, 4), c.owner, c.fetchable, c.reason ?? ''])).toEqual([
+      ['bbbb', 'pulseengine', true, ''],
+      ['main', 'pulseengine', false, 'ref "main" is not a full commit sha, so it is not read'],
+      ['bbbb', 'evil', false, 'another org (evil) is not read'],
+      ['BBBB', 'pulseengine', false, `ref "${'B'.repeat(40)}" is not a full commit sha, so it is not read`]
     ]);
   });
 });
