@@ -383,8 +383,9 @@ artifacts:
     description: >
       Skipped: a repository that is private, archived, outside the
       configured org or allow-list; a pull request; a closed or locked
-      issue; an author whose association is OWNER, MEMBER or COLLABORATOR;
-      an issue an org member already commented on.
+      issue; an author whose association is OWNER, MEMBER or COLLABORATOR,
+      or whose login is in the deploy's internal_logins (v0.2, temper#99);
+      an issue such an org member already commented on.
     fields:
       priority: must
       category: constraint
@@ -564,3 +565,26 @@ artifacts:
     links:
       - type: verifies
         target: REQ-037
+
+  - id: VER-032
+    type: verification
+    title: internal_logins makes a private org member internal in both the author and the commenter check
+    status: implemented
+    description: >
+      temper#99. tests/negative_controls.rs
+      listed_logins_count_as_org_members_in_both_checks: an issue by a listed
+      login with association NONE, or with a listed commenter, is skipped
+      with no write, compared without case; an unlisted login, a login that
+      only extends a listed one, and the listed login with no list configured
+      each get a reply. internal_logins_must_be_github_logins rejects six
+      malformed entries. Mutations: author check ignoring the list, commenter
+      check ignoring the list, case-sensitive compare and no login validation
+      each fail one test. Kill criterion from temper#99: a dry run on a queue
+      item by a listed author must plan skipped.
+    fields:
+      method: automated-test
+      test-name: listed_logins_count_as_org_members_in_both_checks
+      test-location: triage/tests/negative_controls.rs
+    links:
+      - type: verifies
+        target: REQ-036

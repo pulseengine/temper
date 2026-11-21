@@ -258,6 +258,66 @@ fn out_of_scope_issues_are_skipped_without_writes() {
     }
 }
 
+// rivet: verifies REQ-036
+#[test]
+fn listed_logins_count_as_org_members_in_both_checks() {
+    // A private org member: GitHub reports NONE, so only the list can tell.
+    let c = cfg("internal_logins = [\"Hidden-Maint\"]");
+    let author = |login: &str| {
+        let mut gh = FakeGitHub::with_issue(5, "Idea", "text");
+        gh.issues.get_mut(&5).unwrap()["user"] = json!({"login": login});
+        let p = handler(&c).handle(&mut gh, "demo", 5).unwrap();
+        (p, gh.writes().len())
+    };
+    let commenter = |login: &str| {
+        let mut gh = FakeGitHub::with_issue(5, "Idea", "text");
+        gh.comments.insert(
+            5,
+            vec![json!({"user": {"login": login}, "author_association": "NONE", "body": "on it"})],
+        );
+        let p = handler(&c).handle(&mut gh, "demo", 5).unwrap();
+        (p, gh.writes().len())
+    };
+    // Listed (compared without case): skipped, nothing written.
+    let (p, w) = author("hidden-maint");
+    assert_eq!(
+        (p.outcome, p.reason.as_str(), w),
+        (Outcome::Skipped, "author is in the org", 0)
+    );
+    let (p, w) = commenter("HIDDEN-MAINT");
+    assert_eq!(
+        (p.outcome, p.reason.as_str(), w),
+        (Outcome::Skipped, "an org member already commented", 0)
+    );
+    // Negative control: an unlisted login with the same association gets a reply.
+    for (p, w) in [
+        author("someone"),
+        commenter("someone"),
+        author("hidden-maint-2"),
+    ] {
+        assert_ne!(p.outcome, Outcome::Skipped, "{}", p.reason);
+        assert_eq!(w, 1);
+    }
+    // Without the list, the listed login is an outsider again.
+    let none = cfg("");
+    let mut gh = FakeGitHub::with_issue(5, "Idea", "text");
+    gh.issues.get_mut(&5).unwrap()["user"] = json!({"login": "hidden-maint"});
+    assert_ne!(
+        handler(&none).handle(&mut gh, "demo", 5).unwrap().outcome,
+        Outcome::Skipped
+    );
+}
+
+#[test]
+fn internal_logins_must_be_github_logins() {
+    for bad in ["", "-lead", "a b", "x/y", "a@b", &"a".repeat(40)] {
+        let text = format!(
+            "org = \"pulseengine\"\nwarte_url = \"https://warte.example/warte\"\napp_id = 1\nrepos = [\"*\"]\ninternal_logins = [{bad:?}]\n"
+        );
+        assert!(Config::parse(&text).is_err(), "{bad:?} accepted");
+    }
+}
+
 #[test]
 fn someone_elses_marker_is_not_temper_s_reply() {
     let c = cfg("");
