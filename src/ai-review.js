@@ -426,11 +426,11 @@ async function oracleBinaries({ octokit, owner, repo, headSha, baseSha, rivetCfg
   };
   const head = await resolve(headSha);
   if (!head.ok) return head;
-  if (!baseSha || baseSha === headSha) return { ok: true, head: head.binary, base: null };
+  if (!baseSha || baseSha === headSha) return { ok: true, head: head.binary, base: null, layer: head.layer };
   const base = await resolve(baseSha);
   return base.ok
-    ? { ok: true, head: head.binary, base: base.binary }
-    : { ok: true, head: head.binary, base: null, baseReason: base.reason };
+    ? { ok: true, head: head.binary, base: base.binary, layer: head.layer, baseLayer: base.layer }
+    : { ok: true, head: head.binary, base: null, baseReason: base.reason, layer: head.layer };
 }
 
 /** The rivet oracle can run: enabled and a binary (or varve, per repo) configured. */
@@ -534,9 +534,10 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
       const resolvedBinary = !rivetCfg.binary_path ? null : path.isAbsolute(rivetCfg.binary_path)
         ? rivetCfg.binary_path
         : path.resolve(__dirname, '..', rivetCfg.binary_path);
+      let gate = null;
       try {
         // temper#94: only the rivet this repository pins may speak for it.
-        const gate = (headSha && (await hasRivetYaml(octokit, owner, repo, headSha)))
+        gate = (headSha && (await hasRivetYaml(octokit, owner, repo, headSha)))
           ? await oracleBinaries({ octokit, owner, repo, headSha, baseSha, rivetCfg, resolvedBinary })
           : null;
         if (gate && !gate.ok) {
@@ -580,7 +581,7 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
                 })
               ).catch((err) => {
                 getLogger().warn(
-                  { pr: prNumber, err: err.message },
+                  { repo: `${owner}/${repo}`, pr: prNumber, layer: gate.baseLayer, err: err.message },
                   'base-ref validate failed — falling back to head-only oracle findings'
                 );
                 return null;
@@ -618,7 +619,7 @@ async function reviewPullRequest(octokit, owner, repo, prNumber) {
         }
       } catch (err) {
         getLogger().warn(
-          { pr: prNumber, err: err.message },
+          { repo: `${owner}/${repo}`, pr: prNumber, layer: gate?.layer, err: err.message },
           'Rivet oracle failed — continuing with model-only review'
         );
       }

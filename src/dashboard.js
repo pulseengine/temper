@@ -681,8 +681,23 @@ const HTMX_JS = readFileSync(join(dashModuleDir, 'htmx.min.js'), 'utf8');
 const IDIOMORPH_JS = readFileSync(join(dashModuleDir, 'idiomorph-ext.min.js'), 'utf8');
 
 // ── Deploy info (captured once at startup) ──────────────────────────
-export const DEPLOY_SHA = (() => { try { return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: dashModuleDir, encoding: 'utf8' }).trim(); } catch { return 'unknown'; } })();
-const DEPLOY_SHA_FULL = (() => { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dashModuleDir, encoding: 'utf8' }).trim(); } catch { return 'unknown'; } })();
+/**
+ * The deployed commit. A release directory has no .git, so the deploy sets
+ * TEMPER_COMMIT (smithy's systemd unit); a git checkout falls back to
+ * `git rev-parse`. Anything but a full 40-hex sha is ignored.
+ */
+export function resolveDeployCommit(env = process.env, git = () =>
+  execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dashModuleDir, encoding: 'utf8' })) {
+  const fromEnv = String(env.TEMPER_COMMIT || '').trim().toLowerCase();
+  if (/^[0-9a-f]{40}$/.test(fromEnv)) return fromEnv;
+  try {
+    const sha = String(git()).trim();
+    if (/^[0-9a-f]{40}$/.test(sha)) return sha;
+  } catch { /* not a checkout */ }
+  return 'unknown';
+}
+const DEPLOY_SHA_FULL = resolveDeployCommit();
+export const DEPLOY_SHA = DEPLOY_SHA_FULL === 'unknown' ? 'unknown' : DEPLOY_SHA_FULL.slice(0, 7);
 const DEPLOY_TIME = new Date().toISOString();
 
 // ── CSS ──────────────────────────────────────────────────────────────

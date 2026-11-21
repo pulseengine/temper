@@ -111,6 +111,44 @@ artifacts:
       - type: verifies
         target: REQ-042
 
+  - id: REQ-043
+    type: requirement
+    title: The rivet oracle SHALL read the validate and impact JSON of the rivet versions the layers carry (0.41.1, 0.42.2), iterating only fields that are lists
+    status: implemented
+    description: >
+      rivet 0.41+ reports lifecycle_gaps as a count and the gaps as
+      lifecycle_coverage. The parser was written for 0.4.3 and threw
+      "number 149 is not iterable" on the first three production PRs after
+      the per-repo switch (2026-11-20), so the oracle never produced a
+      finding with a current rivet. Oracle failures log repo and layer.
+    fields:
+      priority: must
+      category: functional
+      corrective: true
+    links:
+      - type: derives-from
+        target: SC-008
+      - type: refines
+        target: REQ-042
+
+  - id: VER-027
+    type: verification
+    title: rivet output shape tests on real 0.41.1 and 0.42.2 output
+    description: >
+      Fixtures are real `rivet validate --format json` output on this
+      repository, trimmed. On the old parser the test fails with the
+      production error; the oracle was also run end to end with rivet 0.42.2
+      (covalent 2026.11.16) on this repository: validate PASS, 13
+      lifecycle-gap findings, impact parsed.
+    status: implemented
+    fields:
+      method: automated-test
+      test-name: "runRivetValidate on rivet %s output; rivet output fields of an unexpected type; oracle failures name the repo and layer"
+      test-location: __tests__/unit/rivet-validate-shape.test.js, __tests__/integration/ai-review-oracle-per-repo.test.js
+    links:
+      - type: verifies
+        target: REQ-043
+
   - id: REQ-040
     type: requirement
     title: The model review SHALL be off by default, switched on only for a model that clears the pre-registered bar on the review benchmark, and /health SHALL report the review state with its reason
@@ -153,3 +191,5 @@ artifacts:
         target: REQ-040
       - type: satisfies
         target: REQ-042
+      - type: satisfies
+        target: REQ-043
