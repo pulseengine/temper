@@ -82,7 +82,12 @@ From a fresh-context review on 2026-11-19; accepted for v0.1:
 
 - **Hidden org members.** The author and commenter checks use GitHub's
   `author_association`. A member whose membership is private shows as
-  `CONTRIBUTOR` or `NONE` and gets a reply like anyone else.
+  `CONTRIBUTOR` or `NONE`. Since v0.2 the deploy lists such members in
+  `internal_logins` (compared without case): their issues are skipped and
+  their comments count as a member's answer. An unlisted private member
+  still gets a reply. An org-membership lookup would close this without a
+  list, but needs `members: read` on the App, which is the owner's call
+  (temper#99).
 - **Skips are final.** warte drops an item once it is marked done, so a
   `skipped` item (too many comments, an outgoing-check hit, a repository
   briefly private) is not offered again. That is warte's contract; an
@@ -123,6 +128,7 @@ repos       = ["*"]                            # glob allow-list on the repo nam
 docs_url    = "https://pulseengine.eu/"        # optional; enables point-to-docs
 ask_label   = "needs-reproduction"             # optional
 deny        = []                               # substrings never to post
+internal_logins = []                           # org members with private membership
 warte_ca_file = "/etc/temper-triage/warte-ca.pem"  # optional; see below
 ```
 
@@ -145,8 +151,8 @@ Tags `temper-triage-v*` run `.github/workflows/triage-release.yml`, modelled
 on pulseengine/plant's `release.yml`: static musl archives for x86_64 and
 aarch64 Linux plus Apple-silicon macOS (no Intel macOS: owner decision 2026-11-20), a CycloneDX SBOM, `SHA256SUMS.txt` signed keyless
 with cosign from the tag ref, and SLSA provenance. The pulseengine realm
-layer can carry it as `repo = "pulseengine/temper"`, `version = "0.1.0"`,
-`release = "temper-triage-v0.1.0"`, with assets `%R-<target>.tar.gz`. The
+layer can carry it as `repo = "pulseengine/temper"`, `version = "0.2.0"`,
+`release = "temper-triage-v0.2.0"`, with assets `%R-<target>.tar.gz`. The
 layer's release-tag check refuses prefixed tags until varve#374 ships, so
 the layer entry waits for that varve release.
 

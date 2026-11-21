@@ -30,6 +30,12 @@ pub struct Config {
     /// Substrings never to post (runner names, hostnames, confidential topics).
     #[serde(default)]
     pub deny: Vec<String>,
+    /// Logins treated as org members, for members whose membership is
+    /// private (GitHub then reports `CONTRIBUTOR` or `NONE`). Compared
+    /// without case. Their issues are skipped and their comments count as a
+    /// member's answer.
+    #[serde(default)]
+    pub internal_logins: Vec<String>,
     #[serde(default)]
     pub warte_token_file: Option<String>,
     #[serde(default)]
@@ -85,6 +91,17 @@ impl Config {
         if let Some(u) = &self.docs_url {
             docs_host_ok(u)?;
         }
+        for l in &self.internal_logins {
+            let ok = (1..=39).contains(&l.len())
+                && !l.starts_with('-')
+                && l.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+            if !ok {
+                return Err(format!(
+                    "config: internal_logins entry {l:?} is not a GitHub login"
+                ));
+            }
+        }
         if let Some(l) = &self.ask_label {
             let ok = (1..=50).contains(&l.len())
                 && l.chars()
@@ -96,6 +113,16 @@ impl Config {
             }
         }
         Ok(())
+    }
+
+    /// In the org: by `author_association`, or listed in `internal_logins`.
+    pub fn is_internal(&self, item: &Value) -> bool {
+        INTERNAL.contains(&item["author_association"].as_str().unwrap_or("NONE"))
+            || item["user"]["login"].as_str().is_some_and(|login| {
+                self.internal_logins
+                    .iter()
+                    .any(|l| l.eq_ignore_ascii_case(login))
+            })
     }
 
     pub fn serves(&self, repo: &str) -> bool {
@@ -238,7 +265,7 @@ impl Handler<'_> {
         if issue["locked"].as_bool() != Some(false) {
             return Ok(self.skip(repo, number, "issue is locked"));
         }
-        if INTERNAL.contains(&issue["author_association"].as_str().unwrap_or("NONE")) {
+        if self.cfg.is_internal(&issue) {
             return Ok(self.skip(repo, number, "author is in the org"));
         }
 
@@ -262,7 +289,7 @@ impl Handler<'_> {
                         ));
                     }
                 }
-                if INTERNAL.contains(&c["author_association"].as_str().unwrap_or("NONE")) {
+                if self.cfg.is_internal(c) {
                     member_answered = true;
                 }
             }
