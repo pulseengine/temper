@@ -182,3 +182,33 @@ artifacts:
     links:
       - type: verifies
         target: REQ-031
+
+  - id: VER-033
+    type: verification
+    title: verdict_unbaselined requires one required jig verdict to host the baseline at the same sha
+    status: implemented
+    description: >
+      temper#106, for jig v0.1.4 split verdicts (required.yml inputs
+      self-job and baseline-job). Fixtures follow relay's planned
+      three-workflow shape. Positive controls: one workflow hosts the
+      baseline and two pass baseline-job "", the standard single-workflow
+      shape, and a renamed baseline job. Planted: every verdict defers; the
+      hosting workflow pins baseline.yml to another sha; the named job is
+      missing or calls required.yml; an expression baseline-job (fails
+      closed); a hosting verdict that is not required. Mutations: rule off
+      fails 5, sha ignored fails 1, expression counted as hosting fails 1,
+      non-required verdicts counted fails 3, "" counted as hosting fails 5.
+      Owner and repository match without case through the shared
+      REMOTE_REUSABLE parser (security review: a PulseEngine/JIG spelling
+      failed open); a case-sensitive mutant fails 1. The path stays
+      case-sensitive.
+      Live: warte main 3bb73ce, read through fetchSnapshot at the jig pin
+      0a7b358, gives no finding; the same files with baseline-job ""
+      planted into ci.yml give exactly one.
+    fields:
+      method: automated-test
+      test-name: "jig split verdicts: one required verdict must host the baseline (temper#106)"
+      test-location: __tests__/unit/gate-skip.test.js
+    links:
+      - type: verifies
+        target: REQ-031

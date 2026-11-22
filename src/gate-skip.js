@@ -25,6 +25,11 @@
  *                              workflow (reusable-shaped "<caller> / <called>",
  *                              or bound to GitHub Actions) matches no job, so
  *                              nothing above was evaluated for it
+ *   verdict_unbaselined        jig split verdicts (v0.1.4): no required verdict
+ *                              from pulseengine/jig's required.yml hosts the
+ *                              baseline (every baseline-job is "" or an
+ *                              expression), or a named baseline-job is not a
+ *                              job calling jig's baseline.yml at the same sha
  *   probe_workflow_skippable   the workflow that runs the gate-probe action
  *                              can be skipped or weakened: a pull_request
  *                              filter, an `if:`, pull_request_target, or an
@@ -296,6 +301,7 @@ export function analyzeGateSkips(files, requiredContexts, { probeContract = fals
     }
   }
   hits.push(...probeWorkflowHits(wfs, { publicRepo }));
+  hits.push(...verdictBaselineHits(wfs, required));
 
   // A required context no job produces was not analysed at all: say so
   // rather than return nothing. Scoped to contexts a workflow should produce
@@ -318,6 +324,66 @@ export function analyzeGateSkips(files, requiredContexts, { probeContract = fals
     }
     hits.push({ rule: 'required_unmatched', workflow: '(none)',
       detail: `no job in the default branch's workflows produces "${c}" (${reason})` });
+  }
+  return hits;
+}
+
+/**
+ * The ref of a call to pulseengine/jig's workflow `file`, else null. Owner
+ * and repository compare without case, as GitHub resolves them; the path
+ * is case-sensitive. Shares REMOTE_REUSABLE with the fetch, so a spelling
+ * the fetch expands is one this rule sees.
+ */
+function jigCall(uses, file) {
+  const m = REMOTE_REUSABLE.exec(String(uses ?? ''));
+  return m && m[1].toLowerCase() === 'pulseengine' && m[2].toLowerCase() === 'jig'
+    && m[3] === `.github/workflows/${file}` ? m[4] : null;
+}
+
+/**
+ * jig v0.1.4 lets a repository split its verdict across workflows; a caller
+ * passing `baseline-job: ""` defers the baseline to another required
+ * verdict. jig sees one workflow, so the cross-workflow rule is checked
+ * here (temper#106): among the required contexts produced by jig's
+ * required.yml, at least one caller must name a baseline job (default
+ * "baseline") in its own workflow that calls jig's baseline.yml at the same
+ * sha. An expression cannot be read statically and counts as hosting none.
+ */
+function verdictBaselineHits(wfs, required) {
+  const callers = new Map();
+  for (const w of wfs) {
+    for (const { job, matches } of Object.values(w.jobs)) {
+      const sha = job.caller && jigCall(job.caller.uses, 'required.yml');
+      if (!sha || ![...required].some((c) => matches(c))) continue;
+      const id = Object.keys(w.jobs).find((k) => w.jobs[k].job === job.caller);
+      callers.set(`${w.path}#${id}`, { w, id, caller: job.caller, sha });
+    }
+  }
+  if (!callers.size) return [];
+  const hits = [];
+  let hosted = false;
+  const deferred = [];
+  for (const { w, id, caller, sha } of callers.values()) {
+    const raw = caller.with?.['baseline-job'];
+    const bj = raw === undefined || raw === null ? 'baseline' : String(raw);
+    if (bj === '' || bj.includes('${{')) {
+      deferred.push(`${w.path}#${id} (${bj === '' ? 'baseline-job ""' : 'baseline-job is an expression'})`);
+      continue;
+    }
+    const want = `pulseengine/jig/.github/workflows/baseline.yml@${sha}`;
+    const got = w.jobs[bj]?.job?.uses;
+    if (got !== undefined && jigCall(got, 'baseline.yml') === sha) {
+      hosted = true;
+      continue;
+    }
+    hits.push({ rule: 'verdict_unbaselined', workflow: w.path, job: id,
+      detail: got === undefined
+        ? `baseline-job "${bj}" is not a job of this workflow`
+        : `baseline-job "${bj}" calls ${got || 'no reusable workflow'}, not ${want}` });
+  }
+  if (!hosted && !hits.length) {
+    hits.push({ rule: 'verdict_unbaselined', workflow: deferred[0].split('#')[0],
+      detail: `no required jig verdict hosts the baseline: ${deferred.join(', ')}` });
   }
   return hits;
 }

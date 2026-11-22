@@ -372,6 +372,7 @@ ${extra}
     name: test
     runs-on: ubuntu-latest
     steps: [{ run: cargo test }]
+  baseline: { uses: 'pulseengine/jig/.github/workflows/baseline.yml@${uses.split('@')[1]}' }
   required:
     needs: ${needs}
     if: always()
@@ -436,10 +437,103 @@ jobs:
   e: { uses: pulseengine/jig/.github/workflows/required.yml@${'B'.repeat(40)} }
 `)];
     expect(remoteReusableCalls(files, 'PulseEngine').map((c) => [c.uses.split('@')[1].slice(0, 4), c.owner, c.fetchable, c.reason ?? ''])).toEqual([
+      ['bbbb', 'pulseengine', true, ''], // the fixture's baseline.yml call
       ['bbbb', 'pulseengine', true, ''],
       ['main', 'pulseengine', false, 'ref "main" is not a full commit sha, so it is not read'],
       ['bbbb', 'evil', false, 'another org (evil) is not read'],
       ['BBBB', 'pulseengine', false, `ref "${'B'.repeat(40)}" is not a full commit sha, so it is not read`]
     ]);
+  });
+});
+
+describe('jig split verdicts: one required verdict must host the baseline (temper#106)', () => {
+  const SHA = 'e'.repeat(40);
+  const REQ = `pulseengine/jig/.github/workflows/required.yml@${SHA}`;
+  const BASE = `pulseengine/jig/.github/workflows/baseline.yml@${SHA}`;
+  const remoteWorkflows = [
+    { uses: REQ, text: 'on: { workflow_call: {} }\njobs:\n  verdict:\n    name: verdict\n    runs-on: ubuntu-latest\n    steps: [{ run: jig verdict }]\n' },
+    { uses: BASE, text: 'on: { workflow_call: {} }\njobs:\n  guard:\n    name: guard\n    runs-on: ubuntu-latest\n    steps: [{ run: jig baseline }]\n' }
+  ];
+  // One of relay's three workflows. `baseline` is the with: value (undefined = omitted).
+  const split = (file, caller, { baseline, baselineUses = BASE, hostJob = 'baseline' } = {}) => wf(file, `
+on: [pull_request]
+jobs:
+  test: { name: test, runs-on: ubuntu-latest, steps: [{ run: make }] }
+${baselineUses ? `  ${hostJob}: { uses: ${baselineUses} }\n` : ''}  ${caller}:
+    needs: [test]
+    if: always()
+    uses: ${REQ}
+    with:
+      self-job: ${caller}
+      results: "\${{ toJSON(needs) }}"
+${baseline === undefined ? '' : `      baseline-job: ${JSON.stringify(baseline)}\n`}`);
+  const deferring = (file, caller) => split(file, caller, { baseline: '', baselineUses: null });
+  const required = ['required-ci / verdict', 'required-kani / verdict', 'required-verus / verdict'];
+  const run = (files, req = required) => analyzeGateSkips(files, req, { probeContract: true, remoteWorkflows })
+    .filter((h) => h.rule === 'verdict_unbaselined');
+
+  it('positive control: one workflow hosts the baseline (default baseline-job), two defer', () => {
+    expect(run([split('ci.yml', 'required-ci'), deferring('kani.yml', 'required-kani'), deferring('verus.yml', 'required-verus')])).toEqual([]);
+  });
+
+  it('positive control: the standard single-workflow shape, and a renamed baseline job', () => {
+    expect(run([split('ci.yml', 'required')], ['required / verdict'])).toEqual([]);
+    expect(run([split('ci.yml', 'required', { baseline: 'base', hostJob: 'base' })], ['required / verdict'])).toEqual([]);
+  });
+
+  it('planted: every required verdict defers', () => {
+    const hits = run([deferring('ci.yml', 'required-ci'), deferring('kani.yml', 'required-kani'), deferring('verus.yml', 'required-verus')]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].detail).toMatch(/^no required jig verdict hosts the baseline: .*ci\.yml#required-ci \(baseline-job ""\)/);
+  });
+
+  it('planted: the hosting workflow pins baseline.yml to another sha', () => {
+    const other = BASE.replace(SHA, 'f'.repeat(40));
+    const hits = run([split('ci.yml', 'required-ci', { baselineUses: other }), deferring('kani.yml', 'required-kani'), deferring('verus.yml', 'required-verus')]);
+    expect(hits).toEqual([{ rule: 'verdict_unbaselined', workflow: '.github/workflows/ci.yml', job: 'required-ci',
+      detail: `baseline-job "baseline" calls ${other}, not ${BASE}` }]);
+  });
+
+  it('planted: the named baseline job is missing, or calls something other than baseline.yml', () => {
+    expect(run([split('ci.yml', 'required-ci', { baselineUses: null }), deferring('kani.yml', 'required-kani')])
+      .map((h) => h.detail)).toEqual(['baseline-job "baseline" is not a job of this workflow']);
+    const wrong = `pulseengine/jig/.github/workflows/required.yml@${SHA}`;
+    expect(run([split('ci.yml', 'required-ci', { baselineUses: wrong }), deferring('kani.yml', 'required-kani')])
+      .map((h) => h.detail)).toEqual([`baseline-job "baseline" calls ${wrong}, not ${BASE}`]);
+  });
+
+  it('planted: an expression baseline-job hosts none (fail closed)', () => {
+    const hits = run([split('ci.yml', 'required-ci', { baseline: '${{ inputs.b }}' }), deferring('kani.yml', 'required-kani')]);
+    expect(hits.map((h) => h.detail)).toEqual([expect.stringContaining('ci.yml#required-ci (baseline-job is an expression)')]);
+  });
+
+  it('only required verdicts count: a hosting verdict that is not required does not satisfy the rule', () => {
+    const hits = run([split('ci.yml', 'required-ci'), deferring('kani.yml', 'required-kani')], ['required-kani / verdict']);
+    expect(hits).toHaveLength(1);
+  });
+
+  it('owner and repository match without case, as GitHub resolves them (no fail-open by spelling)', () => {
+    const MIXED = REQ.replace('pulseengine/jig', 'PulseEngine/JIG');
+    const mixedRemote = [...remoteWorkflows, { uses: MIXED, text: remoteWorkflows[0].text }];
+    const deferMixed = wf('ci.yml', `
+on: [pull_request]
+jobs:
+  required:
+    uses: ${MIXED}
+    with: { baseline-job: "" }
+`);
+    const hits = analyzeGateSkips([deferMixed], ['required / verdict'], { probeContract: true, remoteWorkflows: mixedRemote })
+      .filter((h) => h.rule === 'verdict_unbaselined');
+    expect(hits).toHaveLength(1);
+    // A mixed-case spelling of the baseline call at the same sha hosts it.
+    const host = split('ci.yml', 'required', { baselineUses: BASE.replace('pulseengine/jig', 'PULSEENGINE/Jig') });
+    expect(run([host], ['required / verdict'])).toEqual([]);
+    // The path stays case-sensitive: Baseline.yml is another file.
+    const wrongPath = split('ci.yml', 'required', { baselineUses: BASE.replace('baseline.yml', 'Baseline.yml') });
+    expect(run([wrongPath], ['required / verdict'])).toHaveLength(1);
+  });
+
+  it('no jig verdict among the required contexts: the rule does not apply', () => {
+    expect(run([deferring('ci.yml', 'required-ci')], ['test'])).toEqual([]);
   });
 });
