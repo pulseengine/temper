@@ -328,7 +328,17 @@ export function analyzeGateSkips(files, requiredContexts, { probeContract = fals
   return hits;
 }
 
-const JIG_REQUIRED = /^pulseengine\/jig\/\.github\/workflows\/required\.yml@(\S+)$/;
+/**
+ * The ref of a call to pulseengine/jig's workflow `file`, else null. Owner
+ * and repository compare without case, as GitHub resolves them; the path
+ * is case-sensitive. Shares REMOTE_REUSABLE with the fetch, so a spelling
+ * the fetch expands is one this rule sees.
+ */
+function jigCall(uses, file) {
+  const m = REMOTE_REUSABLE.exec(String(uses ?? ''));
+  return m && m[1].toLowerCase() === 'pulseengine' && m[2].toLowerCase() === 'jig'
+    && m[3] === `.github/workflows/${file}` ? m[4] : null;
+}
 
 /**
  * jig v0.1.4 lets a repository split its verdict across workflows; a caller
@@ -343,10 +353,10 @@ function verdictBaselineHits(wfs, required) {
   const callers = new Map();
   for (const w of wfs) {
     for (const { job, matches } of Object.values(w.jobs)) {
-      const m = job.caller && JIG_REQUIRED.exec(String(job.caller.uses ?? ''));
-      if (!m || ![...required].some((c) => matches(c))) continue;
+      const sha = job.caller && jigCall(job.caller.uses, 'required.yml');
+      if (!sha || ![...required].some((c) => matches(c))) continue;
       const id = Object.keys(w.jobs).find((k) => w.jobs[k].job === job.caller);
-      callers.set(`${w.path}#${id}`, { w, id, caller: job.caller, sha: m[1] });
+      callers.set(`${w.path}#${id}`, { w, id, caller: job.caller, sha });
     }
   }
   if (!callers.size) return [];
@@ -362,7 +372,7 @@ function verdictBaselineHits(wfs, required) {
     }
     const want = `pulseengine/jig/.github/workflows/baseline.yml@${sha}`;
     const got = w.jobs[bj]?.job?.uses;
-    if (got === want) {
+    if (got !== undefined && jigCall(got, 'baseline.yml') === sha) {
       hosted = true;
       continue;
     }

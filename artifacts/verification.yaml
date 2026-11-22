@@ -198,6 +198,10 @@ artifacts:
       closed); a hosting verdict that is not required. Mutations: rule off
       fails 5, sha ignored fails 1, expression counted as hosting fails 1,
       non-required verdicts counted fails 3, "" counted as hosting fails 5.
+      Owner and repository match without case through the shared
+      REMOTE_REUSABLE parser (security review: a PulseEngine/JIG spelling
+      failed open); a case-sensitive mutant fails 1. The path stays
+      case-sensitive.
       Live: warte main 3bb73ce, read through fetchSnapshot at the jig pin
       0a7b358, gives no finding; the same files with baseline-job ""
       planted into ci.yml give exactly one.

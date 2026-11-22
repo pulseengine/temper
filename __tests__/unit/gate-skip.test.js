@@ -512,6 +512,27 @@ ${baseline === undefined ? '' : `      baseline-job: ${JSON.stringify(baseline)}
     expect(hits).toHaveLength(1);
   });
 
+  it('owner and repository match without case, as GitHub resolves them (no fail-open by spelling)', () => {
+    const MIXED = REQ.replace('pulseengine/jig', 'PulseEngine/JIG');
+    const mixedRemote = [...remoteWorkflows, { uses: MIXED, text: remoteWorkflows[0].text }];
+    const deferMixed = wf('ci.yml', `
+on: [pull_request]
+jobs:
+  required:
+    uses: ${MIXED}
+    with: { baseline-job: "" }
+`);
+    const hits = analyzeGateSkips([deferMixed], ['required / verdict'], { probeContract: true, remoteWorkflows: mixedRemote })
+      .filter((h) => h.rule === 'verdict_unbaselined');
+    expect(hits).toHaveLength(1);
+    // A mixed-case spelling of the baseline call at the same sha hosts it.
+    const host = split('ci.yml', 'required', { baselineUses: BASE.replace('pulseengine/jig', 'PULSEENGINE/Jig') });
+    expect(run([host], ['required / verdict'])).toEqual([]);
+    // The path stays case-sensitive: Baseline.yml is another file.
+    const wrongPath = split('ci.yml', 'required', { baselineUses: BASE.replace('baseline.yml', 'Baseline.yml') });
+    expect(run([wrongPath], ['required / verdict'])).toHaveLength(1);
+  });
+
   it('no jig verdict among the required contexts: the rule does not apply', () => {
     expect(run([deferring('ci.yml', 'required-ci')], ['test'])).toEqual([]);
   });
