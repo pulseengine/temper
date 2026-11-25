@@ -612,3 +612,28 @@ artifacts:
     links:
       - type: verifies
         target: REQ-037
+
+  - id: VER-036
+    type: verification
+    title: The temper-triage-v0.2.1 release carries static binaries, cosign-signed sums, an SBOM and build provenance
+    status: implemented
+    description: >
+      Release run 45043307506 (signed tag temper-triage-v0.2.1 on 8b93a3e,
+      owner-approved 2026-11-22; url 2.5.9 for RUSTSEC-2026-0592) completed
+      success with all 6 jobs green. The GitHub Release has x86_64 and
+      aarch64 linux-musl and aarch64 apple-darwin archives, a docs archive,
+      a CycloneDX SBOM, build-env.txt and SHA256SUMS.txt with a cosign
+      bundle. Checked after download: shasum -c passed; cosign verify-blob
+      passed against triage-release.yml at refs/tags/temper-triage-v0.2.1;
+      gh attestation verify (JSON) gave SLSA v1 provenance from that ref;
+      the SBOM lists url 2.5.9. smithy verified the x86_64 musl archive on
+      its side and its dry run on the production host produced the same
+      plans as 0.2.0 (smithy#259). The first live replies on 0.2.1
+      (kiln#722, meld#662, synth#1785, synth#1786) matched the templates
+      rendered at the tag byte for byte.
+    fields:
+      method: inspection
+      test-location: .github/workflows/triage-release.yml
+    links:
+      - type: verifies
+        target: REQ-037

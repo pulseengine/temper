@@ -108,6 +108,16 @@ export function validateConfig(config) {
       if (dg.default_labels !== undefined && !Array.isArray(dg.default_labels)) {
         errors.push('dependabot_generation.default_labels must be an array');
       }
+      if (dg.open_pull_requests_limit !== undefined) {
+        if (!Number.isInteger(dg.open_pull_requests_limit) || dg.open_pull_requests_limit < 0) {
+          errors.push('dependabot_generation.open_pull_requests_limit must be a non-negative integer');
+        }
+      }
+      if (dg.cooldown_days !== undefined) {
+        if (!Number.isInteger(dg.cooldown_days) || dg.cooldown_days < 0 || dg.cooldown_days > 90) {
+          errors.push('dependabot_generation.cooldown_days must be an integer from 0 to 90');
+        }
+      }
       if (dg.max_directories_per_ecosystem !== undefined) {
         if (typeof dg.max_directories_per_ecosystem !== 'number' || dg.max_directories_per_ecosystem < 1) {
           errors.push('dependabot_generation.max_directories_per_ecosystem must be a positive number');

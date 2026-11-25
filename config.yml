@@ -219,8 +219,12 @@ self_update:
 dependabot_generation:
   enabled: true
   ai_enhance: false
-  default_schedule: "weekly"
+  # Fleet grouped template: monthly, at most 2 open PRs and a 7-day cooldown
+  # per updates entry; groups ride on each entry (never top-level).
+  default_schedule: "monthly"
   default_labels: ["dependencies"]
+  open_pull_requests_limit: 2
+  cooldown_days: 7
   max_directories_per_ecosystem: 5
 
 ai_review:

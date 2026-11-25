@@ -291,6 +291,8 @@ async function checkDependabotConfiguration(octokit, owner, repo) {
 function buildDependabotYaml(ecosystems, genConfig = {}) {
   const schedule = genConfig.default_schedule || 'weekly';
   const labels = genConfig.default_labels || ['dependencies'];
+  const prLimit = genConfig.open_pull_requests_limit;
+  const cooldownDays = genConfig.cooldown_days;
 
   // dependabot.yml has no top-level groups: (its validator rejects it); groups
   // is a per-entry key, and its patterns are globs on the dependency name. So
@@ -325,6 +327,8 @@ function buildDependabotYaml(ecosystems, genConfig = {}) {
       schedule: { interval: schedule },
       labels
     };
+    if (prLimit !== undefined) entry['open-pull-requests-limit'] = prLimit;
+    if (cooldownDays !== undefined) entry.cooldown = { 'default-days': cooldownDays };
     if (groupsByEcosystem[ecosystem]) entry.groups = groupsByEcosystem[ecosystem];
     return entry;
   });

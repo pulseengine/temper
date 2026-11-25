@@ -212,3 +212,28 @@ artifacts:
     links:
       - type: verifies
         target: REQ-031
+
+  - id: VER-035
+    type: verification
+    title: The generated dependabot.yml validates against SchemaStore's dependabot-2.0 schema
+    status: implemented
+    description: >
+      plant#12 (opened 2026-11-18 by the deploy at b9f7e8d, which predates
+      the temper#90 fix) put groups at the top level, which the schema
+      forbids. The test renders buildDependabotYaml with config.yml's
+      dependabot_generation and with the built-in defaults through
+      yaml.dump/yaml.load, and validates the result with ajv against the
+      vendored schema (sha256 891027089ecaeaf2..., fetched 2026-11-25).
+      Negative controls: the plant#12 shape fails on additionalProperties
+      groups, and package-ecosystem inside a per-entry group fails. A mutant
+      that adds a top-level groups key fails 3 of 5 tests. This is a
+      test-time check of the heuristic generator only; REQ-006's runtime
+      validation before apply (which would also cover the AI-enhanced path,
+      off by config) stays open.
+    fields:
+      method: automated-test
+      test-name: "generated dependabot.yml against the SchemaStore schema"
+      test-location: __tests__/unit/dependabot-schema.test.js
+    links:
+      - type: verifies
+        target: REQ-006

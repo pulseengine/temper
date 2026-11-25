@@ -39,6 +39,9 @@ importers:
       '@types/jest':
         specifier: ^30.0.0
         version: 30.0.0
+      ajv:
+        specifier: ^6.15.0
+        version: 6.15.0
       babel-plugin-transform-import-meta:
         specifier: ^2.3.3
         version: 2.3.3(@babel/core@7.29.13)
