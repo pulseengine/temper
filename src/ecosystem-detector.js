@@ -20,6 +20,19 @@ const ECOSYSTEM_PATTERNS = [
   { ecosystem: 'terraform', patterns: [/\.tf$/] }
 ];
 
+// Directories whose manifests are test data, vendored copies or build output,
+// not dependencies the repo ships: updating them would rewrite fixtures that
+// are stale or vulnerable on purpose (pulseengine/plant keeps such locks
+// under examples/*/fixture and ci-controls/).
+const SKIPPED_SEGMENTS = new Set([
+  'fixture', 'fixtures', 'testdata', 'test-data', 'ci-controls',
+  'vendor', 'third_party', 'node_modules', 'target'
+]);
+
+function isSkippedPath(filePath) {
+  return filePath.split('/').slice(0, -1).some((seg) => SKIPPED_SEGMENTS.has(seg));
+}
+
 /**
  * Extract the dependabot directory from a file path.
  * "packages/foo/package.json" → "/packages/foo"
@@ -45,6 +58,7 @@ function detectEcosystems(filePaths, options = {}) {
   const found = new Map();
 
   for (const filePath of filePaths) {
+    if (isSkippedPath(filePath)) continue;
     const basename = filePath.split('/').pop();
 
     for (const pattern of ECOSYSTEM_PATTERNS) {
@@ -92,6 +106,7 @@ function detectEcosystems(filePaths, options = {}) {
 
 export {
   ECOSYSTEM_PATTERNS,
+  SKIPPED_SEGMENTS,
   detectEcosystems,
   extractDirectory
 };

@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import {
   ECOSYSTEM_PATTERNS,
   detectEcosystems,
@@ -212,6 +214,43 @@ describe('ecosystem-detector', () => {
 
     it('returns empty array for empty input', () => {
       expect(detectEcosystems([])).toEqual([]);
+    });
+  });
+
+  describe('fixture, vendored and build-output directories', () => {
+    // pulseengine/plant at 4542688: its nested locks are deliberately stale or
+    // vulnerable test data; the only cargo directory to update is /.
+    const plantTree = fs
+      .readFileSync(path.join(process.cwd(), '__tests__/fixtures/plant-tree.txt'), 'utf8')
+      .split('\n')
+      .filter(Boolean);
+
+    it('gives plant cargo at / and github-actions at / only', () => {
+      expect(detectEcosystems(plantTree)).toEqual([
+        { ecosystem: 'github-actions', directory: '/' },
+        { ecosystem: 'cargo', directory: '/' }
+      ]);
+    });
+
+    it('the plant tree does carry nested Cargo.toml files to skip', () => {
+      const nested = plantTree.filter((p) => p.endsWith('/Cargo.toml'));
+      expect(nested.length).toBeGreaterThan(0);
+    });
+
+    it('skips every listed segment but keeps look-alike names', () => {
+      const result = detectEcosystems([
+        'crates/core/Cargo.toml',
+        'tests/fixtures/a/Cargo.toml',
+        'examples/x/fixture/Cargo.toml',
+        'third_party/lib/Cargo.toml',
+        'target/vendor/Cargo.toml',
+        'web/node_modules/left-pad/package.json',
+        'fixture-tools/Cargo.toml'
+      ]);
+      expect(result).toEqual([
+        { ecosystem: 'cargo', directory: '/fixture-tools' },
+        { ecosystem: 'cargo', directory: '/crates/core' }
+      ]);
     });
   });
 });

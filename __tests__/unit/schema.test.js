@@ -170,6 +170,14 @@ describe('validateConfig', () => {
     expect(result.errors[0]).toContain('max_directories_per_ecosystem');
   });
 
+  it('accepts the fleet template keys and rejects out-of-range values', () => {
+    expect(validateConfig({ dependabot_generation: { open_pull_requests_limit: 2, cooldown_days: 7 } }).valid).toBe(true);
+    const limit = validateConfig({ dependabot_generation: { open_pull_requests_limit: 1.5 } });
+    expect(limit.errors[0]).toContain('open_pull_requests_limit');
+    const cooldown = validateConfig({ dependabot_generation: { cooldown_days: 91 } });
+    expect(cooldown.errors[0]).toContain('cooldown_days');
+  });
+
   // scheduler validation
   it('accepts valid scheduler config', () => {
     const result = validateConfig({
