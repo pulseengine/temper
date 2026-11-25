@@ -41,6 +41,10 @@ export function validateStandards(config = {}) {
     if (r?.required_checks !== undefined && !Array.isArray(r.required_checks)) {
       errors.push(`standards.repos.${name}.required_checks must be an array`);
     }
+    if (r?.tag_include !== undefined && (!Array.isArray(r.tag_include) || r.tag_include.length === 0 ||
+      r.tag_include.some((t) => typeof t !== 'string' || !t.startsWith('refs/tags/')))) {
+      errors.push(`standards.repos.${name}.tag_include must be a non-empty array of refs/tags/ patterns`);
+    }
     if (r?.report_only !== undefined && (typeof r.report_only !== 'string' || !r.report_only)) {
       errors.push(`standards.repos.${name}.report_only must be a non-empty reason string`);
     }

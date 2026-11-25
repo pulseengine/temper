@@ -123,9 +123,10 @@ standards:
       path: .github/workflows/hostname-scan.yml
       template: templates/workflows/hostname-scan.yml
       # Commit sha of pulseengine/temper that carries
-      # .github/actions/hostname-scan. Unset until this lands on main; while
-      # unset, the stub is not distributed and the plan reports "blocked".
-      pin: null
+      # .github/actions/hostname-scan (unchanged since #77). main 8b93a3e,
+      # whose main CI completed success. With a pin the plan lists each
+      # repo's stub PR; nothing opens until a sync runs.
+      pin: "8b93a3eb0b420630b5be75d853027cd396a2b3a8"
   # Per-repo required checks, where the repo requires none today. Names are
   # the check runs the repo's PR workflows actually report (verified on main
   # 2026-10-30). Every other repo carries over what it already requires.
@@ -138,6 +139,37 @@ standards:
     # guard is the baseline's own check (jig main run 44883260023, 4a22275).
     jig:
       required_checks: ["required / verdict", "baseline / guard"]
+    # wohl's own pick (2026-11-25) from the 22 checks that ran on every PR
+    # head, docs-only #116 included. Left out: "Matter interop (chip-tool
+    # commissions the hub)" (external stack, flakes). "sigil attestation"
+    # needs "Bazel build"; both stay in so a skipped attestation cannot pass.
+    wohl:
+      required_checks:
+        - "Bazel build (//:all — exercises WASM component glue)"
+        - "Kani: wohl-air"
+        - "Kani: wohl-alert"
+        - "Kani: wohl-door"
+        - "Kani: wohl-leak"
+        - "Kani: wohl-ota"
+        - "Kani: wohl-power"
+        - "Kani: wohl-temp"
+        - "Script portability (shellcheck + Python 3.9 floor)"
+        - "Scry sound-AI (Matter seam)"
+        - "Trust-escape ledger (assumes may only shrink)"
+        - "Verification gate (rivet-driven)"
+        - "Verified-line guard"
+        - "Verus (bazel test //proofs/verus)"
+        - "Witness MC/DC (Matter seam)"
+        - "cargo test (workspace, incl. proptest)"
+        - "cargo-deny (supply-chain)"
+        - "cargo-fuzz smoke (60s/target)"
+        - "fmt + clippy"
+        - "rivet validate (ASPICE artifacts)"
+        - "sigil attestation (sign composed component)"
+    # relay's release tags are falcon-v* (every tag on the repo); v* stays
+    # covered too.
+    relay:
+      tag_include: ["refs/tags/v*", "refs/tags/falcon-v*"]
     # report_only: drift is reported, nothing is enforced, until the reason
     # is resolved and the line removed.
     pulseengine-layers:

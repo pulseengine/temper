@@ -264,3 +264,30 @@ artifacts:
     links:
       - type: verifies
         target: REQ-045
+
+  - id: VER-038
+    type: verification
+    title: A repo's own release-tag patterns (tag_include) are evaluated and enforced, every pattern covered
+    status: implemented
+    description: >
+      relay tags releases falcon-v* (every tag on the repo), which the org
+      default refs/tags/v* does not cover. standards.repos.relay.tag_include
+      is ["refs/tags/v*", "refs/tags/falcon-v*"]; each pattern is sampled and
+      must be immutable and creation-restricted. Cases: v*-only rulesets
+      drift for relay; falcon-v*-only rulesets drift too (every pattern
+      counts); both covered is ok; enforcement builds both tag rulesets on
+      both patterns; other repos stay on v*; tag_include must be a
+      non-empty list of refs/tags/ patterns. Mutants: per-repo include
+      ignored fails 3, builder ignores include fails 1, only the last
+      pattern counted fails 1. Live, read-only 2026-11-25: relay's plan
+      intends "refs/tags/v*,refs/tags/falcon-v*". Same change pins
+      hostname_scan to 8b93a3e (stub PRs become plannable; hostname-scan is
+      required only once the stub exists) and names wohl's 21 checks, all
+      matching wohl #116's check runs.
+    fields:
+      method: automated-test
+      test-name: "per-repo release-tag patterns (standards.repos.<repo>.tag_include)"
+      test-location: __tests__/unit/standards.test.js
+    links:
+      - type: verifies
+        target: REQ-019

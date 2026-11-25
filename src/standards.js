@@ -216,6 +216,33 @@ function tagRulesetCovers(rs, sampleRef) {
   return hit(inc) && !hit(exc);
 }
 
+/** The release-tag patterns a repo is held to: per-repo tag_include, else the org default. */
+export function tagIncludeFor(std, repo) {
+  const own = std.repos?.[repo]?.tag_include;
+  return Array.isArray(own) && own.length ? own : std.tag_protection.include;
+}
+
+/**
+ * Are the release tags matching every pattern in `include` protected? Each
+ * pattern is sampled (its `*` replaced by a version) and must be covered by
+ * an active, bypass-free ruleset with update + deletion, and by an active
+ * ruleset restricting creation.
+ */
+export function releaseTagCoverage(snap, include) {
+  const active = (snap.rulesets?.items || []).filter((r) => r.target === 'tag' && r.enforcement === 'active');
+  const ruleIn = (r, t) => (r.rules || []).some((x) => x.type === t);
+  let immutable = true;
+  let createRestricted = true;
+  for (const pattern of include) {
+    const sample = String(pattern).replace(/\*/g, '1.0.0');
+    const covering = active.filter((r) => tagRulesetCovers(r, sample));
+    immutable = immutable && covering.some(
+      (r) => Array.isArray(r.bypass_actors) && r.bypass_actors.length === 0 && ruleIn(r, 'update') && ruleIn(r, 'deletion'));
+    createRestricted = createRestricted && covering.some((r) => ruleIn(r, 'creation'));
+  }
+  return { include, immutable, createRestricted };
+}
+
 /** Facts derived from a snapshot, independent of what is intended. */
 export function deriveState(snap) {
   const repo = snap.repo?.body || {};
@@ -377,6 +404,7 @@ const fmt = (v) => (v === undefined || v === null ? 'unknown' : String(v));
 export function evaluateRepo(snap, std) {
   const st = deriveState(snap);
   const out = { repo: st.name, scope: 'enforced', blocker: null, findings: [], state: st };
+  out.tags = releaseTagCoverage(snap, tagIncludeFor(std, st.name));
 
   if (st.archived) {
     out.scope = 'archived';
@@ -509,9 +537,9 @@ export function evaluateRepo(snap, std) {
     const desc = st.tagRulesets.length
       ? st.tagRulesets.map((t) => `"${t.name}" ${t.enforcement} [${t.include.join(',')}] rules=${t.rules.join('+')}`).join('; ')
       : 'none';
-    const missing = [!st.releaseTagsImmutable && 'immutable (update+deletion, no bypass)',
-      !st.releaseTagCreateRestricted && 'creation restricted'].filter(Boolean);
-    f.push(finding('tag_protection', `${std.tag_protection.include.join(',')}: immutable + creation restricted`,
+    const missing = [!out.tags.immutable && 'immutable (update+deletion, no bypass)',
+      !out.tags.createRestricted && 'creation restricted'].filter(Boolean);
+    f.push(finding('tag_protection', `${out.tags.include.join(',')}: immutable + creation restricted`,
       desc, missing.length > 0, 'auto', missing.length ? `missing: ${missing.join('; ')}` : ''));
   }
 
@@ -525,24 +553,24 @@ export function hasDrift(evaluation) {
 // ── Enforcement ─────────────────────────────────────────────────────────────
 
 /** Release tags can never be moved or deleted — by anyone. */
-export function buildTagImmutableRuleset(std) {
+export function buildTagImmutableRuleset(std, include = std.tag_protection.include) {
   return {
     name: std.tag_protection.immutable_name,
     target: 'tag',
     enforcement: 'active',
-    conditions: { ref_name: { include: std.tag_protection.include, exclude: [] } },
+    conditions: { ref_name: { include, exclude: [] } },
     rules: [{ type: 'deletion' }, { type: 'non_fast_forward' }, { type: 'update' }],
     bypass_actors: []
   };
 }
 
 /** Only the bypass list (default: repo admins) may create release tags. */
-export function buildTagCreateRuleset(std) {
+export function buildTagCreateRuleset(std, include = std.tag_protection.include) {
   return {
     name: std.tag_protection.create_name,
     target: 'tag',
     enforcement: 'active',
-    conditions: { ref_name: { include: std.tag_protection.include, exclude: [] } },
+    conditions: { ref_name: { include, exclude: [] } },
     rules: [{ type: 'creation' }],
     bypass_actors: std.tag_protection.create_bypass_actors
   };
@@ -644,8 +672,8 @@ export async function enforceStandards(octokit, owner, protectionConfig, snap, s
 
   if (std.tag_protection.enabled) {
     const wanted = [
-      !st.releaseTagsImmutable && buildTagImmutableRuleset(std),
-      !st.releaseTagCreateRestricted && buildTagCreateRuleset(std)
+      !evaluation.tags.immutable && buildTagImmutableRuleset(std, evaluation.tags.include),
+      !evaluation.tags.createRestricted && buildTagCreateRuleset(std, evaluation.tags.include)
     ].filter(Boolean);
     for (const desired of wanted) {
       const t = await ensureRepositoryRuleset(octokit, owner, repo, desired);

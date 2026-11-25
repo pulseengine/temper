@@ -297,8 +297,12 @@ describe('evaluateRepo', () => {
     const snap = compliantSnapshot();
     snap.workflows = ok([{ name: 'ci.yml', path: '.github/workflows/ci.yml' }]);
     snap.branchRules.body[4].parameters.required_status_checks = [{ context: 'build' }];
-    const f1 = evaluateRepo(snap, std()).findings.find((x) => x.rule === 'hostname_scan');
+    const unpinned = std({ required_workflows: [{ ...std().required_workflows[0], pin: null }] });
+    const f1 = evaluateRepo(snap, unpinned).findings.find((x) => x.rule === 'hostname_scan');
     expect(f1).toMatchObject({ drift: true, fix: 'blocked' });
+    // config.yml pins it (a 40-hex temper main sha), so the stub is plannable
+    expect(std().required_workflows[0].pin).toMatch(/^[0-9a-f]{40}$/);
+    expect(evaluateRepo(snap, std()).findings.find((x) => x.rule === 'hostname_scan').fix).toBe('auto');
     const pinned = std({ required_workflows: [{ ...std().required_workflows[0], pin: 'b'.repeat(40) }] });
     expect(evaluateRepo(snap, pinned).findings.find((x) => x.rule === 'hostname_scan').fix).toBe('auto');
   });
@@ -426,7 +430,8 @@ describe('enforceStandards', () => {
     expect(Buffer.from(put[1].content, 'base64').toString()).toBe(`uses: x@${sha}`);
 
     const kit2 = recordingOctokit([snap.rulesets.items[0]]);
-    await enforceStandards(kit2, 'pulseengine', REPO_CONFIG.branch_protection.default, snap, std(), { readTemplate });
+    const unpinned = std({ required_workflows: [{ ...std().required_workflows[0], pin: null }] });
+    await enforceStandards(kit2, 'pulseengine', REPO_CONFIG.branch_protection.default, snap, unpinned, { readTemplate });
     expect(kit2.calls.some((c) => c[0].startsWith('POST /repos/{owner}/{repo}/pulls'))).toBe(false);
   });
 
@@ -589,5 +594,61 @@ describe('required checks are bound to the app that reports them', () => {
     // Negative control: the same ruleset without the binding is drift.
     actual.rules[4].parameters.required_status_checks[1] = { context: 'hostname-scan' };
     expect(rulesetsMatch(actual, desired)).toBe(false);
+  });
+});
+
+describe('per-repo release-tag patterns (standards.repos.<repo>.tag_include)', () => {
+  const bp = REPO_CONFIG.branch_protection.default;
+  const falcon = (snap) => {
+    for (const r of snap.rulesets.items.filter((x) => x.target === 'tag')) {
+      r.conditions.ref_name.include = ['refs/tags/v*', 'refs/tags/falcon-v*'];
+    }
+    return snap;
+  };
+
+  it('config.yml holds relay to v* and falcon-v*, every other repo to v*', () => {
+    expect(std().repos.relay.tag_include).toEqual(['refs/tags/v*', 'refs/tags/falcon-v*']);
+    expect(evaluateRepo(compliantSnapshot('relay'), std()).tags.include).toEqual(['refs/tags/v*', 'refs/tags/falcon-v*']);
+    expect(evaluateRepo(compliantSnapshot('sieve'), std()).tags.include).toEqual(['refs/tags/v*']);
+  });
+
+  it('v*-only rulesets leave relay drifting: falcon-v1.0.0 is neither immutable nor creation-restricted', () => {
+    const f = evaluateRepo(compliantSnapshot('relay'), std()).findings.find((x) => x.rule === 'tag_protection');
+    expect(f).toMatchObject({ drift: true, intended: 'refs/tags/v*,refs/tags/falcon-v*: immutable + creation restricted' });
+    expect(f.note).toBe('missing: immutable (update+deletion, no bypass); creation restricted');
+  });
+
+  it('positive control: rulesets covering both patterns are ok for relay', () => {
+    const f = evaluateRepo(falcon(compliantSnapshot('relay')), std()).findings.find((x) => x.rule === 'tag_protection');
+    expect(f.drift).toBe(false);
+  });
+
+  it('every pattern must be covered: falcon-v*-only rulesets leave v* drifting', () => {
+    const snap = compliantSnapshot('relay');
+    for (const r of snap.rulesets.items.filter((x) => x.target === 'tag')) r.conditions.ref_name.include = ['refs/tags/falcon-v*'];
+    const f = evaluateRepo(snap, std()).findings.find((x) => x.rule === 'tag_protection');
+    expect(f.note).toBe('missing: immutable (update+deletion, no bypass); creation restricted');
+  });
+
+  it('enforcement builds relay\'s tag rulesets on both patterns', async () => {
+    const snap = compliantSnapshot('relay');
+    snap.rulesets.items = snap.rulesets.items.filter((r) => r.target !== 'tag');
+    const kit = recordingOctokit();
+    await enforceStandards(kit, 'pulseengine', bp, snap, std(), {});
+    const tags = kit.calls.filter((c) => c[0] === 'POST /repos/{owner}/{repo}/rulesets' && c[1].target === 'tag').map((c) => c[1]);
+    expect(tags.map((t) => t.name)).toEqual(['temper-release-tags-immutable', 'temper-release-tags-create']);
+    for (const t of tags) expect(t.conditions.ref_name.include).toEqual(['refs/tags/v*', 'refs/tags/falcon-v*']);
+  });
+
+  it('the builders default to the org patterns', () => {
+    expect(buildTagImmutableRuleset(std()).conditions.ref_name.include).toEqual(['refs/tags/v*']);
+    expect(buildTagCreateRuleset(std(), ['refs/tags/x*']).conditions.ref_name.include).toEqual(['refs/tags/x*']);
+  });
+
+  it('tag_include must be a non-empty list of refs/tags/ patterns', () => {
+    const bad = (v) => validateStandards({ standards: { enabled: true, repos: { r: { tag_include: v } } } })
+      .filter((e) => e.includes('tag_include'));
+    expect(bad(['refs/tags/falcon-v*'])).toEqual([]);
+    for (const v of [[], 'refs/tags/v*', ['falcon-v*'], [7]]) expect(bad(v).join()).toMatch(/tag_include/);
   });
 });
