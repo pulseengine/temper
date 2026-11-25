@@ -118,6 +118,16 @@ export function validateConfig(config) {
           errors.push('dependabot_generation.cooldown_days must be an integer from 0 to 90');
         }
       }
+      if (dg.schedule_time !== undefined) {
+        if (typeof dg.schedule_time !== 'string' || !/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(dg.schedule_time)) {
+          errors.push('dependabot_generation.schedule_time must be "HH:MM" (24-hour)');
+        }
+      }
+      if (dg.schedule_timezone !== undefined) {
+        if (typeof dg.schedule_timezone !== 'string' || dg.schedule_timezone === '') {
+          errors.push('dependabot_generation.schedule_timezone must be a non-empty string');
+        }
+      }
       if (dg.max_directories_per_ecosystem !== undefined) {
         if (typeof dg.max_directories_per_ecosystem !== 'number' || dg.max_directories_per_ecosystem < 1) {
           errors.push('dependabot_generation.max_directories_per_ecosystem must be a positive number');

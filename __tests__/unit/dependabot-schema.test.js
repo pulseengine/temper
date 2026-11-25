@@ -38,10 +38,17 @@ describe('generated dependabot.yml against the SchemaStore schema', () => {
     expect(validate(file) ? [] : validate.errors).toEqual([]);
   });
 
-  it('carries the fleet template on every entry: monthly, 2 open PRs, 7-day cooldown', () => {
+  it('validates a multi-directory entry (directories: list)', () => {
+    const file = rendered(buildDependabotYaml(
+      [...ECOSYSTEMS, { ecosystem: 'cargo', directory: '/fuzz' }], genConfig));
+    expect(file.updates[0].directories).toEqual(['/', '/fuzz']);
+    expect(validate(file) ? [] : validate.errors).toEqual([]);
+  });
+
+  it('carries the fleet template on every entry: monthly on the 1st at 02:00 UTC, 2 open PRs, 7-day cooldown', () => {
     const file = rendered(buildDependabotYaml(ECOSYSTEMS, genConfig));
     for (const u of file.updates) {
-      expect(u.schedule.interval).toBe('monthly');
+      expect(u.schedule).toEqual({ interval: 'monthly', time: '02:00', timezone: 'Etc/UTC' });
       expect(u['open-pull-requests-limit']).toBe(2);
       expect(u.cooldown).toEqual({ 'default-days': 7 });
     }

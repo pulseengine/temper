@@ -178,6 +178,23 @@ describe('validateConfig', () => {
     expect(cooldown.errors[0]).toContain('cooldown_days');
   });
 
+  it('accepts dependabot_generation schedule_time and schedule_timezone', () => {
+    const result = validateConfig({ dependabot_generation: { schedule_time: '02:00', schedule_timezone: 'Etc/UTC' } });
+    expect(result).toEqual({ valid: true, errors: [] });
+  });
+
+  it('rejects a schedule_time that is not HH:MM', () => {
+    for (const t of ['2:00', '24:00', '02:60', 200]) {
+      const result = validateConfig({ dependabot_generation: { schedule_time: t } });
+      expect(result.errors).toEqual(['dependabot_generation.schedule_time must be "HH:MM" (24-hour)']);
+    }
+  });
+
+  it('rejects an empty schedule_timezone', () => {
+    const result = validateConfig({ dependabot_generation: { schedule_timezone: '' } });
+    expect(result.errors).toEqual(['dependabot_generation.schedule_timezone must be a non-empty string']);
+  });
+
   // scheduler validation
   it('accepts valid scheduler config', () => {
     const result = validateConfig({

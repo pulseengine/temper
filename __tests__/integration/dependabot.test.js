@@ -737,10 +737,47 @@ describe('dependabot', () => {
       expect(cargo.groups).not.toHaveProperty('github-actions-all');
       // patterns are globs on the dependency name, not regexes
       expect(actions.groups).toEqual({ 'github-actions-all': { patterns: ['*'] } });
-      expect(npm).not.toHaveProperty('groups');
+      expect(npm.groups).toEqual({ 'minor-patch': { 'update-types': ['minor', 'patch'] } });
       for (const u of result.updates) {
         for (const g of Object.values(u.groups || {})) expect(g).not.toHaveProperty('package-ecosystem');
       }
+    });
+
+    it('writes one entry per ecosystem, its directories in one directories: list', () => {
+      const result = buildDependabotYaml([
+        { ecosystem: 'cargo', directory: '/' },
+        { ecosystem: 'github-actions', directory: '/' },
+        { ecosystem: 'cargo', directory: '/fuzz' },
+        { ecosystem: 'cargo', directory: '/fuzz' },
+        { ecosystem: 'npm', directory: '/web' }
+      ]);
+      expect(result.updates.map((u) => u['package-ecosystem'])).toEqual(['cargo', 'github-actions', 'npm']);
+      const [cargo, actions, npm] = result.updates;
+      expect(cargo.directories).toEqual(['/', '/fuzz']);
+      expect(cargo).not.toHaveProperty('directory');
+      expect(actions.directory).toBe('/');
+      expect(actions).not.toHaveProperty('directories');
+      expect(npm.directory).toBe('/web');
+    });
+
+    it('puts lockstep groups before minor-patch, and none of it on github-actions', () => {
+      const [cargo, actions] = buildDependabotYaml([
+        { ecosystem: 'cargo', directory: '/' },
+        { ecosystem: 'github-actions', directory: '/' }
+      ]).updates;
+      // Dependabot assigns a dependency to the FIRST group it matches.
+      expect(Object.keys(cargo.groups)).toEqual(['wasm-tools-family', 'wasmtime', 'minor-patch']);
+      expect(cargo.groups['minor-patch']).toEqual({ 'update-types': ['minor', 'patch'] });
+      expect(Object.keys(actions.groups)).toEqual(['github-actions-all']);
+    });
+
+    it('sets schedule time and timezone only when configured', () => {
+      const bare = buildDependabotYaml([{ ecosystem: 'npm', directory: '/' }]).updates[0];
+      expect(bare.schedule).toEqual({ interval: 'weekly' });
+      const timed = buildDependabotYaml([{ ecosystem: 'npm', directory: '/' }], {
+        default_schedule: 'monthly', schedule_time: '02:00', schedule_timezone: 'Etc/UTC'
+      }).updates[0];
+      expect(timed.schedule).toEqual({ interval: 'monthly', time: '02:00', timezone: 'Etc/UTC' });
     });
   });
 

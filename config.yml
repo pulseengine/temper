@@ -254,6 +254,8 @@ dependabot_generation:
   # Fleet grouped template: monthly, at most 2 open PRs and a 7-day cooldown
   # per updates entry; groups ride on each entry (never top-level).
   default_schedule: "monthly"
+  schedule_time: "02:00"
+  schedule_timezone: "Etc/UTC"
   default_labels: ["dependencies"]
   open_pull_requests_limit: 2
   cooldown_days: 7

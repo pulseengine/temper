@@ -293,6 +293,8 @@ function buildDependabotYaml(ecosystems, genConfig = {}) {
   const labels = genConfig.default_labels || ['dependencies'];
   const prLimit = genConfig.open_pull_requests_limit;
   const cooldownDays = genConfig.cooldown_days;
+  const scheduleTime = genConfig.schedule_time;
+  const scheduleTimezone = genConfig.schedule_timezone;
 
   // dependabot.yml has no top-level groups: (its validator rejects it); groups
   // is a per-entry key, and its patterns are globs on the dependency name. So
@@ -320,16 +322,33 @@ function buildDependabotYaml(ecosystems, genConfig = {}) {
     }
   };
 
-  const updates = ecosystems.map(({ ecosystem, directory }) => {
-    const entry = {
-      'package-ecosystem': ecosystem,
-      directory,
-      schedule: { interval: schedule },
-      labels
-    };
+  // One entry per ecosystem, its directories in one `directories:` list, so a
+  // release opens one grouped PR and not one per directory (fleet template,
+  // pulseengine/rivet .github/dependabot.yml). Lockstep groups come first
+  // because Dependabot puts a dependency in the FIRST group it matches; then
+  // one minor-patch group. Majors stay ungrouped, one PR each.
+  const dirsByEcosystem = new Map();
+  for (const { ecosystem, directory } of ecosystems) {
+    if (!dirsByEcosystem.has(ecosystem)) dirsByEcosystem.set(ecosystem, []);
+    const dirs = dirsByEcosystem.get(ecosystem);
+    if (!dirs.includes(directory)) dirs.push(directory);
+  }
+
+  const updates = [...dirsByEcosystem].map(([ecosystem, dirs]) => {
+    const entry = { 'package-ecosystem': ecosystem };
+    if (dirs.length === 1) entry.directory = dirs[0];
+    else entry.directories = dirs;
+    entry.schedule = { interval: schedule };
+    if (scheduleTime !== undefined) entry.schedule.time = scheduleTime;
+    if (scheduleTimezone !== undefined) entry.schedule.timezone = scheduleTimezone;
     if (prLimit !== undefined) entry['open-pull-requests-limit'] = prLimit;
     if (cooldownDays !== undefined) entry.cooldown = { 'default-days': cooldownDays };
-    if (groupsByEcosystem[ecosystem]) entry.groups = groupsByEcosystem[ecosystem];
+    entry.labels = labels;
+    const groups = { ...(groupsByEcosystem[ecosystem] || {}) };
+    if (!groups['github-actions-all']) {
+      groups['minor-patch'] = { 'update-types': ['minor', 'patch'] };
+    }
+    entry.groups = groups;
     return entry;
   });
 

@@ -291,3 +291,25 @@ artifacts:
     links:
       - type: verifies
         target: REQ-019
+
+  - id: VER-039
+    type: verification
+    title: The generator emits the fleet grouped template shape
+    status: implemented
+    description: >
+      Unit tests on buildDependabotYaml: repeated directories of one
+      ecosystem collapse into one entry with a deduplicated directories:
+      list; a single directory stays directory:; cargo's group keys are
+      wasm-tools-family, wasmtime, minor-patch in that order; github-actions
+      gets only github-actions-all; schedule time and timezone appear only
+      when configured. The schema test renders config.yml's settings,
+      including a directories: entry, and validates against SchemaStore
+      dependabot-2.0. Mutants killed: minor-patch removed (5 failures),
+      dedupe removed (1), extra directories dropped (2), time dropped (2).
+    fields:
+      method: automated-test
+      test-name: "buildDependabotYaml"
+      test-location: __tests__/integration/dependabot.test.js
+    links:
+      - type: verifies
+        target: REQ-046
