@@ -582,3 +582,48 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-045
+
+  - id: REQ-046
+    type: requirement
+    title: A generated dependabot.yml SHALL follow the fleet grouped template, one entry per ecosystem with lockstep groups before minor-patch and majors ungrouped
+    status: implemented
+    release: v1.1.0
+    description: >
+      The fleet template is pulseengine/rivet's .github/dependabot.yml (owner
+      decision 2026-11-21). buildDependabotYaml writes one updates entry per
+      ecosystem, its detected directories in one directories: list (directory
+      when there is one), schedule monthly with config.yml's schedule_time and
+      schedule_timezone (02:00, Etc/UTC), limit 2, cooldown 7 days. The
+      ecosystem's lockstep groups come first because Dependabot assigns a
+      dependency to the first group it matches, then one minor-patch group;
+      github-actions keeps its single all-pattern group. Majors match no group
+      and arrive one PR each.
+    fields:
+      priority: should
+      category: functional
+      effect: behaviour
+      upstream-ref: "pulseengine/rivet#1349"
+    links:
+      - type: derives-from
+        target: SC-007
+
+  - id: DD-007
+    type: design-decision
+    title: The generator copies rivet's fleet template shape rather than inventing its own grouping
+    status: implemented
+    fields:
+      decision: >
+        buildDependabotYaml merges detected directories per ecosystem into one
+        entry, keeps the version-locked families as lockstep groups, appends
+        one minor-patch group, and takes the schedule time and timezone from
+        config.yml's dependabot_generation.
+      rationale: >
+        Repos that temper bootstraps then match the hand-kept files across the
+        fleet: one grouped PR per ecosystem a month instead of one per
+        directory, and a major version bump read on its own.
+      alternatives: >
+        Keep one entry per directory (N PRs for one release of a shared
+        crate); group majors too (a breaking change hides inside a batch).
+    links:
+      - type: satisfies
+        target: REQ-046
