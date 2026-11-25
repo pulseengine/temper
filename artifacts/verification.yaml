@@ -241,3 +241,26 @@ artifacts:
     links:
       - type: verifies
         target: REQ-006
+
+  - id: VER-037
+    type: verification
+    title: A scoped sync replays only the in-scope recorded writes
+    status: implemented
+    description: >
+      Writes are recorded through the real dry-run recorder (one of every
+      kind plus a content PUT and a PR POST). Negative control: --repo plant
+      --only tag_rulesets against a three-repo plan sends exactly plant's two
+      tag rulesets. Also: exact replay of route, path params and body; content
+      and PR writes never replayed; held and fork scopes not written; a repo
+      stops at its first failed write; dry run sends nothing. Mutants: kind
+      filter off fails 6, repo filter off fails 1, scope guard off fails 1,
+      non-replayable kinds replayed fails 6. Live, read-only on 2026-11-25:
+      plan --repo plant,sieve --only (all but labels) lists the 6 writes per
+      repo that the org plan had, and `sync --repos plant` is refused.
+    fields:
+      method: automated-test
+      test-name: "scopedSync"
+      test-location: __tests__/unit/scoped-sync.test.js
+    links:
+      - type: verifies
+        target: REQ-045

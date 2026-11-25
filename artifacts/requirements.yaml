@@ -532,3 +532,53 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-044
+
+  - id: REQ-045
+    type: requirement
+    title: A scoped sync SHALL send exactly the planned writes of the named repos and kinds, and nothing else
+    status: implemented
+    description: >
+      Hardening is applied in owner-approved batches (plant + sieve, then
+      kiln + warte + wohl, then tag rulesets org-wide). `sync --repo R
+      --only K` plans only R through the real configureRepository against
+      the recording octokit and replays exactly the recorded writes of kinds
+      K (merge, enforce_admins, signatures, branch_ruleset, tag_rulesets,
+      labels), call for call. `plan --only K` prints that same set. Writes
+      whose arguments depend on an earlier write's response, or that carry
+      file content (configuration PRs), are never replayed; repos whose scope
+      is not enforced are not written; a mistyped flag cannot fall through to
+      the org-wide sync.
+    fields:
+      priority: must
+      category: functional
+    links:
+      - type: derives-from
+        target: SC-002
+      - type: derives-from
+        target: SC-004
+
+  - id: DD-006
+    type: design-decision
+    title: A scoped sync replays the plan's recorded writes instead of threading a scope through the apply code
+    status: implemented
+    fields:
+      decision: >
+        scopedSync runs planOrg for the named repos, filters the recorded
+        writes by kind (from the route template and, for rulesets, the
+        target), and replays each in-scope write on the real octokit with
+        the same route, path params and body. Writes that depend on an
+        earlier write's response or carry file content are classified
+        `other` and never replayed.
+      rationale: >
+        The plan is then the apply by construction: what `plan --only`
+        prints is what `sync --only` sends, so the owner approves the exact
+        calls. configureRepository stays the single apply path, with no
+        per-rule flags to drift from it.
+      alternatives: >
+        Pass --only through configureRepository, enforceStandards and the
+        label sync (many call sites, and the plan could diverge from a
+        scoped apply); apply per repo with the full sync (cannot stage tag
+        rulesets separately, and writes labels and config PRs too).
+    links:
+      - type: satisfies
+        target: REQ-045

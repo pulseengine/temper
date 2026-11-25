@@ -117,7 +117,8 @@ export function createDryRunOctokit(real, { minIntervalMs = 1000, cacheDir = nul
   async function request(route, params = {}) {
     const method = methodOf(route, params);
     if (READ_METHODS.has(method)) return get(route, params);
-    writes.push({ method, url: expand(route, params), body: summarise(params) });
+    // route keeps the template so a scoped sync can replay the exact call.
+    writes.push({ method, route, url: expand(route, params), body: summarise(params) });
     // Plausible empty answers so callers that read a write's result keep going.
     return { status: 0, data: { dry_run: true, id: 0, number: 0, object: { sha: '0'.repeat(40) } }, headers: {} };
   }

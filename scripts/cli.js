@@ -217,7 +217,10 @@ async function cmdRepoCheck(octokit, org, repoName) {
   console.log();
 }
 
-async function cmdSync(octokit, org) {
+async function cmdSync(octokit, org, args = []) {
+  if (flag(args, '--repo') || args.includes('--only')) return cmdScopedSync(octokit, org, args);
+  // A mistyped scope flag must not fall through to the org-wide sync.
+  if (args.length > 1) throw new Error(`sync: unrecognised arguments ${args.slice(1).join(' ')}; the org-wide sync takes none`);
   console.log(bold(`\n  Temper — syncing all repos in ${org}...\n`));
 
   const { synchronizeAllRepositories } = await import('../src/organization.js');
@@ -228,6 +231,31 @@ async function cmdSync(octokit, org) {
   } else {
     console.error(err(`  Sync failed: ${result.error}\n`));
   }
+}
+
+// Scoped: plan the named repos, print the writes in scope, send exactly those.
+async function cmdScopedSync(octokit, org, args) {
+  const { scopedSync, renderScoped } = await import('../src/scoped-sync.js');
+  const { setLogger } = await import('../src/logger.js');
+  const pino = (await import('pino')).default;
+  setLogger(pino({ level: process.env.LOG_LEVEL || 'silent' }));
+  if (!flag(args, '--repo')) throw new Error('sync --only needs --repo a,b (or --repo "*")');
+  const dryRun = args.includes('--dry-run');
+  const res = await scopedSync(octokit, org, {
+    repos: flag(args, '--repo').split(','),
+    only: flag(args, '--only'),
+    dryRun,
+    plannerOpts: { minIntervalMs: Number(flag(args, '--interval', '1000')) }
+  });
+  process.stdout.write(renderScoped(res));
+  if (dryRun) {
+    console.log('\nDry run: nothing was sent.');
+  } else {
+    for (const a of res.applied) console.log(ok(`  sent [${a.kind}] ${a.method} ${a.url}`));
+    for (const f of res.failed) console.error(err(`  FAILED [${f.kind}] ${f.method} ${f.url}: ${f.error}`));
+    console.log(`\n${res.applied.length} write(s) sent, ${res.failed.length} failed. Re-run plan to confirm.`);
+  }
+  if (res.failed.length || res.missing.length) process.exitCode = 1;
 }
 
 // ── Plan (dry-run) ───────────────────────────────────────────────────
@@ -248,6 +276,13 @@ async function cmdPlan(octokit, org, args) {
     cacheDir: flag(args, '--cache'),
     minIntervalMs: Number(flag(args, '--interval', '1000'))
   });
+  if (flag(args, '--only')) {
+    const { scopePlan, parseKinds, renderScoped } = await import('../src/scoped-sync.js');
+    const kinds = parseKinds(flag(args, '--only'));
+    process.stdout.write(renderScoped({ kinds, scoped: scopePlan(plan.results, kinds), missing: [] }));
+    console.log('\nNothing was sent.');
+    return;
+  }
   process.stdout.write(renderPlan(plan.results, { showOk: args.includes('--all') }));
   const writes = plan.results.reduce((n, r) => n + r.writes.length, 0);
   const drifted = plan.results.filter((r) => r.drift).length;
@@ -285,7 +320,10 @@ async function main() {
     node scripts/cli.js org repos      Detailed per-repo table
     node scripts/cli.js repo check <n> Check a single repo
     node scripts/cli.js sync           Sync all repos to config (WRITES)
-    node scripts/cli.js plan [--repo a,b] [--cache DIR] [--json FILE] [--all] [--fail-on-drift]
+    node scripts/cli.js sync --repo a,b|"*" [--only KINDS] [--dry-run]
+                                       Send only the planned writes of these repos and kinds (WRITES)
+                                       KINDS: merge,enforce_admins,signatures,branch_ruleset,tag_rulesets,labels
+    node scripts/cli.js plan [--repo a,b] [--only KINDS] [--cache DIR] [--json FILE] [--all] [--fail-on-drift]
                                        Dry-run: drift + the writes a sync would make (sends nothing)
     node scripts/cli.js audit --snapshots DIR [--repo a,b] [--json FILE] [--all] [--fail-on-drift]
                                        Offline drift report from a sweep cache
@@ -301,7 +339,7 @@ async function main() {
   if (cmd === 'org' && sub === 'health') return cmdOrgHealth(octokit, org);
   if (cmd === 'org' && sub === 'repos') return cmdOrgRepos(octokit, org);
   if (cmd === 'repo' && sub === 'check') return cmdRepoCheck(octokit, org, args[2]);
-  if (cmd === 'sync') return cmdSync(octokit, org);
+  if (cmd === 'sync') return cmdSync(octokit, org, args);
 
   console.error(err(`Unknown command: ${cmd} ${sub || ''}`));
   process.exit(1);
