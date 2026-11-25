@@ -229,7 +229,11 @@ artifacts:
       that adds a top-level groups key fails 3 of 5 tests. This is a
       test-time check of the heuristic generator only; REQ-006's runtime
       validation before apply (which would also cover the AI-enhanced path,
-      off by config) stays open.
+      off by config) stays open. The ecosystem detector now skips manifests
+      under fixture, fixtures, testdata, test-data, ci-controls, vendor,
+      third_party, node_modules and target; on plant's tree at 4542688 it
+      gives cargo and github-actions at / only (a skip-removed mutant fails
+      2 tests in __tests__/unit/ecosystem-detector.test.js).
     fields:
       method: automated-test
       test-name: "generated dependabot.yml against the SchemaStore schema"
