@@ -962,12 +962,12 @@ function registerApp(app, options = {}) {
       if ((isDependabot && !refusedDependabot) || isBotUser) {
         let reason = null;
         try {
-          const files = await listPullRequestFiles(context.octokit, owner, repo, pr.number);
+          const files = await listPullRequestFiles(context.octokit, owner, repo, pr.number, pr.changed_files);
           const hits = reviewPathHits(files, autoMerge.review_paths || DEFAULT_REVIEW_PATHS);
           if (hits.length) reason = `this PR changes ${hits.join(', ')}, which keeps maintainer review`;
         } catch (err) {
           getLogger().warn({ pr: pr.number, err: err.message }, "Could not list PR files");
-          reason = "the PR's changed files could not be read";
+          reason = "the PR's changed files could not all be read";
         }
         if (reason) {
           refusedPaths = true;

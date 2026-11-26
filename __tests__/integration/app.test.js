@@ -266,7 +266,7 @@ describe('app', () => {
   // pull_request.opened — Dependabot auto-merge is gated on semver (temper#71)
   // =========================================================================
   describe('pull_request.opened Dependabot auto-merge', () => {
-    function prOpenedContext({ sender, title, body = '', files = [{ filename: 'Cargo.lock' }], filesError = null }) {
+    function prOpenedContext({ sender, title, body = '', files = [{ filename: 'Cargo.lock' }], filesError = null, changedFiles }) {
       const octokit = createMockOctokit();
       // The handler arms auto-merge through a GraphQL mutation; record it.
       octokit.graphql = jest.fn().mockResolvedValue({});
@@ -283,7 +283,7 @@ describe('app', () => {
         log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
         octokit,
         payload: {
-          pull_request: { number: 157, node_id: 'PR_node', title, body },
+          pull_request: { number: 157, node_id: 'PR_node', title, body, changed_files: changedFiles },
           repository: {
             name: 'varve',
             default_branch: 'main',
@@ -396,6 +396,51 @@ describe('app', () => {
       });
       await handlers['pull_request.opened'](ctx);
       expect(ctx.octokit.graphql).not.toHaveBeenCalled();
+    });
+
+    it('matches release workflows case-insensitively', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({
+        sender: 'dependabot[bot]',
+        title: 'build(deps): bump flate2 from 1.1.9 to 1.1.10',
+        files: [{ filename: '.github/workflows/Release.YML' }]
+      });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).not.toHaveBeenCalled();
+    });
+
+    it('does NOT arm when the listed files are fewer than changed_files', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({
+        sender: 'dependabot[bot]',
+        title: 'build(deps): bump flate2 from 1.1.9 to 1.1.10',
+        changedFiles: 2
+      });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).not.toHaveBeenCalled();
+      expect(comments(ctx)[0][1].body).toMatch(/could not be read/);
+    });
+
+    it('does NOT arm a PR whose file list reaches GitHub\'s 3000-file cap', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({
+        sender: 'dependabot[bot]',
+        title: 'build(deps): bump flate2 from 1.1.9 to 1.1.10',
+        files: Array.from({ length: 3000 }, (_, i) => ({ filename: `src/f${i}.rs` }))
+      });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).not.toHaveBeenCalled();
+    });
+
+    it('arms when the listed files match changed_files', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({
+        sender: 'dependabot[bot]',
+        title: 'build(deps): bump flate2 from 1.1.9 to 1.1.10',
+        changedFiles: 1
+      });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).toHaveBeenCalledTimes(1);
     });
 
     it('does NOT arm when the file list cannot be read (fails closed)', async () => {
