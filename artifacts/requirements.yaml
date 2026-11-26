@@ -287,6 +287,13 @@ artifacts:
     title: temper SHALL manage a tag-protection ruleset for v* release tags
     status: draft
     release: backlog
+    description: >
+      The tag standard (owner, 2026-11-26): release tags cannot be deleted or
+      force-moved (rules deletion and update), creation stays open, and only
+      the repo-admin role may bypass. A covering ruleset with more rules or
+      fewer bypass actors (varve adds required_signatures) is stricter, not
+      drift; temper writes the one ruleset tag-v-protection where a repo
+      falls short.
     fields:
       priority: should
       category: functional
@@ -652,3 +659,26 @@ artifacts:
     links:
       - type: derives-from
         target: SC-003
+
+  - id: REQ-048
+    type: requirement
+    title: A difference from the standard that the owner accepted SHALL be reported as divergent_declared and SHALL NOT be written
+    status: implemented
+    release: v1.1.0
+    description: >
+      standards.accepted_deviations lists them (enforce_admins,
+      required_reviews; owner 2026-11-26). enforce_admins off on classic
+      protection no longer drifts no_bypass and is never POSTed; a repo that
+      requires pull requests with 0 approving reviews gets an accepted
+      required_reviews finding. In temper-report.v1 an accepted-only check is
+      code divergent_declared, ok true, severity low; real drift folded into
+      the same check (a bypass actor on a branch ruleset) still reports
+      weaker_than_standard. A tag ruleset stricter than the standard reports
+      stricter_than_standard. All three codes are in warte's closed enum.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-002

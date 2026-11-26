@@ -50,6 +50,8 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-030
+      - type: satisfies
+        target: REQ-048
 
   - id: FEAT-005
     type: feature

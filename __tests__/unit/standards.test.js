@@ -10,8 +10,7 @@ import {
   hasDrift,
   intendedContexts,
   buildManagedRuleset,
-  buildTagImmutableRuleset,
-  buildTagCreateRuleset,
+  buildTagRuleset,
   enforceStandards,
   fetchSnapshot,
   loadSnapshotDir,
@@ -28,14 +27,26 @@ function std(overrides = {}) {
   return { ...getStandards(REPO_CONFIG), ...overrides };
 }
 
+/** The standards with no accepted deviation: enforce_admins off is drift again. */
+const strict = (overrides = {}) => std({ accepted_deviations: new Set(), ...overrides });
+
 const ok = (body) => ({ status: 200, body });
 const err = (status, message) => ({ status, body: { message } });
 
+// The tag standard as pulseengine.eu applied it (2026-11-26): deletion and
+// update blocked, creation open, the admin role may bypass.
 const tagRulesets = () => [
-  { id: 901, name: 'immutable', target: 'tag', enforcement: 'active', source_type: 'Repository',
+  { id: 901, name: 'tag-v-protection', target: 'tag', enforcement: 'active', source_type: 'Repository',
+    conditions: { ref_name: { include: ['refs/tags/v*'], exclude: [] } },
+    rules: [{ type: 'deletion' }, { type: 'update' }], bypass_actors: [ADMIN] }
+];
+
+// temper's earlier two-ruleset shape (ordeal#186): stricter than the standard.
+const oldTagRulesets = () => [
+  { id: 911, name: 'temper-release-tags-immutable', target: 'tag', enforcement: 'active', source_type: 'Repository',
     conditions: { ref_name: { include: ['refs/tags/v*'], exclude: [] } },
     rules: [{ type: 'deletion' }, { type: 'non_fast_forward' }, { type: 'update' }], bypass_actors: [] },
-  { id: 902, name: 'create', target: 'tag', enforcement: 'active', source_type: 'Repository',
+  { id: 912, name: 'temper-release-tags-create', target: 'tag', enforcement: 'active', source_type: 'Repository',
     conditions: { ref_name: { include: ['refs/tags/v*'], exclude: [] } },
     rules: [{ type: 'creation' }], bypass_actors: [ADMIN] }
 ];
@@ -150,7 +161,7 @@ describe('evaluateRepo', () => {
     const snap = compliantSnapshot();
     // Checks stay binding through the bypass-free ruleset, so only no_bypass drifts.
     snap.protection.body.enforce_admins.enabled = false;
-    expect(drifted(evaluateRepo(snap, std()))).toEqual(['no_bypass']);
+    expect(drifted(evaluateRepo(snap, strict()))).toEqual(['no_bypass']);
     snap.protection.body.enforce_admins.enabled = true;
 
     snap.rulesets.items[0].bypass_actors = [ADMIN];
@@ -175,7 +186,7 @@ describe('evaluateRepo', () => {
       source_type: 'Repository', conditions: { ref_name: { include: [], exclude: [] } },
       rules: [{ type: 'pull_request' }], bypass_actors: [] }];
     snap.branchRules.body = [];
-    const ev = evaluateRepo(snap, std());
+    const ev = evaluateRepo(snap, strict());
     const byRule = Object.fromEntries(ev.findings.map((f) => [f.rule, f]));
     expect(byRule.no_bypass.drift).toBe(true);
     expect(byRule.no_bypass.note).toMatch(/inert ruleset.*"main"/);
@@ -225,26 +236,87 @@ describe('evaluateRepo', () => {
     expect(drifted(evaluateRepo(snap, std()))).toEqual(['update_branch']);
   });
 
-  it('immutable tags without a creation restriction is partial', () => {
-    const snap = compliantSnapshot('r2');
-    snap.rulesets.items = snap.rulesets.items.filter((r) => r.id !== 902);
-    const f = evaluateRepo(snap, std()).findings.find((x) => x.rule === 'tag_protection');
-    expect(f).toMatchObject({ drift: true, note: 'missing: creation restricted' });
+  const tagFinding = (snap, s = std()) => evaluateRepo(snap, s).findings.find((x) => x.rule === 'tag_protection');
+
+  it('the standard ruleset meets the tag standard exactly (not stricter)', () => {
+    const f = tagFinding(compliantSnapshot());
+    expect(f).toMatchObject({ drift: false, note: '' });
+    expect(f.stricter).toBeUndefined();
   });
 
-  it('a tag ruleset that admins can bypass does not make tags immutable', () => {
+  it('a ruleset missing update (force-move allowed) is drift', () => {
+    const snap = compliantSnapshot('r2');
+    snap.rulesets.items.find((r) => r.id === 901).rules = [{ type: 'deletion' }];
+    expect(tagFinding(snap)).toMatchObject({ drift: true, note: 'a covering ruleset lacks a standard rule or has another bypass actor' });
+  });
+
+  it('a bypass actor outside the standard list is drift', () => {
     const snap = compliantSnapshot();
-    snap.rulesets.items.find((r) => r.id === 901).bypass_actors = [ADMIN];
-    expect(evaluateRepo(snap, std()).findings.find((x) => x.rule === 'tag_protection').note)
-      .toMatch(/immutable/);
+    snap.rulesets.items.find((r) => r.id === 901).bypass_actors = [ADMIN, { actor_id: 1, actor_type: 'OrganizationAdmin', bypass_mode: 'always' }];
+    expect(tagFinding(snap).drift).toBe(true);
+  });
+
+  it('unknown bypass actors (not readable) do not meet the standard', () => {
+    const snap = compliantSnapshot();
+    snap.rulesets.items.find((r) => r.id === 901).bypass_actors = undefined;
+    expect(tagFinding(snap).drift).toBe(true);
+  });
+
+  it("varve's deletion+update+required_signatures is stricter, not drift", () => {
+    const snap = compliantSnapshot('varve');
+    snap.rulesets.items.find((r) => r.id === 901).rules.push({ type: 'required_signatures' });
+    expect(tagFinding(snap)).toMatchObject({ drift: false, stricter: true, note: 'stricter than the standard' });
+  });
+
+  it("temper's old two-ruleset shape (no bypass, creation restricted) is stricter, not drift", () => {
+    const snap = compliantSnapshot();
+    snap.rulesets.items = [...snap.rulesets.items.filter((r) => r.target !== 'tag'), ...oldTagRulesets()];
+    expect(tagFinding(snap)).toMatchObject({ drift: false, stricter: true });
+  });
+
+  it('a creation-only ruleset beside the standard one makes it stricter', () => {
+    const snap = compliantSnapshot();
+    snap.rulesets.items.push(oldTagRulesets()[1]);
+    expect(tagFinding(snap).stricter).toBe(true);
   });
 
   it('evaluate-mode or excluded tag rulesets do not count', () => {
     const snap = compliantSnapshot();
     snap.rulesets.items.find((r) => r.id === 901).enforcement = 'evaluate';
-    snap.rulesets.items.find((r) => r.id === 902).conditions.ref_name.exclude = ['refs/tags/v**'];
-    expect(evaluateRepo(snap, std()).findings.find((x) => x.rule === 'tag_protection').note)
-      .toBe('missing: immutable (update+deletion, no bypass); creation restricted');
+    expect(tagFinding(snap)).toMatchObject({ drift: true, note: 'no active tag ruleset covers it' });
+    const snap2 = compliantSnapshot();
+    snap2.rulesets.items.find((r) => r.id === 901).conditions.ref_name.exclude = ['refs/tags/v**'];
+    expect(tagFinding(snap2).note).toBe('no active tag ruleset covers it');
+  });
+
+  it('accepted deviations: enforce_admins off and 0 approvals are reported, not drift', () => {
+    const snap = compliantSnapshot();
+    snap.protection.body.enforce_admins.enabled = false;
+    const ev = evaluateRepo(snap, std());
+    expect(drifted(ev)).toEqual([]);
+    const byRule = Object.fromEntries(ev.findings.map((f) => [f.rule, f]));
+    expect(byRule.enforce_admins).toMatchObject({ drift: false, accepted: true, actual: 'enforce_admins=false' });
+    expect(byRule.required_reviews).toMatchObject({ drift: false, accepted: true, actual: 'required approving reviews = 0' });
+    // with no deviation accepted, the same repo drifts and no accepted finding appears
+    const evStrict = evaluateRepo(snap, strict());
+    expect(drifted(evStrict)).toEqual(['no_bypass']);
+    expect(evStrict.findings.some((f) => f.accepted)).toBe(false);
+  });
+
+  it('an accepted deviation does not hide a bypass actor on a branch ruleset', () => {
+    const snap = compliantSnapshot();
+    snap.protection.body.enforce_admins.enabled = false;
+    snap.rulesets.items[0].bypass_actors = [ADMIN];
+    expect(drifted(evaluateRepo(snap, std()))).toContain('no_bypass');
+  });
+
+  it('one required approval leaves nothing to accept for reviews', () => {
+    const snap = compliantSnapshot();
+    snap.protection.body.required_pull_request_reviews.required_approving_review_count = 1;
+    expect(evaluateRepo(snap, std()).findings.some((f) => f.rule === 'required_reviews')).toBe(false);
+    const viaRuleset = compliantSnapshot();
+    viaRuleset.branchRules.body.find((r) => r.type === 'pull_request').parameters = { required_approving_review_count: 2 };
+    expect(evaluateRepo(viaRuleset, std()).findings.some((f) => f.rule === 'required_reviews')).toBe(false);
   });
 
   it('private repo on GitHub Free is unenforceable, but repo settings are still evaluated', () => {
@@ -281,7 +353,7 @@ describe('evaluateRepo', () => {
   it('report_only: findings are reported but nothing is enforced', async () => {
     const snap = compliantSnapshot('held');
     snap.protection.body.enforce_admins.enabled = false;
-    const s = std({ repos: { held: { report_only: 'bot pushes to main' } } });
+    const s = strict({ repos: { held: { report_only: 'bot pushes to main' } } });
     const ev = evaluateRepo(snap, s);
     expect(ev).toMatchObject({ scope: 'held', blocker: 'report-only: bot pushes to main' });
     expect(drifted(ev)).toContain('no_bypass');
@@ -327,10 +399,12 @@ describe('managed and tag rulesets', () => {
     expect(rs.rules.map((r) => r.type)).toContain('required_signatures');
   });
 
-  it('tag rulesets: immutable has no bypass; create bypass is the admin allowlist', () => {
-    expect(buildTagImmutableRuleset(std())).toMatchObject({ target: 'tag', bypass_actors: [] });
-    expect(buildTagCreateRuleset(std()).bypass_actors).toEqual([ADMIN]);
-    expect(buildTagCreateRuleset(std()).rules).toEqual([{ type: 'creation' }]);
+  it('tag ruleset: the standard rules, the admin bypass, named tag-v-protection', () => {
+    expect(buildTagRuleset(std())).toEqual({
+      name: 'tag-v-protection', target: 'tag', enforcement: 'active',
+      conditions: { ref_name: { include: ['refs/tags/v*'], exclude: [] } },
+      rules: [{ type: 'deletion' }, { type: 'update' }], bypass_actors: [ADMIN]
+    });
   });
 
   it('renders the stub template with pin and branch', () => {
@@ -367,18 +441,29 @@ describe('enforceStandards', () => {
     snap.rulesets.items = [];
     snap.branchRules.body = [];
     const kit = recordingOctokit();
-    const { actions } = await enforceStandards(kit, 'pulseengine', bp, snap, std(), {});
+    const { actions } = await enforceStandards(kit, 'pulseengine', bp, snap, strict(), {});
     const routes = kit.calls.map((c) => c[0]);
     expect(routes).toContain('POST /repos/{owner}/{repo}/branches/{branch}/protection/enforce_admins');
     expect(routes).not.toContain('PUT /repos/{owner}/{repo}/branches/{branch}/protection');
     const created = kit.calls.filter((c) => c[0] === 'POST /repos/{owner}/{repo}/rulesets').map((c) => c[1]);
     expect(created.map((r) => r.name)).toEqual([
-      'temper-default-branch-protection', 'temper-release-tags-immutable', 'temper-release-tags-create']);
+      'temper-default-branch-protection', 'tag-v-protection']);
     const checks = created[0].rules.find((r) => r.type === 'required_status_checks');
     // hostname-scan is a required workflow temper names: bound to Actions;
     // build was carried over unbound and stays that way.
     expect(checks.parameters.required_status_checks).toEqual([{ context: 'build' }, { context: 'hostname-scan', integration_id: 15368 }]);
     expect(actions).toEqual(expect.arrayContaining(['classic protection: enforce_admins on']));
+  });
+
+  it('an accepted enforce_admins deviation is never written; a stricter tag shape is left alone', async () => {
+    const snap = compliantSnapshot('r1');
+    snap.protection.body.enforce_admins.enabled = false;
+    snap.rulesets.items = [...snap.rulesets.items.filter((r) => r.target !== 'tag'), ...oldTagRulesets()];
+    const kit = recordingOctokit([snap.rulesets.items[0]]);
+    await enforceStandards(kit, 'pulseengine', bp, snap, std(), {});
+    const routes = kit.calls.map((c) => c[0]);
+    expect(routes).not.toContain('POST /repos/{owner}/{repo}/branches/{branch}/protection/enforce_admins');
+    expect(kit.calls.some((c) => c[1]?.target === 'tag')).toBe(false);
   });
 
   it('strips bypass actors from a foreign repo ruleset, keeping its rules', async () => {
@@ -612,10 +697,10 @@ describe('per-repo release-tag patterns (standards.repos.<repo>.tag_include)', (
     expect(evaluateRepo(compliantSnapshot('sieve'), std()).tags.include).toEqual(['refs/tags/v*']);
   });
 
-  it('v*-only rulesets leave relay drifting: falcon-v1.0.0 is neither immutable nor creation-restricted', () => {
+  it('v*-only rulesets leave relay drifting: no ruleset covers falcon-v1.0.0', () => {
     const f = evaluateRepo(compliantSnapshot('relay'), std()).findings.find((x) => x.rule === 'tag_protection');
-    expect(f).toMatchObject({ drift: true, intended: 'refs/tags/v*,refs/tags/falcon-v*: immutable + creation restricted' });
-    expect(f.note).toBe('missing: immutable (update+deletion, no bypass); creation restricted');
+    expect(f).toMatchObject({ drift: true, intended: 'refs/tags/v*,refs/tags/falcon-v*: rules deletion+update, bypass only RepositoryRole:5' });
+    expect(f.note).toBe('no active tag ruleset covers it');
   });
 
   it('positive control: rulesets covering both patterns are ok for relay', () => {
@@ -627,22 +712,32 @@ describe('per-repo release-tag patterns (standards.repos.<repo>.tag_include)', (
     const snap = compliantSnapshot('relay');
     for (const r of snap.rulesets.items.filter((x) => x.target === 'tag')) r.conditions.ref_name.include = ['refs/tags/falcon-v*'];
     const f = evaluateRepo(snap, std()).findings.find((x) => x.rule === 'tag_protection');
-    expect(f.note).toBe('missing: immutable (update+deletion, no bypass); creation restricted');
+    expect(f.note).toBe('no active tag ruleset covers it');
   });
 
-  it('enforcement builds relay\'s tag rulesets on both patterns', async () => {
+  it('enforcement builds relay\'s tag ruleset on both patterns', async () => {
     const snap = compliantSnapshot('relay');
     snap.rulesets.items = snap.rulesets.items.filter((r) => r.target !== 'tag');
     const kit = recordingOctokit();
     await enforceStandards(kit, 'pulseengine', bp, snap, std(), {});
     const tags = kit.calls.filter((c) => c[0] === 'POST /repos/{owner}/{repo}/rulesets' && c[1].target === 'tag').map((c) => c[1]);
-    expect(tags.map((t) => t.name)).toEqual(['temper-release-tags-immutable', 'temper-release-tags-create']);
+    expect(tags.map((t) => t.name)).toEqual(['tag-v-protection']);
     for (const t of tags) expect(t.conditions.ref_name.include).toEqual(['refs/tags/v*', 'refs/tags/falcon-v*']);
   });
 
   it('the builders default to the org patterns', () => {
-    expect(buildTagImmutableRuleset(std()).conditions.ref_name.include).toEqual(['refs/tags/v*']);
-    expect(buildTagCreateRuleset(std(), ['refs/tags/x*']).conditions.ref_name.include).toEqual(['refs/tags/x*']);
+    expect(buildTagRuleset(std()).conditions.ref_name.include).toEqual(['refs/tags/v*']);
+    expect(buildTagRuleset(std(), ['refs/tags/x*']).conditions.ref_name.include).toEqual(['refs/tags/x*']);
+  });
+
+  it('accepted_deviations and the tag standard are validated', () => {
+    const v = (s) => validateStandards({ standards: { enabled: true, ...s } }).filter((e) => !e.includes('requires branch_protection'));
+    expect(v({ accepted_deviations: ['enforce_admins', 'required_reviews'] })).toEqual([]);
+    expect(v({ accepted_deviations: ['signatures'] })).toEqual(['standards.accepted_deviations must list only: enforce_admins, required_reviews']);
+    expect(v({ tag_protection: { rules: ['deletion', 'rename'] } }).join()).toMatch(/tag_protection.rules/);
+    expect(v({ tag_protection: { rules: [] } }).join()).toMatch(/tag_protection.rules/);
+    expect(v({ tag_protection: { bypass_actors: [{}] } }).join()).toMatch(/bypass_actors/);
+    expect(v({ tag_protection: { name: '' } }).join()).toMatch(/tag_protection.name/);
   });
 
   it('tag_include must be a non-empty list of refs/tags/ patterns', () => {
