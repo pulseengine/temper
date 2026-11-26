@@ -5,7 +5,9 @@ npm_link_all_packages(name = "node_modules")
 
 js_library(
     name = "config_yml",
-    srcs = ["config.yml"],
+    # The required-contexts mirror rides along: a unit test checks it
+    # against standards.repos.temper.required_checks.
+    srcs = ["config.yml", ".github/required-contexts.txt"],
     visibility = ["//__tests__:__pkg__"],
 )
 
