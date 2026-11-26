@@ -418,7 +418,7 @@ describe('app', () => {
       });
       await handlers['pull_request.opened'](ctx);
       expect(ctx.octokit.graphql).not.toHaveBeenCalled();
-      expect(comments(ctx)[0][1].body).toMatch(/could not be read/);
+      expect(comments(ctx)[0][1].body).toMatch(/could not all be read/);
     });
 
     it('does NOT arm a PR whose file list reaches GitHub\'s 3000-file cap', async () => {
@@ -452,7 +452,7 @@ describe('app', () => {
       });
       await handlers['pull_request.opened'](ctx);
       expect(ctx.octokit.graphql).not.toHaveBeenCalled();
-      expect(comments(ctx)[0][1].body).toMatch(/could not be read/);
+      expect(comments(ctx)[0][1].body).toMatch(/could not all be read/);
     });
 
     it('still arms when only other workflows change (release-like names outside .github/workflows do not match)', async () => {
