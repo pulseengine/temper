@@ -203,6 +203,16 @@ describe('validateConfig', () => {
     }
   });
 
+  it('accepts auto_merge.skip_repos as repo names and rejects anything else', () => {
+    for (const sr of [[], ['rivet', 'pulseengine.eu']]) {
+      expect(validateConfig({ auto_merge: { skip_repos: sr } }).valid).toBe(true);
+    }
+    for (const sr of ['rivet', [''], [3], ['pulseengine/rivet']]) {
+      expect(validateConfig({ auto_merge: { skip_repos: sr } }).errors)
+        .toEqual(['auto_merge.skip_repos must be a list of repo names (no owner)']);
+    }
+  });
+
   // scheduler validation
   it('accepts valid scheduler config', () => {
     const result = validateConfig({

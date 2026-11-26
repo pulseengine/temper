@@ -40,6 +40,8 @@ artifacts:
         target: REQ-012
       - type: satisfies
         target: REQ-047
+      - type: satisfies
+        target: REQ-049
 
   - id: FEAT-004
     type: feature

@@ -240,6 +240,36 @@ auto_merge:
   on_bot_users:
     - thrum
   merge_method: squash
+  # Repos whose own session merges its Dependabot queue one PR at a time:
+  # temper arms nothing and posts nothing there (coordinator, 2026-11-26).
+  # Elsewhere temper still never arms on a branch with no required status
+  # check, where auto-merge would merge before CI runs.
+  skip_repos:
+    - pulseengine.eu
+    - rivet
+    - spar
+    - synth
+    - sigil
+    - relay
+    - meld
+    - loom
+    - wohl
+    - ordeal
+    - plant
+    - kiln
+    - jig
+    - varve
+    - gale
+    - sieve
+    - jess
+    - warte
+    - witness
+    - scry
+    - example-kvs
+    - bazel-file-ops-component
+    - rules_wasm_component
+    - rules_rocq_rust
+    - temper
   # Never armed on a PR that changes one of these: a release workflow runs on
   # a tag, so a green PR proves nothing about it (owner rule 2026-11-25,
   # relay#726). `*` matches within one path segment.

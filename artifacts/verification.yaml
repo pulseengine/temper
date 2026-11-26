@@ -369,3 +369,26 @@ artifacts:
         target: REQ-048
       - type: verifies
         target: REQ-019
+
+  - id: VER-042
+    type: verification
+    title: Auto-merge skips listed repos and branches without a required status check
+    status: implemented
+    description: >
+      pull_request.opened tests: in a skip_repos repo, a non-breaking and a
+      breaking Dependabot PR and a thrum PR arm nothing and post no comment;
+      an unlisted repo still arms. A branch whose rules hold no
+      required_status_checks rule, or one listing no checks, is not armed, and
+      the comment names the branch; classic protection with contexts alone, or
+      with checks alone, arms. A 502 on the branch, a 403 on its rules, or a
+      rules answer that is not a list does not arm (fails closed). Schema
+      tests reject a non-list, an empty name, a non-string and an owner/repo
+      name. Mutants killed: skip ignored, no-checks treated as checks, fail
+      open, classic checks ignored, empty rule counted.
+    fields:
+      method: automated-test
+      test-name: "pull_request.opened Dependabot auto-merge"
+      test-location: __tests__/integration/app.test.js
+    links:
+      - type: verifies
+        target: REQ-049

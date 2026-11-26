@@ -136,6 +136,13 @@ export function validateConfig(config) {
     }
   }
 
+  if (config.auto_merge?.skip_repos !== undefined) {
+    const sr = config.auto_merge.skip_repos;
+    if (!Array.isArray(sr) || !sr.every((r) => typeof r === 'string' && r.length > 0 && !r.includes('/'))) {
+      errors.push('auto_merge.skip_repos must be a list of repo names (no owner)');
+    }
+  }
+
   if (config.auto_merge?.review_paths !== undefined) {
     const rp = config.auto_merge.review_paths;
     if (!Array.isArray(rp) || rp.length === 0 || !rp.every((p) => typeof p === 'string' && p.length > 0)) {
