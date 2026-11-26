@@ -682,3 +682,27 @@ artifacts:
     links:
       - type: derives-from
         target: SC-002
+
+  - id: REQ-049
+    type: requirement
+    title: temper SHALL NOT enable auto-merge in a repo whose own session merges its queue, nor on a base branch with no required status check
+    status: implemented
+    release: v1.1.0
+    description: >
+      Coordinator, 2026-11-26, after temper armed auto-merge on
+      rules_wasm_component #760 and #761 while that repo's session merged its
+      Dependabot queue one PR at a time. For a repo in auto_merge.skip_repos,
+      temper arms nothing and posts nothing; the repo's allow_auto_merge
+      setting is untouched. Everywhere else, temper arms only when the PR's
+      base branch has at least one required status check, from classic
+      protection (contexts or checks) or an active ruleset. Without one,
+      auto-merge merges at once, before CI runs. If either source cannot be
+      read, temper does not arm, and it comments why. The check runs when the
+      PR is opened or reopened.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-003

@@ -266,7 +266,9 @@ describe('app', () => {
   // pull_request.opened — Dependabot auto-merge is gated on semver (temper#71)
   // =========================================================================
   describe('pull_request.opened Dependabot auto-merge', () => {
-    function prOpenedContext({ sender, title, body = '', files = [{ filename: 'Cargo.lock' }], filesError = null, changedFiles }) {
+    const REQUIRED_RULES = [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'ci' }] } }];
+    function prOpenedContext({ sender, title, body = '', files = [{ filename: 'Cargo.lock' }], filesError = null, changedFiles,
+      repoName = 'varve', branch = { name: 'main' }, rules = REQUIRED_RULES, branchError = null, rulesError = null }) {
       const octokit = createMockOctokit();
       // The handler arms auto-merge through a GraphQL mutation; record it.
       octokit.graphql = jest.fn().mockResolvedValue({});
@@ -276,6 +278,12 @@ describe('app', () => {
           if (filesError) return Promise.reject(filesError);
           return Promise.resolve({ status: 200, data: files.slice((params.page - 1) * 100, params.page * 100) });
         }
+        if (route === 'GET /repos/{owner}/{repo}/branches/{branch}') {
+          return branchError ? Promise.reject(branchError) : Promise.resolve({ status: 200, data: branch });
+        }
+        if (route === 'GET /repos/{owner}/{repo}/rules/branches/{branch}') {
+          return rulesError ? Promise.reject(rulesError) : Promise.resolve({ status: 200, data: rules });
+        }
         return base(route, params);
       });
       return {
@@ -283,9 +291,9 @@ describe('app', () => {
         log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
         octokit,
         payload: {
-          pull_request: { number: 157, node_id: 'PR_node', title, body, changed_files: changedFiles },
+          pull_request: { number: 157, node_id: 'PR_node', title, body, changed_files: changedFiles, base: { ref: 'main' } },
           repository: {
-            name: 'varve',
+            name: repoName,
             default_branch: 'main',
             owner: { login: 'pulseengine' }
           },
@@ -464,6 +472,88 @@ describe('app', () => {
       });
       await handlers['pull_request.opened'](ctx);
       expect(ctx.octokit.graphql).toHaveBeenCalledTimes(1);
+    });
+
+    const bump = 'build(deps): bump flate2 from 1.1.9 to 1.1.10';
+
+    it('arms nothing and posts nothing in a repo listed in skip_repos', async () => {
+      _setConfigForTesting({
+        auto_merge: { enabled: true, on_dependabot: true, on_bot_users: ['thrum'], merge_method: 'squash', skip_repos: ['rivet', 'varve'] }
+      });
+      const { handlers } = setupApp();
+      for (const [sender, title] of [['dependabot[bot]', bump], ['dependabot[bot]', 'build(deps): bump x from 1.0.0 to 2.0.0'], ['thrum', 'chore: sync']]) {
+        const ctx = prOpenedContext({ sender, title });
+        await handlers['pull_request.opened'](ctx);
+        expect(ctx.octokit.graphql).not.toHaveBeenCalled();
+        expect(comments(ctx)).toHaveLength(0);
+      }
+    });
+
+    it('still arms in a repo not listed in skip_repos', async () => {
+      _setConfigForTesting({
+        auto_merge: { enabled: true, on_dependabot: true, merge_method: 'squash', skip_repos: ['rivet'] }
+      });
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({ sender: 'dependabot[bot]', title: bump });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT arm on a branch with no required status checks, and says why', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({ sender: 'dependabot[bot]', title: bump, rules: [{ type: 'deletion' }] });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).not.toHaveBeenCalled();
+      expect(comments(ctx)[0][1].body).toMatch(/`main` has no required status checks/);
+    });
+
+    it('does NOT arm when a required_status_checks rule lists no checks', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({ sender: 'thrum', title: 'chore: sync',
+        rules: [{ type: 'required_status_checks', parameters: { required_status_checks: [] } }] });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).not.toHaveBeenCalled();
+    });
+
+    it('arms when classic protection alone requires a check', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({ sender: 'dependabot[bot]', title: bump, rules: [],
+        branch: { name: 'main', protection: { required_status_checks: { contexts: ['ci'], checks: [] } } } });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).toHaveBeenCalledTimes(1);
+    });
+
+    it('arms when classic protection requires a check by app (checks only)', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({ sender: 'dependabot[bot]', title: bump, rules: [],
+        branch: { name: 'main', protection: { required_status_checks: { contexts: [], checks: [{ context: 'ci', app_id: 15368 }] } } } });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT arm when the branch protection cannot be read (fails closed)', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({ sender: 'dependabot[bot]', title: bump,
+        branchError: Object.assign(new Error('Server Error'), { status: 502 }) });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).not.toHaveBeenCalled();
+      expect(comments(ctx)[0][1].body).toMatch(/required checks of `main` could not be read/);
+    });
+
+    it('does NOT arm when the branch rules cannot be read (fails closed)', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({ sender: 'dependabot[bot]', title: bump,
+        rulesError: Object.assign(new Error('Forbidden'), { status: 403 }) });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).not.toHaveBeenCalled();
+      expect(comments(ctx)[0][1].body).toMatch(/could not be read/);
+    });
+
+    it('does NOT arm when the rules answer is not a list (fails closed)', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({ sender: 'dependabot[bot]', title: bump, rules: {} });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).not.toHaveBeenCalled();
     });
   });
 
