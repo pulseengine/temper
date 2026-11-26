@@ -706,3 +706,25 @@ artifacts:
     links:
       - type: derives-from
         target: SC-003
+
+  - id: REQ-050
+    type: requirement
+    title: temper SHALL read a repo's required-contexts.txt with sieve's comment rules and SHALL refuse a file that lists no context
+    status: implemented
+    release: v1.1.0
+    description: >
+      Coordinator, 2026-11-26, after sieve v0.4.5 began treating '#' lines as
+      comments and repos (warte first) began adding a header. A line whose
+      first non-blank character is '#' is a comment, blank lines are skipped,
+      and each context is trimmed, so a header never becomes a phantom
+      required context in the audit. A file left with no context is refused
+      rather than read as "no required checks". temper's own mirror test reads
+      its file through the same parser; the cross-repo mirror check uses it
+      when it lands.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-002
