@@ -105,7 +105,7 @@ standards:
   merge_queue:
     # Intended queue repos. Audit-only: creating a queue is a per-repo rollout
     # (every required workflow needs a merge_group trigger first).
-    repos: [pulseengine.eu, rivet, relay, spar, loom, varve, gale, meld, jig]
+    repos: [pulseengine.eu, rivet, relay, spar, loom, varve, gale, meld, jig, temper]
     # The queue re-tests against the latest main; strict only adds
     # update-branch pressure and ~N^2/2 CI runs.
     strict_up_to_date: false
