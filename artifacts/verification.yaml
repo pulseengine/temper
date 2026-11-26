@@ -313,3 +313,26 @@ artifacts:
     links:
       - type: verifies
         target: REQ-046
+
+  - id: VER-040
+    type: verification
+    title: Auto-merge is not armed on a PR that changes a release workflow
+    status: implemented
+    description: >
+      pull_request.opened tests: a non-breaking grouped actions PR that
+      changes release.yml is not armed and the comment names only that path;
+      a thrum PR changing release-npm.yml is not armed; a release workflow on
+      the second page of files, or as a rename source, is found; a 502 on the
+      file list, a list shorter than changed_files, or one that reaches the
+      3000-file cap does not arm (fails closed); Release.YML matches; ci.yml, docs/release.yml,
+      sub/release.yml and release/notes.yml still arm. Mutants killed: first
+      page only, rename source ignored, fail open, `*` crossing `/`, guard
+      ignored (4 failures), case-sensitive match, changed_files ignored,
+      cap ignored.
+    fields:
+      method: automated-test
+      test-name: "pull_request.opened Dependabot auto-merge"
+      test-location: __tests__/integration/app.test.js
+    links:
+      - type: verifies
+        target: REQ-047

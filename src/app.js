@@ -5,6 +5,7 @@ import { createDashboardHandler, DEPLOY_SHA } from './dashboard.js';
 import { getConfig, getControllerRepoConfig, getChatopsRepoConfig } from './config.js';
 import { getLogger, setLogger } from './logger.js';
 import { dependabotAutoMergeDecision } from './dependabot-update-type.js';
+import { DEFAULT_REVIEW_PATHS, listPullRequestFiles, reviewPathHits } from './auto-merge-paths.js';
 import { configureRepository } from './repository.js';
 import {
   checkOrganizationMembership,
@@ -955,7 +956,36 @@ function registerApp(app, options = {}) {
         }
       }
 
+      // A PR that changes a release workflow keeps maintainer review, whoever
+      // opened it. If the file list cannot be read, do not arm.
+      let refusedPaths = false;
       if ((isDependabot && !refusedDependabot) || isBotUser) {
+        let reason = null;
+        try {
+          const files = await listPullRequestFiles(context.octokit, owner, repo, pr.number, pr.changed_files);
+          const hits = reviewPathHits(files, autoMerge.review_paths || DEFAULT_REVIEW_PATHS);
+          if (hits.length) reason = `this PR changes ${hits.join(', ')}, which keeps maintainer review`;
+        } catch (err) {
+          getLogger().warn({ pr: pr.number, err: err.message }, "Could not list PR files");
+          reason = "the PR's changed files could not all be read";
+        }
+        if (reason) {
+          refusedPaths = true;
+          getLogger().info({ pr: pr.number, reason }, "Not enabling auto-merge");
+          try {
+            await issueOps.createComment(context.octokit, {
+              owner,
+              repo,
+              issue_number: pr.number,
+              body: `temper did not enable auto-merge: ${reason}.`
+            });
+          } catch (err) {
+            getLogger().warn({ pr: pr.number, err: err.message }, "Could not explain skipped auto-merge");
+          }
+        }
+      }
+
+      if (((isDependabot && !refusedDependabot) || isBotUser) && !refusedPaths) {
         const mergeMethod = autoMerge.merge_method || "squash";
         getLogger().info({ pr: pr.number, sender, mergeMethod, event: eventName }, "Enabling auto-merge");
 

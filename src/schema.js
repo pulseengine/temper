@@ -136,6 +136,13 @@ export function validateConfig(config) {
     }
   }
 
+  if (config.auto_merge?.review_paths !== undefined) {
+    const rp = config.auto_merge.review_paths;
+    if (!Array.isArray(rp) || rp.length === 0 || !rp.every((p) => typeof p === 'string' && p.length > 0)) {
+      errors.push('auto_merge.review_paths must be a non-empty list of path globs');
+    }
+  }
+
   if (config.report !== undefined) {
     const rp = config.report;
     if (typeof rp !== 'object' || rp === null) {

@@ -231,6 +231,12 @@ auto_merge:
   on_bot_users:
     - thrum
   merge_method: squash
+  # Never armed on a PR that changes one of these: a release workflow runs on
+  # a tag, so a green PR proves nothing about it (owner rule 2026-11-25,
+  # relay#726). `*` matches within one path segment.
+  review_paths:
+    - ".github/workflows/release*.yml"
+    - ".github/workflows/release*.yaml"
 
 # temper-report.v1 for warte's Compliance view. The warte probe on this host
 # forwards the file (warte probe send --feed temper=<path>). The directory is
