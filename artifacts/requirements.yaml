@@ -627,3 +627,28 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-046
+
+  - id: REQ-047
+    type: requirement
+    title: temper SHALL NOT enable auto-merge on a PR that changes a release workflow, and SHALL NOT enable it when the PR's files cannot be read
+    status: implemented
+    release: v1.1.0
+    description: >
+      Owner rule 2026-11-25, after temper armed auto-merge on relay#726, a
+      non-breaking grouped Dependabot actions PR that touched release.yml. A
+      release workflow runs on a tag, so a green PR is no evidence for it.
+      auto_merge.review_paths (default .github/workflows/release*.yml and
+      .yaml; `*` stays within one path segment) is checked against every
+      changed path and every rename source, for Dependabot and configured bot
+      users alike; a match or an unreadable file list leaves the PR to a
+      maintainer, with a comment saying why. The check runs when the PR is
+      opened or reopened; a later push that adds a release workflow to an
+      already-armed PR is not re-checked.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+      upstream-ref: "pulseengine/relay#726"
+    links:
+      - type: derives-from
+        target: SC-003

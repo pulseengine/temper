@@ -195,6 +195,14 @@ describe('validateConfig', () => {
     expect(result.errors).toEqual(['dependabot_generation.schedule_timezone must be a non-empty string']);
   });
 
+  it('accepts auto_merge.review_paths and rejects an empty or non-string list', () => {
+    expect(validateConfig({ auto_merge: { review_paths: ['.github/workflows/release*.yml'] } }).valid).toBe(true);
+    for (const rp of [[], '.github/workflows/release.yml', [''], [3]]) {
+      expect(validateConfig({ auto_merge: { review_paths: rp } }).errors)
+        .toEqual(['auto_merge.review_paths must be a non-empty list of path globs']);
+    }
+  });
+
   // scheduler validation
   it('accepts valid scheduler config', () => {
     const result = validateConfig({

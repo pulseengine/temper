@@ -266,10 +266,18 @@ describe('app', () => {
   // pull_request.opened — Dependabot auto-merge is gated on semver (temper#71)
   // =========================================================================
   describe('pull_request.opened Dependabot auto-merge', () => {
-    function prOpenedContext({ sender, title, body = '' }) {
+    function prOpenedContext({ sender, title, body = '', files = [{ filename: 'Cargo.lock' }], filesError = null }) {
       const octokit = createMockOctokit();
       // The handler arms auto-merge through a GraphQL mutation; record it.
       octokit.graphql = jest.fn().mockResolvedValue({});
+      const base = octokit.request;
+      octokit.request = jest.fn((route, params) => {
+        if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}/files') {
+          if (filesError) return Promise.reject(filesError);
+          return Promise.resolve({ status: 200, data: files.slice((params.page - 1) * 100, params.page * 100) });
+        }
+        return base(route, params);
+      });
       return {
         id: 'delivery-pr-1',
         log: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
@@ -345,6 +353,69 @@ describe('app', () => {
       const ctx = prOpenedContext({
         sender: 'thrum',
         title: 'bump something from 1.0.0 to 2.0.0'
+      });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).toHaveBeenCalledTimes(1);
+    });
+
+    const comments = (ctx) => ctx.octokit.request.mock.calls.filter(
+      ([route]) => route === 'POST /repos/{owner}/{repo}/issues/{issue_number}/comments'
+    );
+
+    it('does NOT arm a non-breaking grouped actions PR that changes release.yml, and says why (relay#726)', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({
+        sender: 'dependabot[bot]',
+        title: 'build(deps): bump the actions-minor-patch group with 2 updates',
+        body: 'Updates `actions/cache` from 4.2.0 to 4.2.3',
+        files: [{ filename: '.github/workflows/ci.yml' }, { filename: '.github/workflows/release.yml' }]
+      });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).not.toHaveBeenCalled();
+      expect(comments(ctx)).toHaveLength(1);
+      expect(comments(ctx)[0][1].body).toContain('.github/workflows/release.yml');
+      expect(comments(ctx)[0][1].body).not.toContain('ci.yml');
+    });
+
+    it('does NOT arm a configured bot user PR that changes a release workflow', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({
+        sender: 'thrum', title: 'ci: tidy', files: [{ filename: '.github/workflows/release-npm.yml' }]
+      });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).not.toHaveBeenCalled();
+    });
+
+    it('finds a release workflow past the first page and as a rename source', async () => {
+      const { handlers } = setupApp();
+      const many = Array.from({ length: 100 }, (_, i) => ({ filename: `src/f${i}.rs` }));
+      const ctx = prOpenedContext({
+        sender: 'dependabot[bot]',
+        title: 'build(deps): bump flate2 from 1.1.9 to 1.1.10',
+        files: [...many, { filename: '.github/workflows/publish.yml', previous_filename: '.github/workflows/release.yml' }]
+      });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).not.toHaveBeenCalled();
+    });
+
+    it('does NOT arm when the file list cannot be read (fails closed)', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({
+        sender: 'dependabot[bot]',
+        title: 'build(deps): bump flate2 from 1.1.9 to 1.1.10',
+        filesError: Object.assign(new Error('Server Error'), { status: 502 })
+      });
+      await handlers['pull_request.opened'](ctx);
+      expect(ctx.octokit.graphql).not.toHaveBeenCalled();
+      expect(comments(ctx)[0][1].body).toMatch(/could not be read/);
+    });
+
+    it('still arms when only other workflows change (release-like names outside .github/workflows do not match)', async () => {
+      const { handlers } = setupApp();
+      const ctx = prOpenedContext({
+        sender: 'dependabot[bot]',
+        title: 'build(deps): bump flate2 from 1.1.9 to 1.1.10',
+        files: [{ filename: '.github/workflows/ci.yml' }, { filename: 'docs/release.yml' }, { filename: '.github/workflows/sub/release.yml' }, { filename: '.github/workflows/release/notes.yml' }]
       });
       await handlers['pull_request.opened'](ctx);
       expect(ctx.octokit.graphql).toHaveBeenCalledTimes(1);
