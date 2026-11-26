@@ -139,7 +139,9 @@ standards:
   # 2026-10-30). Every other repo carries over what it already requires.
   repos:
     temper:
-      required_checks: [test, lint, ci]   # temper#76
+      # The 8 contexts branch protection requires (mirrored in
+      # .github/required-contexts.txt); was [test, lint, ci] from temper#76.
+      required_checks: [test, lint, rivet, hostname-scan, gate-probe, triage, review-bench, ci]
     .github:
       required_checks: [ci, lint, test]
     # jig's verdict needs rivet, lint, test and the baseline and fails closed;

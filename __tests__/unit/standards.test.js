@@ -85,6 +85,15 @@ function compliantSnapshot(name = 'good') {
 const drifted = (ev) => ev.findings.filter((f) => f.drift).map((f) => f.rule).sort();
 
 describe('config.yml standards', () => {
+  it('.github/required-contexts.txt mirrors temper\'s own required checks, one per line, no header', () => {
+    const text = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'required-contexts.txt'), 'utf8');
+    expect(text.endsWith('\n')).toBe(true);
+    const lines = text.slice(0, -1).split('\n');
+    // sieve does not skip '#' lines yet, so a header would read as a context
+    expect(lines.every((l) => l.length > 0 && !l.startsWith('#') && l === l.trim())).toBe(true);
+    expect(lines).toEqual(REPO_CONFIG.standards.repos.temper.required_checks);
+  });
+
   it('the shipped config.yml validates, standards included', () => {
     expect(validateConfig(REPO_CONFIG)).toEqual({ valid: true, errors: [] });
     expect(getStandards(REPO_CONFIG).enabled).toBe(true);

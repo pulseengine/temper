@@ -33,6 +33,12 @@ updates:
       default-days: 7
     labels:
       - dependencies
+    ignore:
+      # nodemon >=3.1.12 pulls minimatch 7-11 (GHSA-g3hv-75wg-m249, moderate),
+      # which fails the test job's npm audit (temper#115). Drop this once a
+      # nodemon release no longer depends on it.
+      - dependency-name: nodemon
+        versions: [">=3.1.12"]
     groups:
       octokit:
         patterns:
@@ -83,6 +89,12 @@ updates:
       default-days: 7
     labels:
       - dependencies
+    ignore:
+      # The image tracks the live runtime: netcup runs node 20 from nodesource
+      # (smithy, 2026-11-26), and nothing builds this Dockerfile. A node major
+      # moves with smithy's runtime change, by hand (temper#118).
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
     groups:
       minor-patch:
         update-types:

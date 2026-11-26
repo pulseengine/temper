@@ -18,7 +18,11 @@ async function getOctokit() {
     return new Octokit({ auth: process.env.GITHUB_TOKEN });
   }
   const appId = process.env.APP_ID;
-  const privateKey = (process.env.PRIVATE_KEY || '').replace(/\\n/g, '\n');
+  // PRIVATE_KEY (inline, \n-escaped) or PRIVATE_KEY_PATH (a PEM file), as
+  // Probot reads them; the live service uses PRIVATE_KEY_PATH.
+  const privateKey = process.env.PRIVATE_KEY
+    ? process.env.PRIVATE_KEY.replace(/\\n/g, '\n')
+    : (process.env.PRIVATE_KEY_PATH ? fs.readFileSync(process.env.PRIVATE_KEY_PATH, 'utf8') : '');
   const org = process.env.ORGANIZATION || 'pulseengine';
 
   const appOctokit = new Octokit({
