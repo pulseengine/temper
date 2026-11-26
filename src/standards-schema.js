@@ -49,6 +49,25 @@ export function validateStandards(config = {}) {
       errors.push(`standards.repos.${name}.report_only must be a non-empty reason string`);
     }
   }
+  // Kept in step with DEVIATIONS in standards.js (no import: see the header).
+  const deviations = ['enforce_admins', 'required_reviews'];
+  if (s.accepted_deviations !== undefined && (!Array.isArray(s.accepted_deviations) ||
+    s.accepted_deviations.some((d) => !deviations.includes(d)))) {
+    errors.push(`standards.accepted_deviations must list only: ${deviations.join(', ')}`);
+  }
+  const tp = s.tag_protection || {};
+  const tagRules = ['creation', 'update', 'deletion', 'non_fast_forward', 'required_signatures'];
+  if (tp.rules !== undefined && (!Array.isArray(tp.rules) || tp.rules.length === 0 ||
+    tp.rules.some((r) => !tagRules.includes(r)))) {
+    errors.push(`standards.tag_protection.rules must be a non-empty list of: ${tagRules.join(', ')}`);
+  }
+  if (tp.bypass_actors !== undefined && (!Array.isArray(tp.bypass_actors) ||
+    tp.bypass_actors.some((a) => typeof a?.actor_type !== 'string' || !a.actor_type))) {
+    errors.push('standards.tag_protection.bypass_actors must be a list of {actor_type, actor_id, bypass_mode}');
+  }
+  if (tp.name !== undefined && (typeof tp.name !== 'string' || !tp.name)) {
+    errors.push('standards.tag_protection.name must be a non-empty string');
+  }
   return errors;
 }
 

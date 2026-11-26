@@ -48,7 +48,7 @@ describe('planOrg (dry-run)', () => {
     expect(urls).toContain('PATCH /repos/o/bare');
     expect(bare.writes.find((w) => w.url === '/repos/o/bare' && w.method === 'PATCH').body.allow_update_branch).toBe(false);
     const rulesets = bare.writes.filter((w) => w.url === '/repos/o/bare/rulesets').map((w) => w.body.name);
-    expect(rulesets).toEqual(['temper-default-branch-protection', 'temper-release-tags-immutable', 'temper-release-tags-create']);
+    expect(rulesets).toEqual(['temper-default-branch-protection', 'tag-v-protection']);
     expect(bare.findings.find((f) => f.rule === 'required_checks')).toMatchObject({ drift: true, fix: 'owner' });
 
     const fork = plan.results.find((r) => r.repo === 'up');

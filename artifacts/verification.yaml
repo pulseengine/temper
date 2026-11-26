@@ -273,9 +273,11 @@ artifacts:
       relay tags releases falcon-v* (every tag on the repo), which the org
       default refs/tags/v* does not cover. standards.repos.relay.tag_include
       is ["refs/tags/v*", "refs/tags/falcon-v*"]; each pattern is sampled and
-      must be immutable and creation-restricted. Cases: v*-only rulesets
+      must meet the tag standard (since 2026-11-26: deletion and update
+      blocked, admin bypass only; formerly immutable and creation-restricted).
+      Cases: v*-only rulesets
       drift for relay; falcon-v*-only rulesets drift too (every pattern
-      counts); both covered is ok; enforcement builds both tag rulesets on
+      counts); both covered is ok; enforcement builds the tag ruleset on
       both patterns; other repos stay on v*; tag_include must be a
       non-empty list of refs/tags/ patterns. Mutants: per-repo include
       ignored fails 3, builder ignores include fails 1, only the last
@@ -336,3 +338,34 @@ artifacts:
     links:
       - type: verifies
         target: REQ-047
+
+  - id: VER-041
+    type: verification
+    title: Accepted deviations and the tag standard report with warte's codes and are never written
+    status: implemented
+    description: >
+      standards.test.js: enforce_admins off and 0 approvals give accepted
+      findings and no drift under config.yml, and drift with no deviation
+      accepted; a branch-ruleset bypass actor still drifts; one approval
+      (classic or ruleset) leaves nothing to accept; enforceStandards never
+      POSTs an accepted enforce_admins and leaves a stricter tag shape alone.
+      Tag standard: tag-v-protection meets it exactly; missing update, an
+      extra bypass actor or unreadable bypass actors drift; varve's
+      required_signatures and temper's old two-ruleset shape are stricter.
+      report.test.js: accepted checks are {ok: true, severity: low, code:
+      divergent_declared}; drift outranks an accepted deviation; varve's tag
+      rule is stricter_than_standard; a missing update is
+      weaker_than_standard. Mutants killed: stricter never set (4), bypass
+      unchecked (2), rules any-of (2), accepted not reported (1), accepted
+      enforce_admins still written (1), approvals threshold (2), accepted
+      hides drift (1), ruleset approvals ignored (1). Live, read-only
+      2026-11-26 after batch 1: plant and sieve plan only hostname_scan.
+    fields:
+      method: automated-test
+      test-name: "evaluateRepo; repoEntry maps standards findings to report checks"
+      test-location: __tests__/unit/standards.test.js
+    links:
+      - type: verifies
+        target: REQ-048
+      - type: verifies
+        target: REQ-019

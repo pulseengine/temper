@@ -63,13 +63,11 @@ function compliantSnapshot(name = 'good') {
         required_status_checks: [{ context: 'build' }, { context: 'hostname-scan', integration_id: 15368 }] } }],
     bypass_actors: []
   };
+  // The tag standard (owner, 2026-11-26), as tag-v-protection carries it.
   const tags = [
-    { id: 901, name: 'immutable', target: 'tag', enforcement: 'active', source_type: 'Repository',
+    { id: 901, name: 'tag-v-protection', target: 'tag', enforcement: 'active', source_type: 'Repository',
       conditions: { ref_name: { include: ['refs/tags/v*'], exclude: [] } },
-      rules: [{ type: 'deletion' }, { type: 'non_fast_forward' }, { type: 'update' }], bypass_actors: [] },
-    { id: 902, name: 'create', target: 'tag', enforcement: 'active', source_type: 'Repository',
-      conditions: { ref_name: { include: ['refs/tags/v*'], exclude: [] } },
-      rules: [{ type: 'creation' }], bypass_actors: [ADMIN] }
+      rules: [{ type: 'deletion' }, { type: 'update' }], bypass_actors: [ADMIN] }
   ];
   return {
     name,
@@ -81,7 +79,7 @@ function compliantSnapshot(name = 'good') {
       required_status_checks: { strict: false, contexts: ['build'], checks: [{ context: 'build' }] },
       enforce_admins: { enabled: true },
       required_signatures: { enabled: true },
-      required_pull_request_reviews: { required_approving_review_count: 0 },
+      required_pull_request_reviews: { required_approving_review_count: 1 },
       required_linear_history: { enabled: false }
     }),
     branchRules: ok(managed.rules.map((r) => ({ ...r, ruleset_id: 100, ruleset_source_type: 'Repository' }))),
@@ -93,7 +91,15 @@ function compliantSnapshot(name = 'good') {
 
 const T = '2026-11-08T10:00:00Z';
 const BUILD = () => ({ version: '1.0.0', commit: 'c'.repeat(40), config_sha256: 'd'.repeat(64) });
-const entry = (snap) => repoEntry(snap, evaluateRepo(snap, std()), T);
+const entry = (snap, s = std()) => repoEntry(snap, evaluateRepo(snap, s), T);
+/** The standards with no accepted deviation. */
+const strictStd = () => ({ ...std(), accepted_deviations: new Set() });
+/** Real drift (not an accepted deviation): signed commits off. */
+function unsigned(snap) {
+  snap.protection.body.required_signatures.enabled = false;
+  snap.branchRules.body = snap.branchRules.body.filter((r) => r.type !== 'required_signatures');
+  return snap;
+}
 const byId = (e) => Object.fromEntries(e.checks.map((c) => [c.id, c]));
 
 describe('validateReport mirrors warte\'s parser', () => {
@@ -156,7 +162,7 @@ describe('repoEntry maps standards findings to report checks', () => {
 
     snap = compliantSnapshot();
     snap.protection.body.enforce_admins.enabled = false;
-    expect(byId(entry(snap))['protection.enforce_admins']).toMatchObject({ ok: false, code: 'weaker_than_standard' });
+    expect(byId(entry(snap, strictStd()))['protection.enforce_admins']).toMatchObject({ ok: false, code: 'weaker_than_standard' });
 
     snap = compliantSnapshot();
     snap.repo.body.allow_rebase_merge = true;
@@ -165,6 +171,33 @@ describe('repoEntry maps standards findings to report checks', () => {
     snap = compliantSnapshot();
     snap.rulesets.items = snap.rulesets.items.filter((r) => r.target !== 'tag');
     expect(byId(entry(snap))['ruleset.tag_v']).toMatchObject({ ok: false, code: 'missing' });
+
+    snap = compliantSnapshot();
+    snap.rulesets.items.find((r) => r.id === 901).rules = [{ type: 'deletion' }];
+    expect(byId(entry(snap))['ruleset.tag_v']).toMatchObject({ ok: false, code: 'weaker_than_standard', severity: 'high' });
+  });
+
+  it('accepted deviations report divergent_declared, ok, severity low (owner 2026-11-26)', () => {
+    const snap = compliantSnapshot();
+    snap.protection.body.enforce_admins.enabled = false;
+    snap.protection.body.required_pull_request_reviews.required_approving_review_count = 0;
+    const e = byId(entry(snap));
+    expect(e['protection.enforce_admins']).toEqual({ id: 'protection.enforce_admins', ok: true, severity: 'low', code: 'divergent_declared' });
+    expect(e['protection.required_reviews']).toEqual({ id: 'protection.required_reviews', ok: true, severity: 'low', code: 'divergent_declared' });
+    expect(summarize([entry(snap)])).toEqual({ repos: 1, compliant: 1, noncompliant: 0, unknown: 0 });
+  });
+
+  it('drift in the same check outranks an accepted deviation', () => {
+    const snap = compliantSnapshot();
+    snap.protection.body.enforce_admins.enabled = false;
+    snap.rulesets.items[0].bypass_actors = [ADMIN];
+    expect(byId(entry(snap))['protection.enforce_admins']).toMatchObject({ ok: false, code: 'weaker_than_standard', severity: 'high' });
+  });
+
+  it("varve's tag rule (deletion, update, required_signatures) reports stricter_than_standard", () => {
+    const snap = compliantSnapshot('varve');
+    snap.rulesets.items.find((r) => r.id === 901).rules.push({ type: 'required_signatures' });
+    expect(byId(entry(snap))['ruleset.tag_v']).toEqual({ id: 'ruleset.tag_v', ok: true, severity: 'high', code: 'stricter_than_standard' });
   });
 
   it('a fail-open skipped required check is drift and fails standards.drift', () => {
@@ -214,8 +247,7 @@ describe('repoEntry maps standards findings to report checks', () => {
   });
 
   it('a report built from entries is one warte accepts', () => {
-    const bad = compliantSnapshot('bad');
-    bad.protection.body.enforce_admins.enabled = false;
+    const bad = unsigned(compliantSnapshot('bad'));
     const repos = [entry(compliantSnapshot()), entry(bad)];
     const r = buildReport({
       org: 'pulseengine', now: Date.parse(T),
@@ -371,8 +403,7 @@ describe('report sweep', () => {
     const file = path.join(dir, 'report.json');
     const kv = initKVStore(path.join(dir, 'kv.db'), 'report_state');
     const clock = () => Date.parse(T);
-    const bad = compliantSnapshot('bad');
-    bad.protection.body.enforce_admins.enabled = false;
+    const bad = unsigned(compliantSnapshot('bad'));
     const sweep = createReportSweep({
       octokitFactory: async () => fakeOctokit({ good: compliantSnapshot('good'), bad }),
       org: 'pulseengine', stateStore: kv, config: config(file), clock, build: BUILD

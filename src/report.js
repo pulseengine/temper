@@ -38,6 +38,8 @@ const RULE_MAP = {
   required_checks: ['protection.required_checks', 'critical'],
   check_source: ['protection.required_checks', 'critical'],
   no_bypass: ['protection.enforce_admins', 'high'],
+  enforce_admins: ['protection.enforce_admins', 'high'],
+  required_reviews: ['protection.required_reviews', 'high'],
   required_signatures: ['protection.signed_commits', 'high'],
   pull_request: ['protection.required_reviews', 'high'],
   tag_protection: ['ruleset.tag_v', 'high'],
@@ -99,15 +101,22 @@ export function repoEntry(snap, evaluation, checkedAt) {
     const mapped = RULE_MAP[f.rule] || (f.rule === 'merge_queue' ? null : ['standards.drift', 'medium']);
     if (!mapped) continue;
     const [id, severity] = mapped;
-    const prev = folded.get(id) || { severity, drift: false, absent: false };
+    const prev = folded.get(id) || { severity, drift: false, absent: false, accepted: false, stricter: false };
     prev.drift = prev.drift || f.drift;
+    prev.accepted = prev.accepted || f.accepted === true;
+    prev.stricter = prev.stricter || f.stricter === true;
     prev.absent = prev.absent || (f.drift && ABSENT.test(String(f.actual)));
     folded.set(id, prev);
   }
   for (const [id, v] of folded) {
+    // Drift wins over an accepted deviation folded into the same check; an
+    // accepted deviation (owner decision) is ok at low severity.
     let code = 'ok';
+    let severity = v.severity;
     if (v.drift) code = declared ? 'divergent_declared' : (v.absent ? 'missing' : 'weaker_than_standard');
-    byId.set(id, check(id, v.severity, code));
+    else if (v.accepted) { code = 'divergent_declared'; severity = 'low'; }
+    else if (v.stricter) code = 'stricter_than_standard';
+    byId.set(id, check(id, severity, code));
   }
   return { ...base, checks: [...byId.values()].sort((a, b) => CHECK_IDS.indexOf(a.id) - CHECK_IDS.indexOf(b.id)) };
 }

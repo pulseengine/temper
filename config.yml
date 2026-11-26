@@ -84,6 +84,11 @@ standards:
   # enforce_admins on classic protection AND no bypass actors on any ruleset
   # that applies to the default branch.
   no_bypass: true
+  # Differences the owner accepted (2026-11-26): reported as divergent_declared
+  # (ok, severity low) and never written. enforce_admins off keeps the admin's
+  # emergency merge; required approving reviews stay at 0 until the agents
+  # have their own GitHub identity (revisit then).
+  accepted_deviations: [enforce_admins, required_reviews]
   # Strip bypass actors from repo rulesets temper does not manage. Shown in the
   # plan per ruleset before any apply.
   fix_foreign_bypass: true
@@ -107,13 +112,15 @@ standards:
   tag_protection:
     enabled: true
     include: ["refs/tags/v*"]
-    # Two rulesets (the shape ordeal#186 runs today): one makes release tags
-    # immutable for everyone (no bypass); one restricts creation, and its
-    # bypass list is the allowlist of who may cut a release tag. A repo that
-    # already has an equivalent ruleset is left alone.
-    immutable_name: temper-release-tags-immutable
-    create_name: temper-release-tags-create
-    create_bypass_actors:
+    # The tag standard (owner, 2026-11-26): release tags cannot be deleted or
+    # force-moved, creation stays open, and the repo-admin role may bypass
+    # (the owner's escape hatch). pulseengine.eu applied it as
+    # "tag-v-protection" to 30 repos (ids 28136300-28136334). A covering
+    # ruleset with more rules (creation, required_signatures) or fewer bypass
+    # actors reports as stricter_than_standard, never as drift.
+    name: tag-v-protection
+    rules: [deletion, update]
+    bypass_actors:
       - actor_type: RepositoryRole   # 5 = admin
         actor_id: 5
         bypass_mode: always
