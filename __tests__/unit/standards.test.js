@@ -18,6 +18,7 @@ import {
 } from '../../src/standards.js';
 import { validateConfig } from '../../src/schema.js';
 import { rulesetsMatch } from '../../src/rulesets.js';
+import { parseRequiredContexts } from '../../src/required-contexts.js';
 
 const REPO_CONFIG = yaml.load(fs.readFileSync(path.join(__dirname, '..', '..', 'config.yml'), 'utf8'));
 const ADMIN = { actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: 'always' };
@@ -85,13 +86,10 @@ function compliantSnapshot(name = 'good') {
 const drifted = (ev) => ev.findings.filter((f) => f.drift).map((f) => f.rule).sort();
 
 describe('config.yml standards', () => {
-  it('.github/required-contexts.txt mirrors temper\'s own required checks, one per line, no header', () => {
+  it('.github/required-contexts.txt mirrors temper\'s own required checks', () => {
     const text = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'required-contexts.txt'), 'utf8');
     expect(text.endsWith('\n')).toBe(true);
-    const lines = text.slice(0, -1).split('\n');
-    // sieve does not skip '#' lines yet, so a header would read as a context
-    expect(lines.every((l) => l.length > 0 && !l.startsWith('#') && l === l.trim())).toBe(true);
-    expect(lines).toEqual(REPO_CONFIG.standards.repos.temper.required_checks);
+    expect(parseRequiredContexts(text)).toEqual(REPO_CONFIG.standards.repos.temper.required_checks);
   });
 
   it('the shipped config.yml validates, standards included', () => {

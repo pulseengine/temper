@@ -392,3 +392,23 @@ artifacts:
     links:
       - type: verifies
         target: REQ-049
+
+  - id: VER-043
+    type: verification
+    title: required-contexts.txt comments and blank lines are skipped and an empty file is refused
+    status: implemented
+    description: >
+      Unit tests for parseRequiredContexts: a '#' header, an indented '#'
+      line, blank lines and CRLF endings yield only the contexts; a '#' later
+      in a line stays part of the context; an empty file, a blank file and a
+      comments-only file are refused; non-text is refused. temper's own
+      mirror test reads .github/required-contexts.txt through the parser and
+      matches config.yml. Mutants killed: comments not skipped, no trim,
+      empty file accepted.
+    fields:
+      method: automated-test
+      test-name: "parseRequiredContexts"
+      test-location: __tests__/unit/required-contexts.test.js
+    links:
+      - type: verifies
+        target: REQ-050

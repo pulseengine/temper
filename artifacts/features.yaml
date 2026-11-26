@@ -54,6 +54,8 @@ artifacts:
         target: REQ-030
       - type: satisfies
         target: REQ-048
+      - type: satisfies
+        target: REQ-050
 
   - id: FEAT-005
     type: feature
