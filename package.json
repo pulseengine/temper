@@ -37,9 +37,9 @@
     "@octokit/rest": "^22.0.1",
     "better-sqlite3": "^11.10.0",
     "dotenv": "^16.6.1",
-    "helmet": "^8.1.0",
+    "helmet": "^8.3.0",
     "js-yaml": "^4.1.1",
-    "pino": "^10.3.0",
+    "pino": "^10.4.0",
     "probot": "^14.2.4"
   },
   "devDependencies": {
