@@ -1,0 +1,7 @@
+# The toolchain CI and the release workflow use. A wasm32-wasip2 build from
+# an older std lacks wasi:cli/exit exit-with-code, so a documented exit 2
+# reaches the host as 1 (fleet exit-code rule, 2026-11-27).
+[toolchain]
+channel = "1.100.0"
+components = ["clippy", "rustfmt"]
+targets = ["wasm32-wasip1", "wasm32-wasip2"]
