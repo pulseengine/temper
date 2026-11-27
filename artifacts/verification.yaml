@@ -432,7 +432,10 @@ artifacts:
       path outside the preopen exiting 1. cargo-mutants on src/lib.rs: 78
       mutants, 75 caught, 3 unviable, 0 missed. tests/wasip2-smoke.sh runs the
       wasm32-wasip2 component under wasmtime v50.0.1 (sha256-pinned) in the
-      same job, with the same cases plus exit 2 on a usage error.
+      same job, with the same cases plus exit 2 on a usage error. The
+      advisory readme-blocks-kiln job fuses it with meld 0.70.0
+      (--reproducible --memory multi) and runs the same smoke on kiln 0.9.0
+      (covalent layer 2026.11.28).
     fields:
       method: automated-test
       test-name: "readme-blocks"
