@@ -23,7 +23,9 @@ export const CHECK_IDS = [
   'protection.required_checks', 'protection.signed_commits', 'protection.linear_history',
   'ruleset.tag_v', 'merge.settings', 'merge.auto_merge', 'merge.relaxation_open',
   'dependabot.config', 'dependabot.config_valid', 'labels.synced', 'templates.present',
-  'codeowners.present', 'secret_scanning', 'standards.drift'
+  'codeowners.present', 'secret_scanning', 'standards.drift',
+  // warte >= 1.6.53; emitted only with readme_blocks.enabled (docs/readme-blocks.md).
+  'readme.shared_blocks'
 ];
 export const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'];
 export const CODES = [

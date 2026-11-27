@@ -71,9 +71,11 @@ artifacts:
     type: feature
     title: Shared README blocks across the fleet (readme-blocks module and templates)
     status: draft
-    description: tools/readme-blocks, templates/readme, docs/readme-blocks.md. temper does not load the module yet.
+    description: tools/readme-blocks, templates/readme, docs/readme-blocks.md, src/readme-blocks.js. temper loads the module behind readme_blocks.enabled (false).
     links:
       - type: satisfies
         target: REQ-051
       - type: satisfies
         target: REQ-052
+      - type: satisfies
+        target: REQ-053

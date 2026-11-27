@@ -223,6 +223,9 @@ jobs:
           rustup target add wasm32-wasip1
           cargo build --locked --release --target wasm32-wasip1
           node --no-warnings tests/wasi-smoke.mjs target/wasm32-wasip1/release/readme-blocks.wasm ../..
+          # temper's own loader (src/readme-blocks.js): sha256 and
+          # interface-version gates, then checkReadme on the same build.
+          node --no-warnings tests/loader-smoke.mjs target/wasm32-wasip1/release/readme-blocks.wasm ../..
       # The same crate as a wasm32-wasip2 command component, run under
       # wasmtime (owner, 2026-11-27: run what we build). wasmtime is a
       # release pinned by sha256. kiln runs the fused component in the

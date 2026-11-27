@@ -288,6 +288,20 @@ report:
   sweep_interval_hours: 12
   review_window_days: 7
 
+# Shared README blocks (docs/readme-blocks.md). Off until smithy flips it in a
+# separate PR. With enabled: true, every report sweep runs the readme-blocks
+# wasm32-wasip1 module on each repo's README.md and .github/pulseengine.yaml
+# and adds readme.shared_blocks (warte >= 1.6.53). temper refuses a module
+# whose sha256 is not module_sha256 or whose interface-version is not 1, and
+# then reports no readme check. Sync PRs (branch temper/readme-blocks, never
+# auto-merged) go only to the repos listed in repos. smithy sets module_path
+# and module_sha256 in the deploy's config from its pin.
+readme_blocks:
+  enabled: false
+  # module_path: "/usr/local/lib/temper-readme-blocks/0.1.0/readme-blocks-v0.1.0-wasm32-wasip1.wasm"
+  # module_sha256: "75cde638b47ca5518d0d7018ecc6387e9b5af5bae74c74440394a64da27acc80"
+  repos: []
+
 self_update:
   enabled: true
   repo: temper

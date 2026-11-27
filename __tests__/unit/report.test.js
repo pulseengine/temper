@@ -10,7 +10,7 @@ import {
 import {
   countReview, reviewTotals, recordApiResponse, apiSnapshot, trackOctokit, setReviewStatsStore, _resetReportStats
 } from '../../src/report-stats.js';
-import { createReportSweep, reportSettings, buildInfo } from '../../src/report-sweep.js';
+import { createReportSweep, reportSettings, buildInfo, sweepOrg } from '../../src/report-sweep.js';
 import { initTaskStore } from '../../src/task-store.js';
 import { initKVStore } from '../../src/persistent-kv.js';
 
@@ -423,6 +423,28 @@ describe('report sweep', () => {
     const again = createReportSweep({ octokitFactory: async () => ({}), org: 'pulseengine', stateStore: kv, config: config(file), clock, build: BUILD });
     expect(again.lastSweepAt).toBe(Date.parse(T));
     kv.close();
+  });
+
+  it('with a readme context, every swept repo gets readme.shared_blocks and drift is collected', async () => {
+    const base = fakeOctokit({ good: compliantSnapshot('good'), bad: unsigned(compliantSnapshot('bad')) });
+    const files = { '.github/pulseengine.yaml': 'format: 1\n', 'README.md': 'old\n' };
+    const octokit = {
+      ...base,
+      request: async (r, p) => {
+        if (r === 'GET /repos/{owner}/{repo}/contents/{path}' && files[p.path] !== undefined) {
+          if (p.repo === 'good' && p.path === '.github/pulseengine.yaml') throw Object.assign(new Error('nf'), { status: 404 });
+          return { status: 200, data: { content: Buffer.from(files[p.path]).toString('base64'), sha: 's1' } };
+        }
+        return base.request(r, p);
+      }
+    };
+    const readme = { mod: 'MOD', templatesDir: '/t', syncs: [], check: () => ({ interface: 1, code: 'divergent_undeclared', reason: '', readme: 'new\n' }) };
+    const repos = await sweepOrg(octokit, 'pulseengine', std(), () => Date.parse(T), readme);
+    const rb = Object.fromEntries(repos.map((x) => [x.name, x.checks.find((c) => c.id === 'readme.shared_blocks')]));
+    expect(rb.good).toEqual({ id: 'readme.shared_blocks', ok: true, severity: 'low', code: 'not_applicable' });
+    expect(rb.bad).toEqual({ id: 'readme.shared_blocks', ok: false, severity: 'low', code: 'divergent_undeclared' });
+    expect(readme.syncs).toEqual([{ repo: 'bad', branch: 'main', readme: 'new\n' }]);
+    expect(repos.every((x) => x.checks.at(-1).id === 'readme.shared_blocks')).toBe(true);
   });
 
   it('a build without a commit is refused, keeping the previous file', async () => {
