@@ -161,6 +161,15 @@ export async function fetchSnapshot(octokit, owner, name) {
   const probe = await getWithStatus(octokit, 'GET /repos/{owner}/{repo}/contents/{path}', {
     owner, repo: name, path: PROBE_CONTRACT, ref: branch
   });
+  // The repo's mirror of its required checks (report check
+  // protection.required_contexts_mirror): {status, text}.
+  const rc = await getWithStatus(octokit, 'GET /repos/{owner}/{repo}/contents/{path}', {
+    owner, repo: name, path: '.github/required-contexts.txt', ref: branch
+  });
+  const requiredContextsFile = {
+    status: rc.status === 200 && typeof rc.body?.content !== 'string' ? 404 : rc.status,
+    text: rc.status === 200 && typeof rc.body?.content === 'string' ? Buffer.from(rc.body.content, 'base64').toString('utf8') : null
+  };
   return {
     name,
     owner,
@@ -172,6 +181,7 @@ export async function fetchSnapshot(octokit, owner, name) {
     workflowTexts,
     remoteWorkflows,
     // The contract's text (null when absent): which outputs it probes or exempts.
+    requiredContextsFile,
     probeContract: probe.status === 200 && typeof probe.body?.content === 'string'
       ? Buffer.from(probe.body.content, 'base64').toString('utf8')
       : null

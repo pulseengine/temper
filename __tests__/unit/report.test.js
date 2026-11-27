@@ -5,7 +5,8 @@ import yaml from 'js-yaml';
 import { getStandards, evaluateRepo } from '../../src/standards.js';
 import { validateConfig } from '../../src/schema.js';
 import {
-  validateReport, writeReport, repoEntry, reportIdent, buildReport, summarize, iso, MAX_REPOS, MAX_CHECKS, MAX_BYTES
+  validateReport, writeReport, repoEntry, reportIdent, buildReport, summarize, iso, MAX_REPOS, MAX_CHECKS, MAX_BYTES,
+  requiredContextsMirror
 } from '../../src/report.js';
 import {
   countReview, reviewTotals, recordApiResponse, apiSnapshot, trackOctokit, setReviewStatsStore, _resetReportStats
@@ -447,6 +448,27 @@ describe('report sweep', () => {
     expect(repos.every((x) => x.checks.at(-1).id === 'readme.shared_blocks')).toBe(true);
   });
 
+  it('mirror on adds protection.required_contexts_mirror per repo; off adds none', async () => {
+    const base = fakeOctokit({ good: compliantSnapshot('good'), bad: compliantSnapshot('bad') });
+    const octokit = {
+      ...base,
+      request: async (r, p) => {
+        if (r === 'GET /repos/{owner}/{repo}/contents/{path}' && p.path === '.github/required-contexts.txt') {
+          if (p.repo === 'good') throw Object.assign(new Error('nf'), { status: 404 });
+          return { status: 200, data: { content: Buffer.from('build\nhostname-scan\nextra\n').toString('base64') } };
+        }
+        return base.request(r, p);
+      }
+    };
+    const on = await sweepOrg(octokit, 'pulseengine', std(), () => Date.parse(T), null, { mirror: true });
+    const mc = Object.fromEntries(on.map((x) => [x.name, x.checks.find((c) => c.id === 'protection.required_contexts_mirror')?.code]));
+    expect(mc).toEqual({ bad: 'drift_file_only', good: 'not_applicable' });
+    const off = await sweepOrg(octokit, 'pulseengine', std(), () => Date.parse(T));
+    expect(off.flatMap((x) => x.checks).some((c) => c.id === 'protection.required_contexts_mirror')).toBe(false);
+    expect(reportSettings({ report: { required_contexts_mirror: true } }).requiredContextsMirror).toBe(true);
+    expect(reportSettings({}).requiredContextsMirror).toBe(false);
+  });
+
   it('a build without a commit is refused, keeping the previous file', async () => {
     const file = path.join(dir, 'report.json');
     const sweep = createReportSweep({
@@ -492,5 +514,56 @@ describe('report sweep', () => {
 
   it('iso() drops milliseconds', () => {
     expect(iso(Date.parse('2026-11-08T10:00:00.789Z'))).toBe('2026-11-08T10:00:00Z');
+  });
+});
+
+describe('protection.required_contexts_mirror', () => {
+  // compliantSnapshot requires 'build' through classic protection; add 'lint'
+  // through a branch ruleset so the live set is the union of both.
+  const snap = (file) => {
+    const s = compliantSnapshot('r');
+    s.branchRules.body.push({ type: 'required_status_checks', ruleset_id: 100, parameters: { required_status_checks: [{ context: 'lint' }] } });
+    s.requiredContextsFile = file;
+    return s;
+  };
+  const txt = (t) => ({ status: 200, text: t });
+  const code = (s) => requiredContextsMirror(s).check.code;
+
+  it('a snapshot without the file read yields no check', () => {
+    expect(requiredContextsMirror(compliantSnapshot('r'))).toBeNull();
+  });
+  it('file matching classic plus ruleset contexts is ok, comments and order ignored', () => {
+    const m = requiredContextsMirror(snap(txt('# mirror\nlint\nhostname-scan\nbuild\n')));
+    expect(m).toEqual({ check: { id: 'protection.required_contexts_mirror', ok: true, severity: 'medium', code: 'ok' }, fileOnly: [], protectionOnly: [] });
+  });
+  it('each drift direction, and both, name the contexts for the log', () => {
+    expect(requiredContextsMirror(snap(txt('build\nlint\nhostname-scan\ngate-probe\n')))).toMatchObject({ check: { ok: false, code: 'drift_file_only' }, fileOnly: ['gate-probe'], protectionOnly: [] });
+    expect(requiredContextsMirror(snap(txt('build\nhostname-scan\n')))).toMatchObject({ check: { ok: false, code: 'drift_protection_only' }, fileOnly: [], protectionOnly: ['lint'] });
+    expect(requiredContextsMirror(snap(txt('build\nhostname-scan\nx\n')))).toMatchObject({ check: { code: 'drift_both' }, fileOnly: ['x'], protectionOnly: ['lint'] });
+  });
+  it('a file listing nothing is protection-only drift, not an error', () => {
+    expect(code(snap(txt('# nothing\n')))).toBe('drift_protection_only');
+  });
+  it('no file is not_applicable; unreadable inputs are undecided', () => {
+    expect(code(snap({ status: 404, text: null }))).toBe('not_applicable');
+    expect(requiredContextsMirror(snap({ status: 403, text: null })).check).toMatchObject({ ok: null, code: 'error_permission' });
+    expect(code(snap({ status: 500, text: null }))).toBe('error_api');
+    const noRules = snap(txt('build\nlint\n')); noRules.branchRules = { status: 502, body: {} };
+    expect(code(noRules)).toBe('error_api');
+    const noProt = snap(txt('build\nlint\n')); noProt.protection = { status: 403, body: {} };
+    expect(code(noProt)).toBe('error_permission');
+  });
+  it('no classic protection (404) compares against rulesets alone', () => {
+    // 'build' is required by both the classic rule and the ruleset in the fixture.
+    const s = snap(txt('lint\nhostname-scan\nbuild\n')); s.protection = { status: 404, body: {} };
+    s.branchRules.body = s.branchRules.body.map((r) => (r.type === 'required_status_checks' && r.parameters.required_status_checks.some((c) => c.context === 'build')
+      ? { ...r, parameters: { required_status_checks: [{ context: 'hostname-scan' }] } } : r));
+    expect(requiredContextsMirror(s)).toMatchObject({ check: { code: 'drift_file_only' }, fileOnly: ['build'] });
+  });
+  it('every code validates in a report', () => {
+    const r = warteSample();
+    r.repos[0].checks = ['ok', 'not_applicable', 'drift_file_only', 'drift_protection_only', 'drift_both', 'error_api']
+      .map((c) => ({ id: 'protection.required_contexts_mirror', ok: c === 'ok' || c === 'not_applicable' ? true : c === 'error_api' ? null : false, severity: 'medium', code: c }));
+    expect(validateReport(r)).toBeNull();
   });
 });

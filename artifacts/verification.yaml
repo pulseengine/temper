@@ -485,3 +485,24 @@ artifacts:
     links:
       - type: verifies
         target: REQ-053
+
+  - id: VER-047
+    type: verification
+    title: The required-contexts mirror check compares the file with classic plus ruleset contexts and emits only agreed codes
+    status: implemented
+    description: >
+      __tests__/unit/report.test.js: no file read yields no check; a file
+      matching the union of classic and ruleset contexts is ok with comments
+      and order ignored; drift_file_only, drift_protection_only and
+      drift_both name the differing contexts for the log; a file listing
+      nothing is protection-only drift; 404 is not_applicable; 403 and 5xx
+      on the file, protection or rules are undecided; no classic protection
+      compares against rulesets alone; every code validates against the
+      warte report rules; the sweep adds the check only with mirror on.
+    fields:
+      method: automated-test
+      test-name: "protection.required_contexts_mirror"
+      test-location: __tests__/unit/report.test.js
+    links:
+      - type: verifies
+        target: REQ-054
