@@ -801,3 +801,28 @@ artifacts:
     links:
       - type: derives-from
         target: SC-008
+
+  - id: REQ-054
+    type: requirement
+    title: temper SHALL report, per repo, whether .github/required-contexts.txt equals the set of contexts live protection requires on the default branch
+    status: implemented
+    description: >
+      Owner, 2026-11-27 (relayed by pulseengine.eu): repo CI cannot read
+      branch protection without an admin token, so protection lagged the
+      file silently (spar since 2026-11-12, gale). Check
+      protection.required_contexts_mirror, severity medium, compares the
+      file (sieve's parsing rules) with classic contexts and branch-ruleset
+      required_status_checks together: ok, drift_file_only,
+      drift_protection_only, drift_both, not_applicable without the file,
+      error_api / error_permission when the file, protection or rules
+      cannot be read. Context names go to temper's log only; the report
+      stays closed. Id and codes agreed with warte, accepted from warte
+      v1.6.56; emitted only with report.required_contexts_mirror (false
+      until the hub runs 1.6.56).
+    fields:
+      priority: should
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-002

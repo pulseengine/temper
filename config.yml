@@ -287,6 +287,11 @@ report:
   path: /var/lib/temper/report.json
   sweep_interval_hours: 12
   review_window_days: 7
+  # protection.required_contexts_mirror: each repo's .github/required-contexts.txt
+  # against live classic + ruleset required checks (owner, 2026-11-27). warte
+  # accepts it from v1.6.56; turn this on only once the hub runs 1.6.56. The
+  # differing context names go to temper's log, never into the report.
+  required_contexts_mirror: false
 
 # Shared README blocks (docs/readme-blocks.md). Off until smithy flips it in a
 # separate PR. With enabled: true, every report sweep runs the readme-blocks

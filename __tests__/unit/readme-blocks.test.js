@@ -62,6 +62,7 @@ describe('readme_blocks settings and schema', () => {
     expect(errs({ enabled: false, repos: [] })).toEqual([]);
     expect(errs({ enabled: true, module_path: '/a.wasm', module_sha256: 'a'.repeat(64), repos: ['zwinger'] })).toEqual([]);
     expect(errs({ enabled: 'yes' })).toContain('readme_blocks.enabled must be a boolean');
+    expect(validateConfig({ organization: 'o', report: { required_contexts_mirror: 'yes' } }).errors).toContain('report.required_contexts_mirror must be a boolean');
     expect(errs({ module_path: 'rel.wasm' })).toContain('readme_blocks.module_path must be an absolute path');
     expect(errs({ module_sha256: 'abc' })).toContain('readme_blocks.module_sha256 must be 64 hex characters');
     expect(errs({ repos: ['a/b'] })).toContain('readme_blocks.repos must be a list of repo names');
