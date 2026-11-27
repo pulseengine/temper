@@ -27,8 +27,8 @@ run "${check[@]}" | grep -q '"code":"ok"'
 # A path outside the preopen is unreadable: exit 1, nothing on stdout.
 set +e; out=$(run check --format json --variables /etc/hosts --readme "$g/README.md" --templates "$g/t" 2>/dev/null); rc=$?; set -e
 test "$rc" -eq 1 && test -z "$out"
-# Exit 2 needs a Rust 1.100 build (wasi:cli/exit exit-with-code) and
-# main ending in std::process::exit; an older build reaches the host as 1.
+# Exit 2 is asserted through the component itself: with a Rust 1.100 build,
+# main ends in std::process::exit (see src/main.rs for the measurements).
 set +e; err=$(run --no-such-flag 2>&1 >/dev/null); rc=$?; set -e
 test "$rc" -eq 2
 echo "$err" | grep -q "unknown command or flag"

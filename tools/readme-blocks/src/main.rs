@@ -22,9 +22,11 @@ fn usage_error(msg: &str) -> i32 {
     2
 }
 
-// The exit code goes through std::process::exit: a wasm32-wasip2 build
-// returning ExitCode from main reaches the host as 1 for any failure, while
-// process::exit keeps 2 apart from 1 (wasmtime 50.0.1, Rust 1.100).
+// The exit code goes through std::process::exit. Measured with a Rust 1.100
+// wasm32-wasip2 build on wasmtime 50.0.1: returning ExitCode::from(2) from
+// main reaches the host as 1 unless wasmtime runs with
+// -S cli-exit-with-code=y, while process::exit(2) gives 2 with or without it.
+// CI asserts every documented code through the component either way.
 fn main() {
     let code = run();
     use std::io::Write;
