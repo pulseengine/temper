@@ -223,6 +223,29 @@ jobs:
           rustup target add wasm32-wasip1
           cargo build --locked --release --target wasm32-wasip1
           node --no-warnings tests/wasi-smoke.mjs target/wasm32-wasip1/release/readme-blocks.wasm ../..
+      # The same crate as a wasm32-wasip2 command component, run under
+      # wasmtime (owner, 2026-11-27: run what we build). wasmtime is a
+      # release pinned by sha256. kiln joins, fused with meld, as an advisory
+      # runner once the covalent layer carries kiln 0.9.0 and meld 0.70.0.
+      - name: readme-blocks runs as a wasip2 component under wasmtime
+        working-directory: tools/readme-blocks
+        env:
+          WASMTIME_VERSION: v50.0.1
+          WASMTIME_SHA256: 685466455dd42a14774a86c36c8f2e45cbb9bd6d92a850139315df60a75498a5
+        run: |
+          set -euo pipefail
+          rustup target add wasm32-wasip2
+          cargo build --locked --release --target wasm32-wasip2
+          # Rust >= 1.100 std imports wasi:cli/exit exit-with-code; without it a
+          # documented exit 2 reaches a flagless host as 1.
+          grep -aq exit-with-code target/wasm32-wasip2/release/readme-blocks.wasm
+          t="$RUNNER_TEMP/wasmtime"; mkdir -p "$t"
+          a="wasmtime-${WASMTIME_VERSION}-x86_64-linux"
+          curl -fsSL --proto '=https' -o "$t/$a.tar.xz" "https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}/$a.tar.xz"
+          echo "${WASMTIME_SHA256}  $t/$a.tar.xz" | sha256sum -c -
+          tar -xJf "$t/$a.tar.xz" -C "$t"
+          "$t/$a/wasmtime" --version
+          bash tests/wasip2-smoke.sh wasmtime "$t/$a/wasmtime" target/wasm32-wasip2/release/readme-blocks.wasm ../..
 
   # The review benchmark (eval/review-bench, temper#92): the matcher's tests,
   # every reference/known file anchored on its diff, and the reference

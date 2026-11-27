@@ -759,7 +759,9 @@ artifacts:
     description: >
       Delivery agreed with smithy, 2026-11-27 (pulseengine/temper#128).
       .github/workflows/readme-blocks-release.yml builds the wasm32-wasip1
-      module, runs its tests and the node:wasi smoke on the named file,
+      module and the wasm32-wasip2 component, runs the tests, the node:wasi
+      smoke on the named p1 file and the wasmtime smoke on the named p2 file,
+      requires exactly one of each,
       generates a CycloneDX SBOM and build-env.txt, signs SHA256SUMS.txt with
       cosign keyless (identity readme-blocks-release.yml@refs/tags/<tag>) and
       attests the module. It refuses a tag that does not name the crate

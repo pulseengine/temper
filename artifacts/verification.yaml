@@ -430,7 +430,9 @@ artifacts:
       written) and check exit codes 0, 1 and 2. tests/wasi-smoke.mjs runs the
       wasm32-wasip1 build under node:wasi in the triage CI job, including a
       path outside the preopen exiting 1. cargo-mutants on src/lib.rs: 78
-      mutants, 75 caught, 3 unviable, 0 missed.
+      mutants, 75 caught, 3 unviable, 0 missed. tests/wasip2-smoke.sh runs the
+      wasm32-wasip2 component under wasmtime v50.0.1 (sha256-pinned) in the
+      same job, with the same cases plus exit 2 on a usage error.
     fields:
       method: automated-test
       test-name: "readme-blocks"

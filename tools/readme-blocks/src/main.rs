@@ -1,5 +1,4 @@
 use readme_blocks::{check, Code, State, BLOCKS, INTERFACE_VERSION};
-use std::process::ExitCode;
 
 const USAGE: &str = "\
 Checks and syncs the shared PulseEngine README blocks between marker pairs.
@@ -18,25 +17,37 @@ Options:
 
 Exit codes: 0 a report was printed, 1 the check could not run, 2 usage error.";
 
-fn usage_error(msg: &str) -> ExitCode {
+fn usage_error(msg: &str) -> i32 {
     eprintln!("readme-blocks: {msg}\n\n{USAGE}");
-    ExitCode::from(2)
+    2
 }
 
-fn main() -> ExitCode {
+// The exit code goes through std::process::exit. Measured with a Rust 1.100
+// wasm32-wasip2 build on wasmtime 50.0.1: returning ExitCode::from(2) from
+// main reaches the host as 1 unless wasmtime runs with
+// -S cli-exit-with-code=y, while process::exit(2) gives 2 with or without it.
+// CI asserts every documented code through the component either way.
+fn main() {
+    let code = run();
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    std::process::exit(code);
+}
+
+fn run() -> i32 {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("--version") | Some("-V") => {
             println!("readme-blocks {}", env!("CARGO_PKG_VERSION"));
-            ExitCode::SUCCESS
+            0
         }
         Some("--help") | Some("-h") => {
             println!("{USAGE}");
-            ExitCode::SUCCESS
+            0
         }
         Some("interface-version") if args.len() == 1 => {
             println!("{INTERFACE_VERSION}");
-            ExitCode::SUCCESS
+            0
         }
         Some("check") => run_check(&args[1..]),
         Some(other) => usage_error(&format!("unknown command or flag '{other}'")),
@@ -44,7 +55,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_check(args: &[String]) -> ExitCode {
+fn run_check(args: &[String]) -> i32 {
     let (mut vars, mut readme, mut templates, mut json) = (None, None, None, false);
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -87,7 +98,7 @@ fn run_check(args: &[String]) -> ExitCode {
         Ok(r) => r,
         Err(e) => {
             eprintln!("readme-blocks: {e}");
-            return ExitCode::from(1);
+            return 1;
         }
     };
     if json {
@@ -95,7 +106,7 @@ fn run_check(args: &[String]) -> ExitCode {
             Ok(s) => println!("{s}"),
             Err(e) => {
                 eprintln!("readme-blocks: {e}");
-                return ExitCode::from(1);
+                return 1;
             }
         }
     } else {
@@ -116,5 +127,5 @@ fn run_check(args: &[String]) -> ExitCode {
             println!("  {} {s}", b.name);
         }
     }
-    ExitCode::SUCCESS
+    0
 }
