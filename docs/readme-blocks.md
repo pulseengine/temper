@@ -71,7 +71,7 @@ warte v1.6.53 is the first release that accepts the check. temper emits it only 
 
 ## The module
 
-`tools/readme-blocks` is a Rust program that temper runs as a WASI module (`wasm32-wasip1`) with `node:wasi`. The same source also builds as a `wasm32-wasip2` command component (owner, 2026-11-27: run what we build). CI runs it under wasmtime v50.0.1 in the required `triage` job. kiln runs fused components only, so it joins as an advisory runner (`meld fuse --reproducible`, then kiln 0.9.0) once the covalent layer carries kiln 0.9.0 and meld 0.70.0.
+`tools/readme-blocks` is a Rust program that temper runs as a WASI module (`wasm32-wasip1`) with `node:wasi`. The same source also builds as a `wasm32-wasip2` command component (owner, 2026-11-27: run what we build). CI runs it under wasmtime v50.0.1 in the required `triage` job. The advisory `readme-blocks-kiln` job fuses it with `meld fuse --reproducible --memory multi` and runs it on kiln, both from temper's pinned covalent layer (2026.11.28: meld 0.70.0, kiln 0.9.0), because kiln runs fused components only.
 
 ```sh
 readme-blocks check --variables <file> --readme <file> --templates <dir> --format json

@@ -1,6 +1,6 @@
 manifest-version = 1
 
 [toolchain]
-realm   = "pulseengine"
+realm   = "covalent"
 channel = "rolling"
-layer   = "2026.11.0"
+layer   = "2026.11.28"
