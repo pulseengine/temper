@@ -728,3 +728,26 @@ artifacts:
     links:
       - type: derives-from
         target: SC-002
+
+  - id: REQ-051
+    type: requirement
+    title: The readme-blocks module SHALL change README text only between marker pairs the repo placed, and SHALL refuse an unsyncable README or a non-conforming variables file rather than guess
+    status: implemented
+    description: >
+      Owner, 2026-11-27 (pulseengine/temper#128, relayed by pulseengine.eu):
+      shared README blocks synced by temper. The module reads
+      .github/pulseengine.yaml with rivet-yaml v0.43.3 and refuses an unknown,
+      duplicate or missing key, an unknown status, a format other than 1, a
+      multi-line value, a value carrying an HTML comment marker and a badge URL
+      that is not plain https. It refuses a README with an unknown, malformed,
+      duplicate, nested, mismatched or unclosed marker, ignores markers inside
+      fenced code, and leaves every line outside a pair byte-identical. A
+      template fault (unknown variable or filter) fails the check instead of
+      rendering an empty value. The contract is docs/readme-blocks.md.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-007

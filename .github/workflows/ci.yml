@@ -206,6 +206,23 @@ jobs:
           $b --help > /dev/null
           set +e; $b --no-such-flag 2>/dev/null; rc=$?; set -e
           test "$rc" -eq 2
+      # readme-blocks (docs/readme-blocks.md) rides in this required job: its
+      # Rust checks, then the wasm32-wasip1 build run under node:wasi as
+      # temper will load it.
+      - name: readme-blocks format, clippy and tests
+        working-directory: tools/readme-blocks
+        run: |
+          set -euo pipefail
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --no-fail-fast
+      - name: readme-blocks runs under node:wasi
+        working-directory: tools/readme-blocks
+        run: |
+          set -euo pipefail
+          rustup target add wasm32-wasip1
+          cargo build --locked --release --target wasm32-wasip1
+          node --no-warnings tests/wasi-smoke.mjs target/wasm32-wasip1/release/readme-blocks.wasm ../..
 
   # The review benchmark (eval/review-bench, temper#92): the matcher's tests,
   # every reference/known file anchored on its diff, and the reference

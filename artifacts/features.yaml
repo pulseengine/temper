@@ -66,3 +66,12 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-031
+
+  - id: FEAT-009
+    type: feature
+    title: Shared README blocks across the fleet (readme-blocks module and templates)
+    status: draft
+    description: tools/readme-blocks, templates/readme, docs/readme-blocks.md. temper does not load the module yet.
+    links:
+      - type: satisfies
+        target: REQ-051

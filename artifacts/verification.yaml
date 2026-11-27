@@ -412,3 +412,29 @@ artifacts:
     links:
       - type: verifies
         target: REQ-050
+
+  - id: VER-044
+    type: verification
+    title: readme-blocks refuses every non-conforming variables file and marker shape, syncs only between markers, and runs under node:wasi
+    status: implemented
+    description: >
+      Unit tests in tools/readme-blocks/src/lib.rs: 17 refused variables
+      files (unknown, duplicate and missing keys, multi-line values, format 2, unknown status,
+      bad name, empty or comment-carrying one_liner, bad licence, http and
+      spaced badge URLs, bracketed alt, unknown badge key, bare scheme), 10
+      refused marker shapes with the line named, CommonMark fence indent,
+      length and char rules, a plain badge accepted, html and shield escaping,
+      unknown variable and filter refused, sync leaves text outside pairs
+      unchanged and keeps CRLF, a synced README checks ok. CLI tests run the
+      binary against templates/readme (zwinger's licence line checks ok as
+      written) and check exit codes 0, 1 and 2. tests/wasi-smoke.mjs runs the
+      wasm32-wasip1 build under node:wasi in the triage CI job, including a
+      path outside the preopen exiting 1. cargo-mutants on src/lib.rs: 78
+      mutants, 75 caught, 3 unviable, 0 missed.
+    fields:
+      method: automated-test
+      test-name: "readme-blocks"
+      test-location: tools/readme-blocks
+    links:
+      - type: verifies
+        target: REQ-051
