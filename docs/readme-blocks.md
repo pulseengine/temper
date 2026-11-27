@@ -71,7 +71,7 @@ warte v1.6.53 is the first release that accepts the check. temper emits it only 
 
 ## The module
 
-`tools/readme-blocks` is a Rust program that temper runs as a WASI module (`wasm32-wasip1`) with `node:wasi`. The same source also builds as a `wasm32-wasip2` command component.
+`tools/readme-blocks` is a Rust program that temper runs as a WASI module (`wasm32-wasip1`) with `node:wasi`. The same source also builds as a `wasm32-wasip2` command component (owner, 2026-11-27: run what we build). CI runs it under wasmtime v50.0.1 in the required `triage` job. The advisory `readme-blocks-kiln` job fuses it with `meld fuse --reproducible` and runs it on kiln from the pinned varve layer (2026.11.43: meld 0.70.0, kiln 0.9.0), because kiln runs fused components only.
 
 ```sh
 readme-blocks check --variables <file> --readme <file> --templates <dir> --format json
@@ -79,12 +79,12 @@ readme-blocks interface-version      # prints 1
 ```
 
 - `check --format json` prints `{"interface":1,"code":…,"reason":…,"blocks":[{"name":…,"state":"ok"|"drift"}],"readme":…}`. `readme` is the synced README, present only when a block drifted and the README is syncable. `reason` is for temper's log and never reaches the report.
-- Exit codes: 0 when a report was printed, 1 when the check could not run (an unreadable file or a broken template), and 2 for a usage error.
+- Exit codes: 0 when a report was printed, 1 when the check could not run (an unreadable file or a broken template), and 2 for a usage error. They hold under both targets: `main` ends in `std::process::exit`, which a Rust 1.100 wasip2 build passes through `exit-with-code`.
 
 ## Delivery (agreed with smithy, 2026-11-27)
 
-- Releases use their own tag namespace, `readme-blocks-vX.Y.Z`, built by `.github/workflows/readme-blocks-release.yml` on that tag. The tag must name the version in `tools/readme-blocks/Cargo.toml`. Each release carries `readme-blocks-vX.Y.Z-wasm32-wasip1.wasm`, a CycloneDX SBOM, `build-env.txt`, `SHA256SUMS.txt`, a cosign keyless bundle over the sums, and a GitHub build attestation.
-- smithy verifies all three, pins the version and sha256, and installs the module read-only per version.
+- Releases use their own tag namespace, `readme-blocks-vX.Y.Z`, built by `.github/workflows/readme-blocks-release.yml` on that tag. The tag must name the version in `tools/readme-blocks/Cargo.toml`. Each release carries `readme-blocks-vX.Y.Z-wasm32-wasip1.wasm`, `readme-blocks-vX.Y.Z-wasm32-wasip2.wasm`, a CycloneDX SBOM, `build-env.txt`, `SHA256SUMS.txt`, a cosign keyless bundle over the sums, and a GitHub build attestation.
+- smithy verifies all three, pins the version and sha256, and installs the module read-only per version. smithy pins and deploys only the wasip1 file. The wasip2 file gets its own pin and PR once a kiln that runs it exists and the owner asks for it.
 - temper's config holds the module path and its sha256. temper refuses to load a module whose sha256 differs, or whose `interface-version` is not the one it accepts, and logs which.
 - The first tag is the owner's decision.
 

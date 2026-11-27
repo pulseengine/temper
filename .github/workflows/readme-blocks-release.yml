@@ -54,7 +54,7 @@ jobs:
           test "$tag" = "$crate" || { echo "tag $tag != tools/readme-blocks/Cargo.toml $crate"; exit 1; }
 
   build-module:
-    name: Build wasm32-wasip1
+    name: Build wasm32-wasip1 and wasm32-wasip2
     needs: [version-guard]
     runs-on: ubuntu-24.04
     steps:
@@ -65,24 +65,31 @@ jobs:
       - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-15
         with:
           toolchain: 1.100.0
-          targets: wasm32-wasip1
+          targets: wasm32-wasip1, wasm32-wasip2
 
       - name: Tests
         working-directory: tools/readme-blocks
         run: cargo test --locked --no-fail-fast
 
-      - name: Build the module
+      - name: Build the modules
         working-directory: tools/readme-blocks
-        run: cargo build --locked --release --target wasm32-wasip1
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --target wasm32-wasip1
+          cargo build --locked --release --target wasm32-wasip2
 
-      - name: Name the module
+      - name: Name the modules
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF#refs/tags/}"
           mkdir -p out
           cp tools/readme-blocks/target/wasm32-wasip1/release/readme-blocks.wasm "out/${TAG}-wasm32-wasip1.wasm"
-          echo "MODULE=out/${TAG}-wasm32-wasip1.wasm" >> "$GITHUB_ENV"
-          echo "VERSION=${TAG#readme-blocks-v}" >> "$GITHUB_ENV"
+          cp tools/readme-blocks/target/wasm32-wasip2/release/readme-blocks.wasm "out/${TAG}-wasm32-wasip2.wasm"
+          {
+            echo "MODULE=out/${TAG}-wasm32-wasip1.wasm"
+            echo "COMPONENT=out/${TAG}-wasm32-wasip2.wasm"
+            echo "VERSION=${TAG#readme-blocks-v}"
+          } >> "$GITHUB_ENV"
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -104,10 +111,28 @@ jobs:
           set +e; node --no-warnings run.mjs "$MODULE" --no-such-flag 2>/dev/null; rc=$?; set -e
           test "$rc" -eq 2
 
+      # The p2 file is released for kiln once it runs it; smithy pins and
+      # deploys only the p1 file (pulseengine/temper#128).
+      - name: Smoke-test the component under wasmtime
+        env:
+          WASMTIME_VERSION: v50.0.1
+          WASMTIME_SHA256: 685466455dd42a14774a86c36c8f2e45cbb9bd6d92a850139315df60a75498a5
+        run: |
+          set -euo pipefail
+          t="$RUNNER_TEMP/wasmtime"; mkdir -p "$t"
+          a="wasmtime-${WASMTIME_VERSION}-x86_64-linux"
+          curl -fsSL --proto '=https' -o "$t/$a.tar.xz" "https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}/$a.tar.xz"
+          echo "${WASMTIME_SHA256}  $t/$a.tar.xz" | sha256sum -c -
+          tar -xJf "$t/$a.tar.xz" -C "$t"
+          bash tools/readme-blocks/tests/wasip2-smoke.sh wasmtime "$t/$a/wasmtime" "$COMPONENT" .
+          test "$("$t/$a/wasmtime" run "$COMPONENT" --version)" = "readme-blocks $VERSION"
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: module
-          path: ${{ env.MODULE }}
+          path: |
+            ${{ env.MODULE }}
+            ${{ env.COMPONENT }}
           retention-days: 7
 
   # The SBOM tool runs here, with a read-only token, not in the signing job.
@@ -162,8 +187,12 @@ jobs:
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           mkdir -p release-assets
           find artifacts -type f -name "*.wasm" -exec cp {} release-assets/ \;
+          # Exactly one p1 and one p2 file, each named for its target, and no
+          # other .wasm: smithy pins the p1 file by exact name.
+          test -f "release-assets/${TAG}-wasm32-wasip1.wasm"
+          test -f "release-assets/${TAG}-wasm32-wasip2.wasm"
           n=$(find release-assets -maxdepth 1 -name "*.wasm" | wc -l)
-          test "$n" -eq 1 || { echo "expected 1 module, found $n"; exit 1; }
+          test "$n" -eq 2 || { echo "expected 2 modules (wasip1, wasip2), found $n"; exit 1; }
           cp artifacts/sbom/readme-blocks.cdx.json "release-assets/${TAG}.cdx.json"
 
       - name: Capture build environment
@@ -171,7 +200,8 @@ jobs:
           set -euo pipefail
           {
             echo "rustc: 1.100.0 (dtolnay/rust-toolchain, pinned in build-module)"
-            echo "target: wasm32-wasip1"
+            echo "targets: wasm32-wasip1 (temper loads it with node:wasi), wasm32-wasip2 (component)"
+            echo "smoke runner for wasip2: wasmtime v50.0.1 (sha256-pinned)"
             echo "rivet-yaml: rivet tag v0.43.3 (tools/readme-blocks/Cargo.lock)"
             echo "cosign: v2.4.1 (sigstore/cosign-installer, pinned below)"
             echo "runner: $(uname -srm)"
@@ -227,6 +257,9 @@ jobs:
                 --bundle SHA256SUMS.txt.cosign.bundle SHA256SUMS.txt
               sha256sum -c --ignore-missing SHA256SUMS.txt
               gh attestation verify ${TAG}-wasm32-wasip1.wasm --repo pulseengine/temper
+
+          temper loads the wasm32-wasip1 module. The wasm32-wasip2 file is the
+          same crate as a command component, for runtimes such as kiln.
           EOF
           # Never overwrite published assets: to re-run, delete the release.
           if gh release view "$TAG" >/dev/null 2>&1; then
