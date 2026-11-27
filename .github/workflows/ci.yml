@@ -236,6 +236,9 @@ jobs:
           set -euo pipefail
           rustup target add wasm32-wasip2
           cargo build --locked --release --target wasm32-wasip2
+          # Rust >= 1.100 std imports wasi:cli/exit exit-with-code; without it a
+          # documented exit 2 reaches a flagless host as 1.
+          grep -aq exit-with-code target/wasm32-wasip2/release/readme-blocks.wasm
           t="$RUNNER_TEMP/wasmtime"; mkdir -p "$t"
           a="wasmtime-${WASMTIME_VERSION}-x86_64-linux"
           curl -fsSL --proto '=https' -o "$t/$a.tar.xz" "https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}/$a.tar.xz"

@@ -119,6 +119,7 @@ jobs:
           WASMTIME_SHA256: 685466455dd42a14774a86c36c8f2e45cbb9bd6d92a850139315df60a75498a5
         run: |
           set -euo pipefail
+          grep -aq exit-with-code "$COMPONENT"
           t="$RUNNER_TEMP/wasmtime"; mkdir -p "$t"
           a="wasmtime-${WASMTIME_VERSION}-x86_64-linux"
           curl -fsSL --proto '=https' -o "$t/$a.tar.xz" "https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}/$a.tar.xz"
