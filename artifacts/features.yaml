@@ -75,3 +75,5 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-051
+      - type: satisfies
+        target: REQ-052

@@ -83,7 +83,7 @@ readme-blocks interface-version      # prints 1
 
 ## Delivery (agreed with smithy, 2026-11-27)
 
-- Releases use their own tag namespace, `readme-blocks-vX.Y.Z`, with a workflow on that tag. Each release carries the `.wasm`, `SHA256SUMS.txt`, a cosign keyless bundle over the sums, and a GitHub build attestation.
+- Releases use their own tag namespace, `readme-blocks-vX.Y.Z`, built by `.github/workflows/readme-blocks-release.yml` on that tag. The tag must name the version in `tools/readme-blocks/Cargo.toml`. Each release carries `readme-blocks-vX.Y.Z-wasm32-wasip1.wasm`, a CycloneDX SBOM, `build-env.txt`, `SHA256SUMS.txt`, a cosign keyless bundle over the sums, and a GitHub build attestation.
 - smithy verifies all three, pins the version and sha256, and installs the module read-only per version.
 - temper's config holds the module path and its sha256. temper refuses to load a module whose sha256 differs, or whose `interface-version` is not the one it accepts, and logs which.
 - The first tag is the owner's decision.

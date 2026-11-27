@@ -751,3 +751,26 @@ artifacts:
     links:
       - type: derives-from
         target: SC-007
+
+  - id: REQ-052
+    type: requirement
+    title: readme-blocks releases SHALL be built, signed and attested only from a readme-blocks-v* tag whose name matches the crate version, and SHALL carry SHA256SUMS.txt with a cosign keyless bundle
+    status: draft
+    description: >
+      Delivery agreed with smithy, 2026-11-27 (pulseengine/temper#128).
+      .github/workflows/readme-blocks-release.yml builds the wasm32-wasip1
+      module, runs its tests and the node:wasi smoke on the named file,
+      generates a CycloneDX SBOM and build-env.txt, signs SHA256SUMS.txt with
+      cosign keyless (identity readme-blocks-release.yml@refs/tags/<tag>) and
+      attests the module. It refuses a tag that does not name the crate
+      version, refuses to sign from any other ref, and never overwrites an
+      existing release. Draft until the first tag run completes success; the
+      tag is the owner's decision. temper's own sha256 and interface-version
+      refusal is a separate requirement, with the loader.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-008
