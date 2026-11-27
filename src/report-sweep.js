@@ -17,6 +17,9 @@ import { fetchSnapshot, evaluateRepo, getStandards } from './standards.js';
 import { selectSyncTargets } from './organization.js';
 import { buildReport, repoEntry, writeReport, iso, MAX_REPOS } from './report.js';
 import { trackOctokit, apiSnapshot, reviewTotals } from './report-stats.js';
+import {
+  readmeBlocksSettings, loadModule, evaluateReadme, readmeCheck, writeSyncPr, TEMPLATES_DIR
+} from './readme-blocks.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -56,16 +59,62 @@ export function buildInfo(root = ROOT) {
  * One sweep. Throws if the repo list cannot be read; per-repo read failures
  * become error_* checks instead.
  */
-export async function sweepOrg(octokit, org, std, now = Date.now) {
+export async function sweepOrg(octokit, org, std, now = Date.now, readme = null) {
   const all = await octokit.paginate('GET /orgs/{org}/repos', { org, type: 'all', per_page: 100 });
   const targets = selectSyncTargets(all).sort((a, b) => a.name.localeCompare(b.name));
   const repos = [];
   for (const r of targets) {
     const snap = await fetchSnapshot(octokit, org, r.name);
     const entry = repoEntry(snap, evaluateRepo(snap, std), iso(now()));
-    if (entry) repos.push(entry);
+    if (!entry) continue;
+    // readme = {mod, templatesDir, syncs}: add readme.shared_blocks and collect
+    // the READMEs to sync. Writing happens after the sweep (syncReadmes).
+    if (readme && snap.repo?.status === 200) {
+      const branch = snap.repo.body?.default_branch || 'main';
+      const ev = await evaluateReadme(octokit, readme.mod, org, r.name, branch, readme.templatesDir, readme.check);
+      if (ev.code !== 'ok' && ev.code !== 'not_applicable') {
+        getLogger().info({ repo: r.name, code: ev.code, reason: ev.reason }, 'readme-blocks: not ok');
+      }
+      entry.checks.push(readmeCheck(ev.code));
+      if (ev.readme !== undefined) readme.syncs.push({ repo: r.name, branch, readme: ev.readme });
+    }
+    repos.push(entry);
   }
   return repos;
+}
+
+/**
+ * Open or update the sync PR for each collected README whose repo is listed
+ * in readme_blocks.repos. Repos not listed get the report check only.
+ * Per-repo failures are logged; they never fail the sweep.
+ */
+export async function syncReadmes(octokit, org, syncs, allowed) {
+  const allow = new Set(allowed);
+  const results = [];
+  for (const s of syncs) {
+    if (!allow.has(s.repo)) continue;
+    try {
+      const res = await writeSyncPr(octokit, org, s.repo, s.branch, s.readme);
+      getLogger().info({ repo: s.repo, ...res }, 'readme-blocks: sync PR');
+      results.push({ repo: s.repo, ...res });
+    } catch (err) {
+      getLogger().error({ repo: s.repo, err: err.message }, 'readme-blocks: sync PR failed');
+      results.push({ repo: s.repo, action: 'failed' });
+    }
+  }
+  return results;
+}
+
+/** The readme-blocks context for one sweep, or null when off or the module is refused. */
+export function readmeContext(config, load = loadModule) {
+  const settings = readmeBlocksSettings(config);
+  if (!settings.enabled) return null;
+  try {
+    return { mod: load(settings), templatesDir: TEMPLATES_DIR, syncs: [], repos: settings.repos };
+  } catch (err) {
+    getLogger().error({ err: err.message }, 'readme-blocks: module refused; readme.shared_blocks not reported');
+    return null;
+  }
 }
 
 async function rateNow(octokit, now) {
@@ -105,7 +154,8 @@ export function createReportSweep({ octokitFactory, org, taskStore, stateStore, 
     running = true;
     try {
       const octokit = trackOctokit(await octokitFactory());
-      const repos = await sweepOrg(octokit, org, getStandards(config), clock);
+      const readme = readmeContext(config);
+      const repos = await sweepOrg(octokit, org, getStandards(config), clock, readme);
       if (repos.length > MAX_REPOS) {
         getLogger().error({ repos: repos.length, max: MAX_REPOS }, 'report: too many repos; previous report kept');
         return { written: false, error: 'too many repos' };
@@ -124,6 +174,7 @@ export function createReportSweep({ octokitFactory, org, taskStore, stateStore, 
           { pending: 0, in_progress: 0, failed: 0, oldest_pending_age_s: 0, stale_in_progress: 0 }
       });
       const res = writeReport(settings.path, report);
+      if (readme) await syncReadmes(octokit, org, readme.syncs, readme.repos);
       if (res.written) getLogger().info({ path: settings.path, bytes: res.bytes, repos: repos.length }, 'report: written');
       else getLogger().error({ error: res.error }, 'report: not written; previous report kept');
       return res;

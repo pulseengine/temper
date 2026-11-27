@@ -1,6 +1,6 @@
 # Shared README blocks
 
-Status: decided (pulseengine/temper#128, seam `temper-fleet/readme-blocks`). The module and templates are built. temper does not load the module yet, and the feature is off.
+Status: decided (pulseengine/temper#128, seam `temper-fleet/readme-blocks`). The module and templates are built, readme-blocks-v0.1.0 is released, and temper loads the module (`src/readme-blocks.js`) behind `readme_blocks.enabled: false`.
 
 The owner decided on 2026-11-27 that PulseEngine repos read as one platform through shared README blocks, which temper keeps in sync. This file is the contract between temper and each repo that opts in.
 
@@ -85,7 +85,7 @@ readme-blocks interface-version      # prints 1
 
 - Releases use their own tag namespace, `readme-blocks-vX.Y.Z`, built by `.github/workflows/readme-blocks-release.yml` on that tag. The tag must name the version in `tools/readme-blocks/Cargo.toml`. Each release carries `readme-blocks-vX.Y.Z-wasm32-wasip1.wasm`, `readme-blocks-vX.Y.Z-wasm32-wasip2.wasm`, a CycloneDX SBOM, `build-env.txt`, `SHA256SUMS.txt`, a cosign keyless bundle over the sums, and a GitHub build attestation.
 - smithy verifies all three, pins the version and sha256, and installs the module read-only per version. smithy pins and deploys only the wasip1 file. The wasip2 file gets its own pin and PR once a kiln that runs it exists and the owner asks for it.
-- temper's config holds the module path and its sha256. temper refuses to load a module whose sha256 differs, or whose `interface-version` is not the one it accepts, and logs which.
+- temper's config holds the module path and its sha256 as `readme_blocks.module_path` (absolute) and `readme_blocks.module_sha256` (64 hex). temper refuses to load a module whose sha256 differs, or whose `interface-version` is not 1, logs which, and then reports no `readme.shared_blocks` check. `readme_blocks.repos` lists the repos that get sync PRs; every swept repo gets the check.
 - The first tag is the owner's decision.
 
 ## Sync pull requests
