@@ -105,7 +105,7 @@ standards:
   merge_queue:
     # Intended queue repos. Audit-only: creating a queue is a per-repo rollout
     # (every required workflow needs a merge_group trigger first).
-    repos: [pulseengine.eu, rivet, relay, spar, loom, varve, gale, meld, jig]
+    repos: [pulseengine.eu, rivet, relay, spar, loom, varve, gale, meld, jig, temper]
     # The queue re-tests against the latest main; strict only adds
     # update-branch pressure and ~N^2/2 CI runs.
     strict_up_to_date: false
@@ -240,6 +240,36 @@ auto_merge:
   on_bot_users:
     - thrum
   merge_method: squash
+  # Repos whose own session merges its Dependabot queue one PR at a time:
+  # temper arms nothing and posts nothing there (coordinator, 2026-11-26).
+  # Elsewhere temper still never arms on a branch with no required status
+  # check, where auto-merge would merge before CI runs.
+  skip_repos:
+    - pulseengine.eu
+    - rivet
+    - spar
+    - synth
+    - sigil
+    - relay
+    - meld
+    - loom
+    - wohl
+    - ordeal
+    - plant
+    - kiln
+    - jig
+    - varve
+    - gale
+    - sieve
+    - jess
+    - warte
+    - witness
+    - scry
+    - example-kvs
+    - bazel-file-ops-component
+    - rules_wasm_component
+    - rules_rocq_rust
+    - temper
   # Never armed on a PR that changes one of these: a release workflow runs on
   # a tag, so a green PR proves nothing about it (owner rule 2026-11-25,
   # relay#726). `*` matches within one path segment.
@@ -257,6 +287,25 @@ report:
   path: /var/lib/temper/report.json
   sweep_interval_hours: 12
   review_window_days: 7
+  # protection.required_contexts_mirror: each repo's .github/required-contexts.txt
+  # against live classic + ruleset required checks (owner, 2026-11-27). warte
+  # accepts it from v1.6.56; turn this on only once the hub runs 1.6.56. The
+  # differing context names go to temper's log, never into the report.
+  required_contexts_mirror: false
+
+# Shared README blocks (docs/readme-blocks.md). Off until smithy flips it in a
+# separate PR. With enabled: true, every report sweep runs the readme-blocks
+# wasm32-wasip1 module on each repo's README.md and .github/pulseengine.yaml
+# and adds readme.shared_blocks (warte >= 1.6.53). temper refuses a module
+# whose sha256 is not module_sha256 or whose interface-version is not 1, and
+# then reports no readme check. Sync PRs (branch temper/readme-blocks, never
+# auto-merged) go only to the repos listed in repos. smithy sets module_path
+# and module_sha256 in the deploy's config from its pin.
+readme_blocks:
+  enabled: false
+  # module_path: "/usr/local/lib/temper-readme-blocks/0.1.0/readme-blocks-v0.1.0-wasm32-wasip1.wasm"
+  # module_sha256: "75cde638b47ca5518d0d7018ecc6387e9b5af5bae74c74440394a64da27acc80"
+  repos: []
 
 self_update:
   enabled: true

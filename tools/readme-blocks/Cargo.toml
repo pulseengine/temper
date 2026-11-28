@@ -1,0 +1,26 @@
+[package]
+name = "readme-blocks"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Checks and syncs the shared PulseEngine README blocks between marker pairs"
+license = "MIT"
+repository = "https://github.com/pulseengine/temper"
+publish = false
+
+[[bin]]
+name = "readme-blocks"
+path = "src/main.rs"
+
+[dependencies]
+# rivet's own YAML parser (YAML 1.2, duplicate keys refused), pinned to the
+# tag named in docs/readme-blocks.md.
+rivet-yaml = { git = "https://github.com/pulseengine/rivet", tag = "v0.43.3" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = "s"

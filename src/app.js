@@ -5,7 +5,7 @@ import { createDashboardHandler, DEPLOY_SHA } from './dashboard.js';
 import { getConfig, getControllerRepoConfig, getChatopsRepoConfig } from './config.js';
 import { getLogger, setLogger } from './logger.js';
 import { dependabotAutoMergeDecision } from './dependabot-update-type.js';
-import { DEFAULT_REVIEW_PATHS, listPullRequestFiles, reviewPathHits } from './auto-merge-paths.js';
+import { DEFAULT_REVIEW_PATHS, hasRequiredChecks, listPullRequestFiles, reviewPathHits } from './auto-merge-paths.js';
 import { configureRepository } from './repository.js';
 import {
   checkOrganizationMembership,
@@ -921,7 +921,13 @@ function registerApp(app, options = {}) {
 
     // Auto-merge for Dependabot and bot PRs
     const autoMerge = config?.auto_merge;
-    if (autoMerge?.enabled) {
+    // A repo whose own session merges its queue: temper arms nothing and says
+    // nothing there, so one actor decides each merge.
+    const skipRepo = (autoMerge?.skip_repos || []).includes(repo);
+    if (autoMerge?.enabled && skipRepo) {
+      getLogger().info({ pr: pr.number, repo }, "Auto-merge skipped: repo is in auto_merge.skip_repos");
+    }
+    if (autoMerge?.enabled && !skipRepo) {
       const isDependabot = sender === "dependabot[bot]" && autoMerge.on_dependabot;
       const isBotUser = (autoMerge.on_bot_users || []).some(
         bot => sender === bot || sender === bot + "[bot]"
@@ -985,7 +991,37 @@ function registerApp(app, options = {}) {
         }
       }
 
+      // With no required status check on the base branch, auto-merge merges at
+      // once, before CI runs. If the protection cannot be read, do not arm.
+      let refusedChecks = false;
       if (((isDependabot && !refusedDependabot) || isBotUser) && !refusedPaths) {
+        const branch = pr.base?.ref || repository.default_branch;
+        let reason = null;
+        try {
+          if (!(await hasRequiredChecks(context.octokit, owner, repo, branch))) {
+            reason = `\`${branch}\` has no required status checks, so auto-merge would merge before CI runs`;
+          }
+        } catch (err) {
+          getLogger().warn({ pr: pr.number, err: err.message }, "Could not read required checks");
+          reason = `the required checks of \`${branch}\` could not be read`;
+        }
+        if (reason) {
+          refusedChecks = true;
+          getLogger().info({ pr: pr.number, reason }, "Not enabling auto-merge");
+          try {
+            await issueOps.createComment(context.octokit, {
+              owner,
+              repo,
+              issue_number: pr.number,
+              body: `temper did not enable auto-merge: ${reason}.`
+            });
+          } catch (err) {
+            getLogger().warn({ pr: pr.number, err: err.message }, "Could not explain skipped auto-merge");
+          }
+        }
+      }
+
+      if (((isDependabot && !refusedDependabot) || isBotUser) && !refusedPaths && !refusedChecks) {
         const mergeMethod = autoMerge.merge_method || "squash";
         getLogger().info({ pr: pr.number, sender, mergeMethod, event: eventName }, "Enabling auto-merge");
 
