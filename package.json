@@ -59,6 +59,16 @@
     "provenance": true
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["better-sqlite3"]
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ],
+    "overrides": {
+      "glob@>=9.0.0": "^14.0.6",
+      "minimatch@>=7.0.0": "^11.0.9"
+    }
+  },
+  "overrides": {
+    "glob@>=9.0.0": "^14.0.6",
+    "minimatch@>=7.0.0": "^11.0.9"
   }
 }

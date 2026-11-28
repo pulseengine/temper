@@ -27,7 +27,7 @@ jest_bin.jest_test(
     args = [
         "--config",
         "jest.config.cjs",
-        "--testPathPattern",
+        "--testPathPatterns",
         "unit",
         "--no-cache",
         "--no-watchman",
@@ -52,7 +52,7 @@ jest_bin.jest_test(
     args = [
         "--config",
         "jest.config.cjs",
-        "--testPathPattern",
+        "--testPathPatterns",
         "integration",
         "--no-cache",
         "--no-watchman",
