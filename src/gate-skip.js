@@ -47,7 +47,7 @@ import yaml from 'js-yaml';
 
 export const PROBE_CONTRACT = '.github/gate-probe.json';
 
-function triggers(doc) {
+export function triggers(doc) {
   const on = doc?.on ?? doc?.true; // YAML 1.1 reads a bare `on:` key as true
   if (typeof on === 'string') return { [on]: {} };
   if (Array.isArray(on)) return Object.fromEntries(on.map((e) => [e, {}]));

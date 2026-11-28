@@ -826,3 +826,29 @@ artifacts:
     links:
       - type: derives-from
         target: SC-002
+  - id: REQ-056
+    type: requirement
+    title: temper SHALL report, per repo, whether its workflows cancel superseded PR runs and never cancel main or release runs
+    status: implemented
+    description: >
+      pulseengine.eu, 2026-11-28: superseded PR runs (kapsel alone had 14)
+      jammed the fleet's hosted-runner queue for hours. Check ci.concurrency,
+      severity medium, report only, over the workflow files the sweep already
+      reads: release_cancellable (a tag, release or release-named dispatch
+      workflow whose cancel-in-progress is not false), main_cancellable
+      (cancel-in-progress true on a workflow that runs on push to the
+      default branch or merge_group), pr_not_cancelled (a pull_request
+      workflow without a ref-scoped group that cancels on PR events, at the
+      top level or on every job), error_parse (a workflow that does not
+      parse), first match wins; not_applicable without workflows;
+      error_api / error_permission when the directory or a file cannot be
+      read. Paths and "N of M workflows parsed" go to temper's log only.
+      Id and codes agreed with warte, accepted from warte v1.6.60; emitted
+      only with report.ci_concurrency.
+    fields:
+      priority: should
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-002

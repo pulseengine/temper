@@ -292,6 +292,12 @@ report:
   # accepts it from v1.6.56; turn this on only once the hub runs 1.6.56. The
   # differing context names go to temper's log, never into the report.
   required_contexts_mirror: false
+  # ci.concurrency: each repo's workflows cancel superseded PR runs (a
+  # ref-scoped group that cancels on PR events) and never cancel main or
+  # release runs (pulseengine.eu, 2026-11-28). warte accepts it from v1.6.60;
+  # turn this on only once the hub runs 1.6.60. Workflow paths and the parse
+  # count go to temper's log, never into the report.
+  ci_concurrency: false
 
 # Shared README blocks (docs/readme-blocks.md). Off until smithy flips it in a
 # separate PR. With enabled: true, every report sweep runs the readme-blocks
