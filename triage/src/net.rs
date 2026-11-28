@@ -13,27 +13,35 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const UA: &str = concat!("temper-triage/", env!("CARGO_PKG_VERSION"));
 
-fn builder() -> ureq::AgentBuilder {
-    ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(30))
-        .redirects(0)
-        .user_agent(UA)
+fn agent_with(tls: Option<ureq::tls::TlsConfig>) -> ureq::Agent {
+    let mut b = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(30)))
+        .max_redirects(0)
+        .user_agent(UA);
+    if let Some(t) = tls {
+        b = b.tls_config(t);
+    }
+    b.build().into()
 }
 
 fn agent() -> ureq::Agent {
-    builder().build()
+    agent_with(None)
 }
 
 /// A TLS config that trusts exactly the certificates in the PEM file at
 /// `path`. Fails closed: an unreadable file or one without a certificate is
 /// an error, never a fallback to the public roots or to no verification.
-pub fn tls_trusting(path: &str) -> Result<Arc<rustls::ClientConfig>, String> {
+/// Every certificate is parsed here first, because ureq skips the ones it
+/// cannot parse without an error.
+pub fn tls_trusting(path: &str) -> Result<ureq::tls::TlsConfig, String> {
     use rustls_pki_types::pem::PemObject;
     use rustls_pki_types::CertificateDer;
     let pem = std::fs::read(path).map_err(|e| format!("warte_ca_file {path}: {e}"))?;
     let mut roots = rustls::RootCertStore::empty();
+    let mut certs = Vec::new();
     for c in CertificateDer::pem_slice_iter(&pem) {
         let c = c.map_err(|e| format!("warte_ca_file {path}: {e}"))?;
+        certs.push(ureq::tls::Certificate::from_der(c.as_ref()).to_owned());
         roots
             .add(c)
             .map_err(|e| format!("warte_ca_file {path}: {e}"))?;
@@ -42,12 +50,29 @@ pub fn tls_trusting(path: &str) -> Result<Arc<rustls::ClientConfig>, String> {
         return Err(format!("warte_ca_file {path}: no certificate in it"));
     }
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let cfg = rustls::ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
-        .map_err(|e| format!("tls: {e}"))?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    Ok(Arc::new(cfg))
+    Ok(ureq::tls::TlsConfig::builder()
+        .provider(ureq::tls::TlsProvider::Rustls)
+        .root_certs(ureq::tls::RootCerts::Specific(Arc::new(certs)))
+        .unversioned_rustls_crypto_provider(provider)
+        .build())
+}
+
+/// A transport error as a fixed category, never ureq's own message, which
+/// may carry the URL or a server-supplied string.
+fn err_kind(e: &ureq::Error) -> &'static str {
+    match e {
+        ureq::Error::Timeout(_) => "timeout",
+        ureq::Error::HostNotFound => "host not found",
+        ureq::Error::ConnectionFailed => "connection failed",
+        // rustls reports a refused certificate as an io::Error wrapping it.
+        ureq::Error::Io(io) if io.get_ref().is_some_and(|i| i.is::<rustls::Error>()) => "tls error",
+        ureq::Error::Io(_) => "io error",
+        ureq::Error::Tls(_) => "tls error",
+        ureq::Error::Rustls(_) => "tls error",
+        ureq::Error::TooManyRedirects => "too many redirects",
+        ureq::Error::Json(_) => "invalid json",
+        _ => "transport error",
+    }
 }
 
 fn now() -> u64 {
@@ -167,28 +192,35 @@ impl GitHub for RealGitHub {
             Method::Get => "GET",
             Method::Post => "POST",
         };
-        let req = self
-            .http
-            .request(m, &format!("{}{path}", self.api))
-            .set("Authorization", &auth)
-            .set("Accept", "application/vnd.github+json")
-            .set("X-GitHub-Api-Version", "2022-11-28");
-        let res = match body {
-            Some(b) => req.send_json(b.clone()),
-            None if method == Method::Post => req.send_json(json!({})),
-            None => req.call(),
+        let url = format!("{}{path}", self.api);
+        let res = match method {
+            Method::Get => self
+                .http
+                .get(&url)
+                .header("Authorization", &auth)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .call(),
+            Method::Post => self
+                .http
+                .post(&url)
+                .header("Authorization", &auth)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .send_json(body.cloned().unwrap_or_else(|| json!({}))),
         };
         // Only the method and path are reported: never the token or a body.
         match res {
-            // redirects(0) hands a 3xx back as Ok: only 2xx is success.
-            Ok(r) if !(200..300).contains(&r.status()) => {
-                Err(format!("{m} {path}: HTTP {}", r.status()))
+            // max_redirects(0) hands a 3xx back as Ok: only 2xx is success.
+            Ok(r) if !r.status().is_success() => {
+                Err(format!("{m} {path}: HTTP {}", r.status().as_u16()))
             }
-            Ok(r) => r
-                .into_json::<Value>()
+            Ok(mut r) => r
+                .body_mut()
+                .read_json::<Value>()
                 .map_err(|e| format!("{m} {path}: {e}")),
-            Err(ureq::Error::Status(code, _)) => Err(format!("{m} {path}: HTTP {code}")),
-            Err(e) => Err(format!("{m} {path}: {}", e.kind())),
+            Err(ureq::Error::StatusCode(code)) => Err(format!("{m} {path}: HTTP {code}")),
+            Err(e) => Err(format!("{m} {path}: {}", err_kind(&e))),
         }
     }
 }
@@ -203,7 +235,7 @@ impl RealWarte {
     /// `ca_file`: trust only this CA for warte (see `tls_trusting`).
     pub fn new(base: &str, token: &str, ca_file: Option<&str>) -> Result<RealWarte, String> {
         let http = match ca_file {
-            Some(p) => builder().tls_config(tls_trusting(p)?).build(),
+            Some(p) => agent_with(Some(tls_trusting(p)?)),
             None => agent(),
         };
         Ok(RealWarte {
@@ -216,19 +248,22 @@ impl RealWarte {
 
 impl Warte for RealWarte {
     fn offer(&mut self) -> Result<Vec<(String, u64)>, String> {
-        let v = self
+        let mut v = self
             .http
             .get(&format!("{}/api/triage", self.base))
-            .set("Authorization", &self.auth)
+            .header("Authorization", &self.auth)
             .call()
             .map_err(|e| match e {
-                ureq::Error::Status(c, _) => format!("GET /api/triage: HTTP {c}"),
-                e => format!("GET /api/triage: {}", e.kind()),
+                ureq::Error::StatusCode(c) => format!("GET /api/triage: HTTP {c}"),
+                e => format!("GET /api/triage: {}", err_kind(&e)),
             })?;
-        if !(200..300).contains(&v.status()) {
-            return Err(format!("GET /api/triage: HTTP {}", v.status()));
+        if !v.status().is_success() {
+            return Err(format!("GET /api/triage: HTTP {}", v.status().as_u16()));
         }
-        let v: Value = v.into_json().map_err(|e| format!("GET /api/triage: {e}"))?;
+        let v: Value = v
+            .body_mut()
+            .read_json()
+            .map_err(|e| format!("GET /api/triage: {e}"))?;
         let ready = v["ready"]
             .as_array()
             .ok_or("GET /api/triage: no ready list")?;
@@ -242,14 +277,17 @@ impl Warte for RealWarte {
         let r = self
             .http
             .post(&format!("{}/api/triage/done", self.base))
-            .set("Authorization", &self.auth)
+            .header("Authorization", &self.auth)
             .send_json(json!({"repo": repo, "number": number, "outcome": outcome.as_str()}));
         match r {
-            Ok(r) if (200..300).contains(&r.status()) => Ok(true),
-            Ok(r) => Err(format!("POST /api/triage/done: HTTP {}", r.status())),
-            Err(ureq::Error::Status(422, _)) => Ok(false),
-            Err(ureq::Error::Status(c, _)) => Err(format!("POST /api/triage/done: HTTP {c}")),
-            Err(e) => Err(format!("POST /api/triage/done: {}", e.kind())),
+            Ok(r) if r.status().is_success() => Ok(true),
+            Ok(r) => Err(format!(
+                "POST /api/triage/done: HTTP {}",
+                r.status().as_u16()
+            )),
+            Err(ureq::Error::StatusCode(422)) => Ok(false),
+            Err(ureq::Error::StatusCode(c)) => Err(format!("POST /api/triage/done: HTTP {c}")),
+            Err(e) => Err(format!("POST /api/triage/done: {}", err_kind(&e))),
         }
     }
 }
