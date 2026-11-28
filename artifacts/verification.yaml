@@ -369,3 +369,140 @@ artifacts:
         target: REQ-048
       - type: verifies
         target: REQ-019
+
+  - id: VER-042
+    type: verification
+    title: Auto-merge skips listed repos and branches without a required status check
+    status: implemented
+    description: >
+      pull_request.opened tests: in a skip_repos repo, a non-breaking and a
+      breaking Dependabot PR and a thrum PR arm nothing and post no comment;
+      an unlisted repo still arms. A branch whose rules hold no
+      required_status_checks rule, or one listing no checks, is not armed, and
+      the comment names the branch; classic protection with contexts alone, or
+      with checks alone, arms. A 502 on the branch, a 403 on its rules, or a
+      rules answer that is not a list does not arm (fails closed). Schema
+      tests reject a non-list, an empty name, a non-string and an owner/repo
+      name. Mutants killed: skip ignored, no-checks treated as checks, fail
+      open, classic checks ignored, empty rule counted.
+    fields:
+      method: automated-test
+      test-name: "pull_request.opened Dependabot auto-merge"
+      test-location: __tests__/integration/app.test.js
+    links:
+      - type: verifies
+        target: REQ-049
+
+  - id: VER-043
+    type: verification
+    title: required-contexts.txt comments and blank lines are skipped and an empty file is refused
+    status: implemented
+    description: >
+      Unit tests for parseRequiredContexts: a '#' header, an indented '#'
+      line, blank lines and CRLF endings yield only the contexts; a '#' later
+      in a line stays part of the context; an empty file, a blank file and a
+      comments-only file are refused; non-text is refused. temper's own
+      mirror test reads .github/required-contexts.txt through the parser and
+      matches config.yml. Mutants killed: comments not skipped, no trim,
+      empty file accepted.
+    fields:
+      method: automated-test
+      test-name: "parseRequiredContexts"
+      test-location: __tests__/unit/required-contexts.test.js
+    links:
+      - type: verifies
+        target: REQ-050
+
+  - id: VER-044
+    type: verification
+    title: readme-blocks refuses every non-conforming variables file and marker shape, syncs only between markers, and runs under node:wasi
+    status: implemented
+    description: >
+      Unit tests in tools/readme-blocks/src/lib.rs: 17 refused variables
+      files (unknown, duplicate and missing keys, multi-line values, format 2, unknown status,
+      bad name, empty or comment-carrying one_liner, bad licence, http and
+      spaced badge URLs, bracketed alt, unknown badge key, bare scheme), 10
+      refused marker shapes with the line named, CommonMark fence indent,
+      length and char rules, a plain badge accepted, html and shield escaping,
+      unknown variable and filter refused, sync leaves text outside pairs
+      unchanged and keeps CRLF, a synced README checks ok. CLI tests run the
+      binary against templates/readme (zwinger's licence line checks ok as
+      written) and check exit codes 0, 1 and 2. tests/wasi-smoke.mjs runs the
+      wasm32-wasip1 build under node:wasi in the triage CI job, including a
+      path outside the preopen exiting 1. cargo-mutants on src/lib.rs: 78
+      mutants, 75 caught, 3 unviable, 0 missed. tests/wasip2-smoke.sh runs the
+      wasm32-wasip2 component under wasmtime v50.0.1 (sha256-pinned) in the
+      same job, with the same cases plus exit 2 on a usage error. The
+      advisory readme-blocks-kiln job fuses it with meld 0.70.0
+      (--reproducible --memory multi) and runs the same smoke on kiln 0.9.0
+      (covalent layer 2026.11.28).
+    fields:
+      method: automated-test
+      test-name: "readme-blocks"
+      test-location: tools/readme-blocks
+    links:
+      - type: verifies
+        target: REQ-051
+
+  - id: VER-045
+    type: verification
+    title: The first readme-blocks release run completed success and its assets verify
+    status: implemented
+    description: >
+      Tag readme-blocks-v0.1.0 (signed, on 47d1a86, owner's decision
+      2026-11-27). Release run 46000629576 completed success in all four
+      jobs. On the mini: sha256sum -c SHA256SUMS.txt passed for all 4 files,
+      cosign verify-blob with identity
+      readme-blocks-release.yml@refs/tags/readme-blocks-v.* printed
+      Verified OK, and gh attestation verify passed for both .wasm files.
+      smithy verified the same independently (smithy#293). wasip1 sha256
+      75cde638b47ca5518d0d7018ecc6387e9b5af5bae74c74440394a64da27acc80.
+    fields:
+      method: inspection
+    links:
+      - type: verifies
+        target: REQ-052
+
+  - id: VER-046
+    type: verification
+    title: temper's loader refuses a wrong sha256 or interface version, maps the module report onto readme.shared_blocks, and writes sync PRs without auto-merge
+    status: implemented
+    description: >
+      __tests__/unit/readme-blocks.test.js: settings default off, schema
+      refusals, sha256 mismatch and non-module refused, refused module gives
+      no check, not_applicable without running the module, read failures
+      undecided, module failure unknown, drift carries the synced README,
+      every code validates against the warte report rules, first sync opens
+      one PR with README.md only and no merge call, an open PR is updated in
+      place, an up-to-date PR is left alone, unlisted repos get no PR.
+      tools/readme-blocks/tests/loader-smoke.mjs runs src/readme-blocks.js
+      against the wasm32-wasip1 build in the required triage job (wrong
+      sha256 refused, drift, ok, not_applicable, failing run).
+    fields:
+      method: automated-test
+      test-name: "readme-blocks loader"
+      test-location: __tests__/unit/readme-blocks.test.js
+    links:
+      - type: verifies
+        target: REQ-053
+
+  - id: VER-047
+    type: verification
+    title: The required-contexts mirror check compares the file with classic plus ruleset contexts and emits only agreed codes
+    status: implemented
+    description: >
+      __tests__/unit/report.test.js: no file read yields no check; a file
+      matching the union of classic and ruleset contexts is ok with comments
+      and order ignored; drift_file_only, drift_protection_only and
+      drift_both name the differing contexts for the log; a file listing
+      nothing is protection-only drift; 404 is not_applicable; 403 and 5xx
+      on the file, protection or rules are undecided; no classic protection
+      compares against rulesets alone; every code validates against the
+      warte report rules; the sweep adds the check only with mirror on.
+    fields:
+      method: automated-test
+      test-name: "protection.required_contexts_mirror"
+      test-location: __tests__/unit/report.test.js
+    links:
+      - type: verifies
+        target: REQ-054

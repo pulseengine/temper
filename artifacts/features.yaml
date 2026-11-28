@@ -40,6 +40,8 @@ artifacts:
         target: REQ-012
       - type: satisfies
         target: REQ-047
+      - type: satisfies
+        target: REQ-049
 
   - id: FEAT-004
     type: feature
@@ -52,6 +54,10 @@ artifacts:
         target: REQ-030
       - type: satisfies
         target: REQ-048
+      - type: satisfies
+        target: REQ-050
+      - type: satisfies
+        target: REQ-054
 
   - id: FEAT-005
     type: feature
@@ -62,3 +68,16 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-031
+
+  - id: FEAT-009
+    type: feature
+    title: Shared README blocks across the fleet (readme-blocks module and templates)
+    status: draft
+    description: tools/readme-blocks, templates/readme, docs/readme-blocks.md, src/readme-blocks.js. temper loads the module behind readme_blocks.enabled (false).
+    links:
+      - type: satisfies
+        target: REQ-051
+      - type: satisfies
+        target: REQ-052
+      - type: satisfies
+        target: REQ-053

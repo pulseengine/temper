@@ -682,3 +682,147 @@ artifacts:
     links:
       - type: derives-from
         target: SC-002
+
+  - id: REQ-049
+    type: requirement
+    title: temper SHALL NOT enable auto-merge in a repo whose own session merges its queue, nor on a base branch with no required status check
+    status: implemented
+    release: v1.1.0
+    description: >
+      Coordinator, 2026-11-26, after temper armed auto-merge on
+      rules_wasm_component #760 and #761 while that repo's session merged its
+      Dependabot queue one PR at a time. For a repo in auto_merge.skip_repos,
+      temper arms nothing and posts nothing; the repo's allow_auto_merge
+      setting is untouched. Everywhere else, temper arms only when the PR's
+      base branch has at least one required status check, from classic
+      protection (contexts or checks) or an active ruleset. Without one,
+      auto-merge merges at once, before CI runs. If either source cannot be
+      read, temper does not arm, and it comments why. The check runs when the
+      PR is opened or reopened.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-003
+
+  - id: REQ-050
+    type: requirement
+    title: temper SHALL read a repo's required-contexts.txt with sieve's comment rules and SHALL refuse a file that lists no context
+    status: implemented
+    release: v1.1.0
+    description: >
+      Coordinator, 2026-11-26, after sieve v0.4.5 began treating '#' lines as
+      comments and repos (warte first) began adding a header. A line whose
+      first non-blank character is '#' is a comment, blank lines are skipped,
+      and each context is trimmed, so a header never becomes a phantom
+      required context in the audit. A file left with no context is refused
+      rather than read as "no required checks". temper's own mirror test reads
+      its file through the same parser; the cross-repo mirror check uses it
+      when it lands.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-002
+
+  - id: REQ-051
+    type: requirement
+    title: The readme-blocks module SHALL change README text only between marker pairs the repo placed, and SHALL refuse an unsyncable README or a non-conforming variables file rather than guess
+    status: implemented
+    description: >
+      Owner, 2026-11-27 (pulseengine/temper#128, relayed by pulseengine.eu):
+      shared README blocks synced by temper. The module reads
+      .github/pulseengine.yaml with rivet-yaml v0.43.3 and refuses an unknown,
+      duplicate or missing key, an unknown status, a format other than 1, a
+      multi-line value, a value carrying an HTML comment marker and a badge URL
+      that is not plain https. It refuses a README with an unknown, malformed,
+      duplicate, nested, mismatched or unclosed marker, ignores markers inside
+      fenced code, and leaves every line outside a pair byte-identical. A
+      template fault (unknown variable or filter) fails the check instead of
+      rendering an empty value. The contract is docs/readme-blocks.md.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-007
+
+  - id: REQ-052
+    type: requirement
+    title: readme-blocks releases SHALL be built, signed and attested only from a readme-blocks-v* tag whose name matches the crate version, and SHALL carry SHA256SUMS.txt with a cosign keyless bundle
+    status: implemented
+    description: >
+      Delivery agreed with smithy, 2026-11-27 (pulseengine/temper#128).
+      .github/workflows/readme-blocks-release.yml builds the wasm32-wasip1
+      module and the wasm32-wasip2 component, runs the tests, the node:wasi
+      smoke on the named p1 file and the wasmtime smoke on the named p2 file,
+      requires exactly one of each,
+      generates a CycloneDX SBOM and build-env.txt, signs SHA256SUMS.txt with
+      cosign keyless (identity readme-blocks-release.yml@refs/tags/<tag>) and
+      attests the module. It refuses a tag that does not name the crate
+      version, refuses to sign from any other ref, and never overwrites an
+      existing release. The first tag run, readme-blocks-v0.1.0, completed
+      success. temper's own sha256 and interface-version refusal is a
+      separate requirement, with the loader.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-008
+
+  - id: REQ-053
+    type: requirement
+    title: temper SHALL run the readme-blocks module only when its sha256 equals readme_blocks.module_sha256 and it reports interface-version 1, and SHALL never arm auto-merge on a README sync pull request
+    status: implemented
+    description: >
+      Delivery agreed with smithy, 2026-11-27 (pulseengine/temper#128).
+      src/readme-blocks.js hashes the file at readme_blocks.module_path and
+      refuses it on a mismatch, then runs `interface-version` under node:wasi
+      and refuses anything but 1. A refused module is logged and the sweep
+      reports no readme.shared_blocks check. A module run gets only a fresh
+      temp dir preopened at /work, an empty environment and no stderr.
+      Report codes are ok, not_applicable, divergent_undeclared (module) and
+      error_api, error_permission, unknown (temper could not decide). Sync
+      PRs go only to repos in readme_blocks.repos, on branch
+      temper/readme-blocks reset to the default branch head, change
+      README.md only through the contents API, and are never auto-merged.
+      Everything is behind readme_blocks.enabled, false by default.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-008
+
+  - id: REQ-054
+    type: requirement
+    title: temper SHALL report, per repo, whether .github/required-contexts.txt equals the set of contexts live protection requires on the default branch
+    status: implemented
+    description: >
+      Owner, 2026-11-27 (relayed by pulseengine.eu): repo CI cannot read
+      branch protection without an admin token, so protection lagged the
+      file silently (spar since 2026-11-12, gale). Check
+      protection.required_contexts_mirror, severity medium, compares the
+      file (sieve's parsing rules) with classic contexts and branch-ruleset
+      required_status_checks together: ok, drift_file_only,
+      drift_protection_only, drift_both, not_applicable without the file,
+      error_api / error_permission when the file, protection or rules
+      cannot be read. Context names go to temper's log only; the report
+      stays closed. Id and codes agreed with warte, accepted from warte
+      v1.6.56; emitted only with report.required_contexts_mirror (false
+      until the hub runs 1.6.56).
+    fields:
+      priority: should
+      category: functional
+      effect: behaviour
+    links:
+      - type: derives-from
+        target: SC-002

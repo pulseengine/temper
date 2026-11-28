@@ -12,6 +12,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { deriveState } from './standards.js';
+import { parseRequiredContexts } from './required-contexts.js';
 
 export const SCHEMA = 'temper-report.v1';
 export const MAX_BYTES = 1 << 20;
@@ -23,12 +24,19 @@ export const CHECK_IDS = [
   'protection.required_checks', 'protection.signed_commits', 'protection.linear_history',
   'ruleset.tag_v', 'merge.settings', 'merge.auto_merge', 'merge.relaxation_open',
   'dependabot.config', 'dependabot.config_valid', 'labels.synced', 'templates.present',
-  'codeowners.present', 'secret_scanning', 'standards.drift'
+  'codeowners.present', 'secret_scanning', 'standards.drift',
+  // warte >= 1.6.53; emitted only with readme_blocks.enabled (docs/readme-blocks.md).
+  'readme.shared_blocks',
+  // warte >= 1.6.56; emitted only with report.required_contexts_mirror.
+  'protection.required_contexts_mirror'
 ];
 export const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'];
 export const CODES = [
   'ok', 'missing', 'weaker_than_standard', 'stricter_than_standard', 'divergent_declared',
-  'divergent_undeclared', 'not_applicable', 'error_api', 'error_permission', 'unknown'
+  'divergent_undeclared', 'not_applicable', 'error_api', 'error_permission', 'unknown',
+  // warte >= 1.6.56 (global codes; temper emits them only for
+  // protection.required_contexts_mirror).
+  'drift_file_only', 'drift_protection_only', 'drift_both'
 ];
 const UNDECIDED = new Set(['unknown', 'error_api', 'error_permission']);
 
@@ -233,4 +241,39 @@ export function writeReport(file, report) {
     throw e;
   }
   return { written: true, bytes: body.length };
+}
+
+/**
+ * protection.required_contexts_mirror: the repo's .github/required-contexts.txt
+ * against every context live protection requires on the default branch
+ * (classic contexts and branch-ruleset required_status_checks together).
+ * Returns null when the snapshot predates the file read. The context names
+ * are for temper's log only; the report check carries the code alone.
+ * @returns {{check: object, fileOnly: string[], protectionOnly: string[]}|null}
+ */
+export function requiredContextsMirror(snap) {
+  const file = snap.requiredContextsFile;
+  if (!file) return null;
+  const id = 'protection.required_contexts_mirror';
+  const out = (code) => ({ check: check(id, 'medium', code), fileOnly: [], protectionOnly: [] });
+  if (file.status === 404) return out('not_applicable');
+  if (file.status !== 200) return out(errorCode(file.status));
+  // Classic protection may be absent (404); branch rules must be readable.
+  const prot = snap.protection?.status;
+  if (prot !== 200 && prot !== 404) return out(errorCode(prot));
+  if (snap.branchRules?.status !== 200) return out(errorCode(snap.branchRules?.status));
+  let listed;
+  try {
+    listed = parseRequiredContexts(file.text);
+  } catch {
+    listed = []; // a file that lists nothing still mirrors (or fails to mirror) protection
+  }
+  const fileSet = new Set(listed);
+  const live = new Set(deriveState(snap).allContexts);
+  const fileOnly = [...fileSet].filter((c) => !live.has(c)).sort();
+  const protectionOnly = [...live].filter((c) => !fileSet.has(c)).sort();
+  const code = fileOnly.length && protectionOnly.length ? 'drift_both'
+    : fileOnly.length ? 'drift_file_only'
+      : protectionOnly.length ? 'drift_protection_only' : 'ok';
+  return { check: check(id, 'medium', code), fileOnly, protectionOnly };
 }

@@ -56,3 +56,27 @@ export async function listPullRequestFiles(octokit, owner, repo, pullNumber, cha
   }
   throw new Error(`PR file list reaches GitHub's ${MAX_PAGES * 100}-file cap`);
 }
+
+/**
+ * Whether `branch` has at least one required status check, from classic
+ * protection or from an active ruleset. Without one, auto-merge merges the
+ * moment it is armed, before CI runs. Throws when either source cannot be
+ * read, so a caller that cannot tell does not arm.
+ */
+export async function hasRequiredChecks(octokit, owner, repo, branch) {
+  const b = await octokit.request('GET /repos/{owner}/{repo}/branches/{branch}', { owner, repo, branch });
+  if (!b?.data || typeof b.data !== 'object') throw new Error('branch answer is not an object');
+  const rsc = b.data.protection?.required_status_checks;
+  if ((rsc?.contexts?.length || 0) + (rsc?.checks?.length || 0) > 0) return true;
+
+  for (let page = 1; page <= 10; page += 1) {
+    const r = await octokit.request('GET /repos/{owner}/{repo}/rules/branches/{branch}', {
+      owner, repo, branch, per_page: 100, page
+    });
+    if (!Array.isArray(r?.data)) throw new Error('branch rules answer is not an array');
+    if (r.data.some((rule) => rule?.type === 'required_status_checks' &&
+      (rule.parameters?.required_status_checks?.length || 0) > 0)) return true;
+    if (r.data.length < 100) return false;
+  }
+  throw new Error('branch rules exceed 1000 entries');
+}

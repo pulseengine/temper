@@ -136,6 +136,13 @@ export function validateConfig(config) {
     }
   }
 
+  if (config.auto_merge?.skip_repos !== undefined) {
+    const sr = config.auto_merge.skip_repos;
+    if (!Array.isArray(sr) || !sr.every((r) => typeof r === 'string' && r.length > 0 && !r.includes('/'))) {
+      errors.push('auto_merge.skip_repos must be a list of repo names (no owner)');
+    }
+  }
+
   if (config.auto_merge?.review_paths !== undefined) {
     const rp = config.auto_merge.review_paths;
     if (!Array.isArray(rp) || rp.length === 0 || !rp.every((p) => typeof p === 'string' && p.length > 0)) {
@@ -150,6 +157,9 @@ export function validateConfig(config) {
     } else {
       if (rp.enabled !== undefined && typeof rp.enabled !== 'boolean') {
         errors.push('report.enabled must be a boolean');
+      }
+      if (rp.required_contexts_mirror !== undefined && typeof rp.required_contexts_mirror !== 'boolean') {
+        errors.push('report.required_contexts_mirror must be a boolean');
       }
       if (rp.path !== undefined && (typeof rp.path !== 'string' || !rp.path.startsWith('/'))) {
         errors.push('report.path must be an absolute path');
@@ -243,6 +253,33 @@ export function validateConfig(config) {
       }
       if (cr.enabled && (typeof cr.repo !== 'string' || !cr.repo.includes('/'))) {
         errors.push('chatops_repo.repo must be "owner/repo" when enabled');
+      }
+    }
+  }
+
+  if (config.readme_blocks !== undefined) {
+    const rb = config.readme_blocks;
+    if (typeof rb !== 'object' || rb === null || Array.isArray(rb)) {
+      errors.push('readme_blocks must be an object');
+    } else {
+      for (const k of Object.keys(rb)) {
+        if (!['enabled', 'module_path', 'module_sha256', 'repos'].includes(k)) errors.push(`readme_blocks.${k} is not a known key`);
+      }
+      if (rb.enabled !== undefined && typeof rb.enabled !== 'boolean') {
+        errors.push('readme_blocks.enabled must be a boolean');
+      }
+      if (rb.module_path !== undefined && (typeof rb.module_path !== 'string' || !rb.module_path.startsWith('/'))) {
+        errors.push('readme_blocks.module_path must be an absolute path');
+      }
+      if (rb.module_sha256 !== undefined && (typeof rb.module_sha256 !== 'string' || !/^[0-9a-fA-F]{64}$/.test(rb.module_sha256))) {
+        errors.push('readme_blocks.module_sha256 must be 64 hex characters');
+      }
+      if (rb.repos !== undefined &&
+          (!Array.isArray(rb.repos) || !rb.repos.every((r) => typeof r === 'string' && /^[A-Za-z0-9._-]{1,100}$/.test(r)))) {
+        errors.push('readme_blocks.repos must be a list of repo names');
+      }
+      if (rb.enabled === true && (rb.module_path === undefined || rb.module_sha256 === undefined)) {
+        errors.push('readme_blocks.module_path and readme_blocks.module_sha256 are required when readme_blocks.enabled is true');
       }
     }
   }
