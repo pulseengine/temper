@@ -420,22 +420,22 @@
   ]
  },
  {
-  "text": "/Volumes/Home/git/x",
+  "text": "/Volumes/Scratch/git/x",
   "home": "",
   "hits": [
    [
     "volumes",
-    "/Volumes/Home/git/x"
+    "/Volumes/Scratch/git/x"
    ]
   ]
  },
  {
-  "text": "/Volumes/Home/git/x",
+  "text": "/Volumes/Scratch/git/x",
   "home": "/home/svc",
   "hits": [
    [
     "volumes",
-    "/Volumes/Home/git/x"
+    "/Volumes/Scratch/git/x"
    ]
   ]
  },
