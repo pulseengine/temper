@@ -444,22 +444,28 @@ async function generateDependabotConfig(octokit, owner, repo, defaultBranch) {
       .filter(item => item.type === 'blob')
       .map(item => item.path);
 
+    // A fork mirrors its upstream outside .github/ (mirror release guards
+    // refuse a tag otherwise), so it gets github-actions only: a package
+    // ecosystem would open PRs that change the mirrored tree.
+    const { data: repoInfo } = await octokit.request('GET /repos/{owner}/{repo}', { owner, repo });
+    const fork = repoInfo?.fork === true;
+
     // Detect ecosystems
     const ecosystems = detectEcosystems(filePaths, {
       maxDirectoriesPerEcosystem: genConfig.max_directories_per_ecosystem || 5
-    });
+    }).filter(e => !fork || e.ecosystem === 'github-actions');
 
     if (ecosystems.length === 0) {
-      getLogger().info(`No package ecosystems detected in ${owner}/${repo}`);
+      getLogger().info(`No package ecosystems detected in ${owner}/${repo}${fork ? ' (fork: github-actions only)' : ''}`);
       return { config: null, ecosystems: [], report: 'No package ecosystems detected.' };
     }
 
     // Build heuristic config
     let config = buildDependabotYaml(ecosystems, genConfig);
 
-    // Optionally enhance with AI
+    // Optionally enhance with AI (never on a fork: it could add ecosystems back)
     const aiConfig = appConfig.ai_review;
-    if (genConfig.ai_enhance && aiConfig?.enabled && aiConfig?.endpoint) {
+    if (!fork && genConfig.ai_enhance && aiConfig?.enabled && aiConfig?.endpoint) {
       config = await enhanceDependabotWithAI(config, filePaths, aiConfig);
     }
 

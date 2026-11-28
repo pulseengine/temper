@@ -930,6 +930,54 @@ describe('dependabot', () => {
       expect(result.ecosystems).toEqual([]);
     });
 
+    describe('on a fork', () => {
+      const tree = [
+        { path: '.github/workflows/ci.yml', type: 'blob' },
+        { path: 'examples/rust-wasi/Cargo.toml', type: 'blob' },
+        { path: 'package.json', type: 'blob' }
+      ];
+      function routed(fork) {
+        octokit.request.mockImplementation(async (route) =>
+          route === 'GET /repos/{owner}/{repo}' ? { data: { fork } } : { data: { tree } });
+      }
+
+      it('keeps github-actions only', async () => {
+        _setConfigForTesting({ dependabot_generation: { enabled: true } });
+        routed(true);
+        const result = await generateDependabotConfig(octokit, 'pulseengine', 'w2c2', 'main');
+        expect(result.config.updates.map(u => u['package-ecosystem'])).toEqual(['github-actions']);
+        expect(result.ecosystems.map(e => e.ecosystem)).toEqual(['github-actions']);
+      });
+
+      it('negative control: the same tree on a non-fork keeps every ecosystem', async () => {
+        _setConfigForTesting({ dependabot_generation: { enabled: true } });
+        routed(false);
+        const result = await generateDependabotConfig(octokit, 'pulseengine', 'w2c2', 'main');
+        expect(result.config.updates.map(u => u['package-ecosystem']).sort())
+          .toEqual(['cargo', 'github-actions', 'npm']);
+      });
+
+      it('generates nothing for a fork without workflows', async () => {
+        _setConfigForTesting({ dependabot_generation: { enabled: true } });
+        octokit.request.mockImplementation(async (route) =>
+          route === 'GET /repos/{owner}/{repo}'
+            ? { data: { fork: true } }
+            : { data: { tree: [{ path: 'Cargo.toml', type: 'blob' }] } });
+        const result = await generateDependabotConfig(octokit, 'pulseengine', 'w2c2', 'main');
+        expect(result.config).toBeNull();
+      });
+
+      it('never runs the AI enhancement on a fork', async () => {
+        _setConfigForTesting({
+          dependabot_generation: { enabled: true, ai_enhance: true },
+          ai_review: { enabled: true, endpoint: 'http://ai.example' }
+        });
+        routed(true);
+        await generateDependabotConfig(octokit, 'pulseengine', 'w2c2', 'main');
+        expect(callLocalAI).not.toHaveBeenCalled();
+      });
+    });
+
     it('throws on API error', async () => {
       _setConfigForTesting({ dependabot_generation: {} });
       octokit.request.mockRejectedValue(new Error('API error'));

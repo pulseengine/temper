@@ -506,3 +506,21 @@ artifacts:
     links:
       - type: verifies
         target: REQ-054
+  - id: VER-048
+    type: verification
+    title: A fork's generated dependabot.yml keeps github-actions only; the same tree on a non-fork keeps every ecosystem
+    status: implemented
+    description: >
+      __tests__/integration/dependabot.test.js "on a fork": a tree with
+      workflows, Cargo.toml and package.json yields github-actions only when
+      the repo is a fork and all three ecosystems when it is not (negative
+      control); a fork without workflows yields no config; the AI
+      enhancement is never called on a fork. Disabling the fork check makes
+      the three fork cases fail.
+    fields:
+      method: automated-test
+      test-name: "on a fork"
+      test-location: __tests__/integration/dependabot.test.js
+    links:
+      - type: verifies
+        target: REQ-055
