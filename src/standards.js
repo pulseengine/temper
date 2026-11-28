@@ -131,6 +131,7 @@ export async function fetchSnapshot(octokit, owner, name) {
   // analysis (gate-skip.js). Absent from older sweep caches: then that
   // finding is not evaluated.
   const workflowTexts = [];
+  const workflowUnread = []; // listed but not read: {path, status}
   if (workflows.status === 200 && Array.isArray(workflows.body)) {
     for (const f of workflows.body) {
       if (!/\.ya?ml$/.test(f.name || '')) continue;
@@ -139,6 +140,8 @@ export async function fetchSnapshot(octokit, owner, name) {
       });
       if (file.status === 200 && typeof file.body?.content === 'string') {
         workflowTexts.push({ path: f.path || `.github/workflows/${f.name}`, text: Buffer.from(file.body.content, 'base64').toString('utf8') });
+      } else {
+        workflowUnread.push({ path: f.path || `.github/workflows/${f.name}`, status: file.status });
       }
     }
   }
@@ -179,6 +182,7 @@ export async function fetchSnapshot(octokit, owner, name) {
     rulesets: { status: list.status, body: list.status === 200 ? undefined : list.body, items },
     workflows,
     workflowTexts,
+    workflowUnread,
     remoteWorkflows,
     // The contract's text (null when absent): which outputs it probes or exempts.
     requiredContextsFile,

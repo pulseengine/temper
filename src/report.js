@@ -28,7 +28,9 @@ export const CHECK_IDS = [
   // warte >= 1.6.53; emitted only with readme_blocks.enabled (docs/readme-blocks.md).
   'readme.shared_blocks',
   // warte >= 1.6.56; emitted only with report.required_contexts_mirror.
-  'protection.required_contexts_mirror'
+  'protection.required_contexts_mirror',
+  // warte >= 1.6.60; emitted only with report.ci_concurrency (src/concurrency.js).
+  'ci.concurrency'
 ];
 export const SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'];
 export const CODES = [
@@ -36,7 +38,9 @@ export const CODES = [
   'divergent_undeclared', 'not_applicable', 'error_api', 'error_permission', 'unknown',
   // warte >= 1.6.56 (global codes; temper emits them only for
   // protection.required_contexts_mirror).
-  'drift_file_only', 'drift_protection_only', 'drift_both'
+  'drift_file_only', 'drift_protection_only', 'drift_both',
+  // warte >= 1.6.60 (global codes; temper emits them only for ci.concurrency).
+  'pr_not_cancelled', 'main_cancellable', 'release_cancellable', 'error_parse'
 ];
 const UNDECIDED = new Set(['unknown', 'error_api', 'error_permission']);
 

@@ -161,6 +161,9 @@ export function validateConfig(config) {
       if (rp.required_contexts_mirror !== undefined && typeof rp.required_contexts_mirror !== 'boolean') {
         errors.push('report.required_contexts_mirror must be a boolean');
       }
+      if (rp.ci_concurrency !== undefined && typeof rp.ci_concurrency !== 'boolean') {
+        errors.push('report.ci_concurrency must be a boolean');
+      }
       if (rp.path !== undefined && (typeof rp.path !== 'string' || !rp.path.startsWith('/'))) {
         errors.push('report.path must be an absolute path');
       }

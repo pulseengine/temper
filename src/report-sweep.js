@@ -16,6 +16,7 @@ import { getLogger } from './logger.js';
 import { fetchSnapshot, evaluateRepo, getStandards } from './standards.js';
 import { selectSyncTargets } from './organization.js';
 import { buildReport, repoEntry, writeReport, iso, MAX_REPOS, CHECK_IDS, requiredContextsMirror } from './report.js';
+import { ciConcurrency } from './concurrency.js';
 import { trackOctokit, apiSnapshot, reviewTotals } from './report-stats.js';
 import {
   readmeBlocksSettings, loadModule, evaluateReadme, readmeCheck, writeSyncPr, TEMPLATES_DIR
@@ -33,7 +34,8 @@ export function reportSettings(config = getConfig()) {
     path: process.env.TEMPER_REPORT_PATH || r.path || DEFAULT_REPORT_PATH,
     intervalMs: (Number(r.sweep_interval_hours) > 0 ? Number(r.sweep_interval_hours) : 12) * HOUR,
     windowDays: Number(r.review_window_days) > 0 ? Math.floor(Number(r.review_window_days)) : 7,
-    requiredContextsMirror: r.required_contexts_mirror === true
+    requiredContextsMirror: r.required_contexts_mirror === true,
+    ciConcurrency: r.ci_concurrency === true
   };
 }
 
@@ -60,7 +62,7 @@ export function buildInfo(root = ROOT) {
  * One sweep. Throws if the repo list cannot be read; per-repo read failures
  * become error_* checks instead.
  */
-export async function sweepOrg(octokit, org, std, now = Date.now, readme = null, { mirror = false } = {}) {
+export async function sweepOrg(octokit, org, std, now = Date.now, readme = null, { mirror = false, concurrency = false } = {}) {
   const all = await octokit.paginate('GET /orgs/{org}/repos', { org, type: 'all', per_page: 100 });
   const targets = selectSyncTargets(all).sort((a, b) => a.name.localeCompare(b.name));
   const repos = [];
@@ -76,6 +78,18 @@ export async function sweepOrg(octokit, org, std, now = Date.now, readme = null,
       if (m.fileOnly.length || m.protectionOnly.length) {
         getLogger().warn({ repo: r.name, code: m.check.code, file_only: m.fileOnly, protection_only: m.protectionOnly },
           'required-contexts: file and protection differ');
+      }
+    }
+    // concurrency: ci.concurrency (warte >= 1.6.60). Paths and the parse
+    // denominator go to the log only.
+    const c = concurrency && snap.repo?.status === 200 ? ciConcurrency(snap) : null;
+    if (c) {
+      entry.checks.push(c.check);
+      if (c.check.code !== 'ok' && c.check.code !== 'not_applicable') {
+        getLogger().warn({
+          repo: r.name, code: c.check.code, findings: c.findings, unread: c.unread,
+          parsed: `${c.parsed} of ${c.total} workflows parsed`
+        }, 'ci-concurrency: not ok');
       }
     }
     // readme = {mod, templatesDir, syncs}: add readme.shared_blocks and collect
@@ -168,7 +182,7 @@ export function createReportSweep({ octokitFactory, org, taskStore, stateStore, 
       const octokit = trackOctokit(await octokitFactory());
       const readme = readmeContext(config);
       const repos = await sweepOrg(octokit, org, getStandards(config), clock, readme,
-        { mirror: settings.requiredContextsMirror });
+        { mirror: settings.requiredContextsMirror, concurrency: settings.ciConcurrency });
       if (repos.length > MAX_REPOS) {
         getLogger().error({ repos: repos.length, max: MAX_REPOS }, 'report: too many repos; previous report kept');
         return { written: false, error: 'too many repos' };

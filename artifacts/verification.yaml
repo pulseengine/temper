@@ -524,3 +524,25 @@ artifacts:
     links:
       - type: verifies
         target: REQ-055
+  - id: VER-049
+    type: verification
+    title: ci.concurrency classifies each rule with a negative control per code and emits only agreed codes
+    status: implemented
+    description: >
+      __tests__/unit/concurrency.test.js: kapsel's form is ok; each of
+      pr_not_cancelled (no block, unscoped group, never cancels, one job
+      without concurrency), main_cancellable (push, merge_group, job level,
+      the repo's own default branch), release_cancellable (tag push, release
+      with a non-literal expression, release-named dispatch, rank) and
+      error_parse (unparsable, no jobs, rank below findings, denominator)
+      has a passing negative control; an unread file or directory is never
+      ok. Nine rule mutations each fail at least one case.
+      __tests__/unit/report.test.js: the sweep adds the check only with
+      concurrency on, and every code validates against the warte report rules.
+    fields:
+      method: automated-test
+      test-name: "ci.concurrency"
+      test-location: __tests__/unit/concurrency.test.js
+    links:
+      - type: verifies
+        target: REQ-056

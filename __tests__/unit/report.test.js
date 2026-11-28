@@ -469,6 +469,33 @@ describe('report sweep', () => {
     expect(reportSettings({}).requiredContextsMirror).toBe(false);
   });
 
+  it('concurrency on adds ci.concurrency per repo; off adds none', async () => {
+    const base = fakeOctokit({ good: compliantSnapshot('good'), bad: compliantSnapshot('bad') });
+    const files = {
+      good: 'on: push\njobs:\n  a:\n    runs-on: x\n    steps: [{run: "true"}]\n',
+      bad: 'on: pull_request\njobs:\n  a:\n    runs-on: x\n    steps: [{run: "true"}]\n'
+    };
+    const octokit = {
+      ...base,
+      request: async (r, p) => {
+        if (r === 'GET /repos/{owner}/{repo}/contents/{path}' && p.path === '.github/workflows') {
+          return { status: 200, data: [{ name: 'ci.yml', path: '.github/workflows/ci.yml' }] };
+        }
+        if (r === 'GET /repos/{owner}/{repo}/contents/{path}' && p.path === '.github/workflows/ci.yml') {
+          return { status: 200, data: { content: Buffer.from(files[p.repo]).toString('base64') } };
+        }
+        return base.request(r, p);
+      }
+    };
+    const on = await sweepOrg(octokit, 'pulseengine', std(), () => Date.parse(T), null, { concurrency: true });
+    const cc = Object.fromEntries(on.map((x) => [x.name, x.checks.find((c) => c.id === 'ci.concurrency')?.code]));
+    expect(cc).toEqual({ bad: 'pr_not_cancelled', good: 'ok' });
+    const off = await sweepOrg(octokit, 'pulseengine', std(), () => Date.parse(T));
+    expect(off.flatMap((x) => x.checks).some((c) => c.id === 'ci.concurrency')).toBe(false);
+    expect(reportSettings({ report: { ci_concurrency: true } }).ciConcurrency).toBe(true);
+    expect(reportSettings({}).ciConcurrency).toBe(false);
+  });
+
   it('a build without a commit is refused, keeping the previous file', async () => {
     const file = path.join(dir, 'report.json');
     const sweep = createReportSweep({
@@ -564,6 +591,13 @@ describe('protection.required_contexts_mirror', () => {
     const r = warteSample();
     r.repos[0].checks = ['ok', 'not_applicable', 'drift_file_only', 'drift_protection_only', 'drift_both', 'error_api']
       .map((c) => ({ id: 'protection.required_contexts_mirror', ok: c === 'ok' || c === 'not_applicable' ? true : c === 'error_api' ? null : false, severity: 'medium', code: c }));
+    expect(validateReport(r)).toBeNull();
+  });
+  it('every ci.concurrency code validates in a report', () => {
+    const r = warteSample();
+    const undecided = new Set(['error_api', 'error_permission']);
+    r.repos[0].checks = ['ok', 'not_applicable', 'pr_not_cancelled', 'main_cancellable', 'release_cancellable', 'error_parse', 'error_api', 'error_permission']
+      .map((c) => ({ id: 'ci.concurrency', ok: c === 'ok' || c === 'not_applicable' ? true : undecided.has(c) ? null : false, severity: 'medium', code: c }));
     expect(validateReport(r)).toBeNull();
   });
 });
