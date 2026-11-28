@@ -634,6 +634,8 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-046
+      - type: satisfies
+        target: REQ-055
 
   - id: REQ-047
     type: requirement
@@ -826,6 +828,26 @@ artifacts:
     links:
       - type: derives-from
         target: SC-002
+  - id: REQ-055
+    type: requirement
+    title: A dependabot.yml temper generates for a fork SHALL contain the github-actions entry only
+    status: implemented
+    description: >
+      Forks in the org mirror their upstream everywhere outside .github/,
+      and a mirror's release guard refuses a tag when the tree differs from
+      the named upstream commit there (pulseengine/w2c2#1, varve, 2026-11-28).
+      A package-ecosystem entry would open PRs that change the mirrored tree.
+      generateDependabotConfig reads the repo's fork flag and keeps only
+      github-actions for a fork, skips the AI enhancement there, and
+      generates nothing for a fork without workflows.
+    fields:
+      priority: must
+      category: functional
+      effect: behaviour
+      upstream-ref: "pulseengine/w2c2#1"
+    links:
+      - type: derives-from
+        target: SC-007
   - id: REQ-056
     type: requirement
     title: temper SHALL report, per repo, whether its workflows cancel superseded PR runs and never cancel main or release runs
